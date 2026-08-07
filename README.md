@@ -36,7 +36,8 @@ npm run build
 
 Репозиторий совместим с Git и настроен для [Jujutsu (`jj`)](https://github.com/jj-vcs/jj).
 Полезные команды: `jj status`, `jj log`, `jj op log` и `jj undo`. GitHub продолжает
-работать через обычный Git remote `origin`.
+работать через обычный Git remote `origin`. Правила использования jj и безопасного
+резервного копирования приведены в [docs/HISTORY_AND_BACKUP.md](docs/HISTORY_AND_BACKUP.md).
 
 ## Дальнейшая миграция
 
