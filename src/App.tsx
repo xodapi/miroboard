@@ -9,7 +9,7 @@ type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type ImportedBpmnModel = {
-  nodes: { id: string; type: string; name?: string }[]
+  nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number }[]
   flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message' }[]
 }
 
@@ -172,6 +172,10 @@ export default function App() {
         type: element.bpmnNodeType,
         poolId: 'default',
         name: element.text,
+        x: element.x,
+        y: element.y,
+        width: element.w,
+        height: element.h,
       }))
     const flows = elements
       .filter((element) => element.bpmnFlow)
@@ -505,8 +509,8 @@ export default function App() {
         const column = index % 3
         const row = Math.floor(index / 3)
         return [node.id, {
-          id: node.id, type: 'sticky' as const, x: 100 + column * 260, y: 130 + row * 180,
-          w: width, h: height, text: node.name || (type === 'task' ? 'Задача' : ''),
+          id: node.id, type: 'sticky' as const, x: node.x ?? 100 + column * 260, y: node.y ?? 130 + row * 180,
+          w: node.width ?? width, h: node.height ?? height, text: node.name || (type === 'task' ? 'Задача' : ''),
           color: colorForType(type), fill: colorForType(type), createdBy: user.id, bpmnNodeType: type,
         }]
       }))

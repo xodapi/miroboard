@@ -26,14 +26,14 @@ pub fn clamp_scale(value: f64) -> f64 {
     value.clamp(MIN_SCALE, MAX_SCALE)
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct BpmnModel {
     nodes: Vec<BpmnNode>,
     flows: Vec<BpmnFlow>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct BpmnNode {
     id: String,
@@ -43,6 +43,14 @@ struct BpmnNode {
     pool_id: Option<String>,
     #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
+    x: Option<f64>,
+    #[serde(default)]
+    y: Option<f64>,
+    #[serde(default)]
+    width: Option<f64>,
+    #[serde(default)]
+    height: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -346,8 +354,8 @@ fn bpmn_tag(node_type: &BpmnNodeType) -> &'static str {
     }
 }
 
-/// Exports a validated BPMN graph as portable BPMN 2.0 XML. This preserves the
-/// executable process graph; BPMN-DI coordinates will follow in a later phase.
+/// Exports a validated BPMN graph as portable BPMN 2.0 XML with BPMN-DI
+/// coordinates when the model supplies them.
 #[wasm_bindgen]
 pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
     let model: BpmnModel = serde_json::from_str(model_json)
@@ -372,6 +380,9 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                   id="MiroBoard_Definitions"
                   targetNamespace="https://miroboard.app/bpmn">
   <bpmn:process id="MiroBoard_Process" isExecutable="false">
@@ -406,11 +417,68 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
             escape_xml(&flow.target_id),
         ));
     }
-    xml.push_str(
-        r#"  </bpmn:process>
-</bpmn:definitions>
+    xml.push_str("  </bpmn:process>\n");
+    let positioned_nodes: Vec<&BpmnNode> = model
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.x.is_some() && node.y.is_some() && node.width.is_some() && node.height.is_some()
+        })
+        .collect();
+    if !positioned_nodes.is_empty() {
+        xml.push_str(
+            r#"  <bpmndi:BPMNDiagram id="MiroBoard_Diagram">
+    <bpmndi:BPMNPlane id="MiroBoard_Plane" bpmnElement="MiroBoard_Process">
 "#,
-    );
+        );
+        for node in positioned_nodes {
+            xml.push_str(&format!(
+                r#"      <bpmndi:BPMNShape id="{}_di" bpmnElement="{}"><dc:Bounds x="{}" y="{}" width="{}" height="{}" /></bpmndi:BPMNShape>
+"#,
+                escape_xml(&node.id),
+                escape_xml(&node.id),
+                node.x.expect("positioned node"),
+                node.y.expect("positioned node"),
+                node.width.expect("positioned node"),
+                node.height.expect("positioned node"),
+            ));
+        }
+        let nodes_by_id: HashMap<&str, &BpmnNode> = model
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect();
+        for flow in &model.flows {
+            let (Some(source), Some(target)) = (
+                nodes_by_id.get(flow.source_id.as_str()),
+                nodes_by_id.get(flow.target_id.as_str()),
+            ) else {
+                continue;
+            };
+            let (Some(source_x), Some(source_y), Some(source_width), Some(source_height)) =
+                (source.x, source.y, source.width, source.height)
+            else {
+                continue;
+            };
+            let (Some(target_x), Some(target_y), Some(target_width), Some(target_height)) =
+                (target.x, target.y, target.width, target.height)
+            else {
+                continue;
+            };
+            xml.push_str(&format!(
+                r#"      <bpmndi:BPMNEdge id="{}_di" bpmnElement="{}"><di:waypoint x="{}" y="{}" /><di:waypoint x="{}" y="{}" /></bpmndi:BPMNEdge>
+"#,
+                escape_xml(&flow.id),
+                escape_xml(&flow.id),
+                source_x + source_width / 2.0,
+                source_y + source_height / 2.0,
+                target_x + target_width / 2.0,
+                target_y + target_height / 2.0,
+            ));
+        }
+        xml.push_str("    </bpmndi:BPMNPlane>\n  </bpmndi:BPMNDiagram>\n");
+    }
+    xml.push_str("</bpmn:definitions>\n");
     Ok(xml)
 }
 
@@ -443,9 +511,10 @@ fn local_xml_name(name: &[u8]) -> Result<&str, JsValue> {
 pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
-    let mut nodes = Vec::new();
-    let mut flows = Vec::new();
+    let mut nodes: Vec<BpmnNode> = Vec::new();
+    let mut flows: Vec<BpmnFlow> = Vec::new();
     let mut buffer = Vec::new();
+    let mut active_shape_element: Option<String> = None;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -456,6 +525,11 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                 let mut name = None;
                 let mut source_id = None;
                 let mut target_id = None;
+                let mut bpmn_element = None;
+                let mut x = None;
+                let mut y = None;
+                let mut width = None;
+                let mut height = None;
                 for attribute in element.attributes().with_checks(false).flatten() {
                     let key = local_xml_name(attribute.key.as_ref())?;
                     let value = attribute
@@ -469,11 +543,29 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         "name" => name = Some(value),
                         "sourceRef" => source_id = Some(value),
                         "targetRef" => target_id = Some(value),
+                        "bpmnElement" => bpmn_element = Some(value),
+                        "x" => x = value.parse::<f64>().ok(),
+                        "y" => y = value.parse::<f64>().ok(),
+                        "width" => width = value.parse::<f64>().ok(),
+                        "height" => height = value.parse::<f64>().ok(),
                         _ => {}
                     }
                 }
 
-                if let Some(node_type) = imported_node_type(tag) {
+                if tag == "BPMNShape" {
+                    active_shape_element = bpmn_element;
+                } else if tag == "Bounds" {
+                    if let (Some(element_id), Some(x), Some(y), Some(width), Some(height)) =
+                        (active_shape_element.as_deref(), x, y, width, height)
+                    {
+                        if let Some(node) = nodes.iter_mut().find(|node| node.id == element_id) {
+                            node.x = Some(x);
+                            node.y = Some(y);
+                            node.width = Some(width);
+                            node.height = Some(height);
+                        }
+                    }
+                } else if let Some(node_type) = imported_node_type(tag) {
                     let id = id.ok_or_else(|| {
                         JsValue::from_str(&format!("BPMN {tag} is missing required id attribute."))
                     })?;
@@ -482,6 +574,10 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         node_type,
                         pool_id: None,
                         name,
+                        x: None,
+                        y: None,
+                        width: None,
+                        height: None,
                     });
                 } else if matches!(tag, "sequenceFlow" | "messageFlow") {
                     let id = id.ok_or_else(|| {
@@ -503,6 +599,11 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                             BpmnFlowType::Sequence
                         },
                     });
+                }
+            }
+            Ok(Event::End(element)) => {
+                if local_xml_name(element.name().as_ref())? == "BPMNShape" {
+                    active_shape_element = None;
                 }
             }
             Ok(Event::Eof) => break,
@@ -557,18 +658,30 @@ mod tests {
                     node_type: BpmnNodeType::StartEvent,
                     pool_id: Some("pool-a".into()),
                     name: Some("Start".into()),
+                    x: Some(10.0),
+                    y: Some(20.0),
+                    width: Some(36.0),
+                    height: Some(36.0),
                 },
                 BpmnNode {
                     id: "task".into(),
                     node_type: BpmnNodeType::Task,
                     pool_id: Some("pool-a".into()),
                     name: Some("Review & approve".into()),
+                    x: Some(100.0),
+                    y: Some(20.0),
+                    width: Some(160.0),
+                    height: Some(80.0),
                 },
                 BpmnNode {
                     id: "end".into(),
                     node_type: BpmnNodeType::EndEvent,
                     pool_id: Some("pool-a".into()),
                     name: Some("End".into()),
+                    x: Some(300.0),
+                    y: Some(20.0),
+                    width: Some(36.0),
+                    height: Some(36.0),
                 },
             ],
             flows: vec![
@@ -617,9 +730,9 @@ mod tests {
         let xml = export_bpmn_xml(
             r#"{
               "nodes":[
-                {"id":"start","type":"startEvent","name":"Start"},
-                {"id":"task","type":"task","name":"Review & approve"},
-                {"id":"end","type":"endEvent","name":"End"}
+                {"id":"start","type":"startEvent","name":"Start","x":10,"y":20,"width":36,"height":36},
+                {"id":"task","type":"task","name":"Review & approve","x":100,"y":20,"width":160,"height":80},
+                {"id":"end","type":"endEvent","name":"End","x":300,"y":20,"width":36,"height":36}
               ],
               "flows":[
                 {"id":"f1","sourceId":"start","targetId":"task"},
@@ -631,6 +744,14 @@ mod tests {
 
         assert!(xml.contains(r#"<bpmn:task id="task" name="Review &amp; approve" />"#));
         assert!(xml.contains(r#"<bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="task" />"#));
+        assert!(xml.contains(r#"<bpmndi:BPMNShape id="task_di" bpmnElement="task">"#));
+        assert!(xml.contains(r#"<dc:Bounds x="100" y="20" width="160" height="80" />"#));
+
+        let round_trip = import_bpmn_xml(&xml).expect("exported BPMN should import");
+        let model: BpmnModel =
+            serde_json::from_str(&round_trip).expect("round-trip result is JSON");
+        assert_eq!(model.nodes[1].x, Some(100.0));
+        assert_eq!(model.nodes[1].width, Some(160.0));
     }
 
     #[test]
@@ -645,6 +766,13 @@ mod tests {
                 <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="task" />
                 <bpmn:sequenceFlow id="f2" sourceRef="task" targetRef="end" />
               </bpmn:process>
+              <bpmndi:BPMNDiagram>
+                <bpmndi:BPMNPlane>
+                  <bpmndi:BPMNShape id="task_di" bpmnElement="task">
+                    <dc:Bounds x="240" y="120" width="180" height="80" />
+                  </bpmndi:BPMNShape>
+                </bpmndi:BPMNPlane>
+              </bpmndi:BPMNDiagram>
             </bpmn:definitions>"#,
         )
         .expect("standard BPMN should import");
@@ -654,5 +782,7 @@ mod tests {
         assert_eq!(model.flows.len(), 2);
         assert_eq!(model.nodes[1].node_type, BpmnNodeType::Task);
         assert_eq!(model.nodes[1].name.as_deref(), Some("Review"));
+        assert_eq!(model.nodes[1].x, Some(240.0));
+        assert_eq!(model.nodes[1].height, Some(80.0));
     }
 }

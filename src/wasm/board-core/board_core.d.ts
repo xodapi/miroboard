@@ -7,8 +7,8 @@
 export function clamp_scale(value: number): number;
 
 /**
- * Exports a validated BPMN graph as portable BPMN 2.0 XML. This preserves the
- * executable process graph; BPMN-DI coordinates will follow in a later phase.
+ * Exports a validated BPMN graph as portable BPMN 2.0 XML with BPMN-DI
+ * coordinates when the model supplies them.
  */
 export function export_bpmn_xml(model_json: string): string;
 
