@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
-import { clamp_scale, snap_to_grid } from './wasm/board-core/board_core'
+import { clamp_scale, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji'
+type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 
 interface BoardElement {
   id: string
@@ -24,6 +25,8 @@ interface BoardElement {
   createdBy?: string
   emoji?: string
   zIndex?: number
+  bpmnNodeType?: BpmnNodeType
+  bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message' }
 }
 
 interface Cursor {
@@ -153,6 +156,34 @@ export default function App() {
   const yElements = useRef<Y.Array<BoardElement> | null>(null)
   const awarenessRef = useRef<any>(null)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
+
+  const bpmnIssues = useMemo(() => {
+    const nodes = elements
+      .filter((element) => element.bpmnNodeType)
+      .map((element) => ({
+        id: element.id,
+        type: element.bpmnNodeType,
+        poolId: 'default',
+      }))
+    if (nodes.length === 0) return []
+
+    const flows = elements
+      .filter((element) => element.bpmnFlow)
+      .map((element) => ({
+        id: element.id,
+        ...element.bpmnFlow,
+      }))
+
+    try {
+      return JSON.parse(validate_bpmn(JSON.stringify({ nodes, flows }))).issues as {
+        severity: 'error' | 'warning'
+        message: string
+        elementId?: string
+      }[]
+    } catch {
+      return [{ severity: 'error' as const, message: 'Не удалось проверить BPMN-модель.' }]
+    }
+  }, [elements])
 
   const user = useMemo(() => {
     const saved = localStorage.getItem('miro-user')
@@ -383,6 +414,15 @@ export default function App() {
         t.push(s('Шаг 2', 230, 270, 160, 60, '#FFD93D'))
         t.push({ id: genId(), type: 'arrow', x: 310, y: 330, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id })
         t.push(s('Результат', 230, 400, 160, 60, '#9D65C9'))
+      } else if (name === 'bpmn') {
+        const startId = genId()
+        const taskId = genId()
+        const endId = genId()
+        t.push({ id: startId, type: 'sticky', x: 80, y: 180, w: 86, h: 56, text: 'Старт', color: '#6BCB77', fill: '#6BCB77', createdBy: user.id, bpmnNodeType: 'startEvent' })
+        t.push({ id: taskId, type: 'sticky', x: 250, y: 170, w: 180, h: 76, text: 'Выполнить задачу', color: '#4D96FF', fill: '#4D96FF', createdBy: user.id, bpmnNodeType: 'task' })
+        t.push({ id: endId, type: 'sticky', x: 510, y: 180, w: 86, h: 56, text: 'Конец', color: '#FF5D5D', fill: '#FF5D5D', createdBy: user.id, bpmnNodeType: 'endEvent' })
+        t.push({ id: genId(), type: 'arrow', x: 166, y: 208, w: 84, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id, bpmnFlow: { sourceId: startId, targetId: taskId } })
+        t.push({ id: genId(), type: 'arrow', x: 430, y: 208, w: 80, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id, bpmnFlow: { sourceId: taskId, targetId: endId } })
       }
       t.forEach(el => yElements.current!.push([el]))
     })
@@ -900,6 +940,15 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
+          {elements.some(element => element.bpmnNodeType) && (
+            <div
+              className={`h-7 px-2 rounded-lg text-[11px] font-semibold flex items-center gap-1 ${bpmnIssues.some(issue => issue.severity === 'error') ? 'bg-red-100 text-red-700' : bpmnIssues.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}
+              title={bpmnIssues.map(issue => issue.message).join('\n') || 'BPMN-модель корректна'}
+            >
+              <span>{bpmnIssues.some(issue => issue.severity === 'error') ? '!' : '✓'}</span>
+              BPMN {bpmnIssues.length || 'OK'}
+            </div>
+          )}
           {/* Snap */}
           <button onClick={() => setSnapGrid(!snapGrid)}
             className={`h-7 px-2 rounded-lg text-[11px] font-medium flex items-center gap-1 transition ${snapGrid ? (dk ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-700') : (dk ? 'text-slate-400 hover:bg-slate-700' : 'text-black/40 hover:bg-black/5')}`} title="Привязка к сетке">
@@ -1202,6 +1251,7 @@ export default function App() {
                 { id: 'swot', name: '📊 SWOT анализ', desc: 'Сильные, слабые, возможности, угрозы', gradient: 'from-green-400 to-blue-400' },
                 { id: 'retro', name: '🔄 Ретроспектива', desc: 'Что хорошо, что улучшить, действия', gradient: 'from-blue-400 to-cyan-400' },
                 { id: 'flowchart', name: '🔀 Блок-схема', desc: 'Последовательность шагов', gradient: 'from-pink-400 to-rose-400' },
+                { id: 'bpmn', name: '⚙️ BPMN 2.0', desc: 'Старт, задача, завершение и проверка', gradient: 'from-indigo-400 to-violet-500' },
               ].map(t => (
                 <button key={t.id} onClick={() => applyTemplate(t.id)}
                   className={`p-4 rounded-2xl ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-gray-50 hover:bg-gray-100'} text-left transition active:scale-95`}>

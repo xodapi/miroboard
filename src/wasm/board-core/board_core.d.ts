@@ -11,13 +11,23 @@ export function clamp_scale(value: number): number;
  */
 export function snap_to_grid(value: number, grid_size: number): number;
 
+/**
+ * Validates a compact BPMN graph. The input and output are JSON strings to
+ * keep the browser/WASM boundary stable and easy to persist in a CRDT.
+ */
+export function validate_bpmn(model_json: string): string;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly snap_to_grid: (a: number, b: number) => number;
+    readonly validate_bpmn: (a: number, b: number) => [number, number];
     readonly clamp_scale: (a: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }
 
