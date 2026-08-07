@@ -58,6 +58,8 @@ struct BpmnNode {
     #[serde(default)]
     cost_per_hour: Option<f64>,
     #[serde(default)]
+    resource_capacity: Option<u32>,
+    #[serde(default)]
     x: Option<f64>,
     #[serde(default)]
     y: Option<f64>,
@@ -446,6 +448,8 @@ struct BpmnRunResult {
     token_path: Vec<String>,
     estimated_duration_ms: u64,
     estimated_cost: f64,
+    role_workload_ms: HashMap<String, u64>,
+    role_capacity: HashMap<String, u32>,
 }
 
 fn fixed_duration_ms(node: &BpmnNode) -> u64 {
@@ -580,6 +584,8 @@ fn run_bpmn_model(
     let mut completed_tokens = 0usize;
     let mut estimated_duration_ms = 0u64;
     let mut estimated_cost = 0.0;
+    let mut role_workload_ms = HashMap::new();
+    let mut role_capacity = HashMap::new();
     let step_limit = model.nodes.len().saturating_mul(model.flows.len().max(1)).saturating_mul(4);
 
     for _ in 0..=step_limit {
@@ -590,6 +596,8 @@ fn run_bpmn_model(
                     token_path,
                     estimated_duration_ms,
                     estimated_cost,
+                    role_workload_ms,
+                    role_capacity,
                 });
             }
             return Err(JsValue::from_str(
@@ -603,6 +611,13 @@ fn run_bpmn_model(
         let sampled_duration_ms = sampled_duration_ms(current, random_state);
         let completed_at_ms = arrived_at_ms.saturating_add(sampled_duration_ms);
         estimated_cost += sampled_duration_ms as f64 / 3_600_000.0 * current.cost_per_hour.unwrap_or(0.0);
+        if let Some(role) = current.resource_role.as_deref().filter(|role| !role.trim().is_empty()) {
+            *role_workload_ms.entry(role.to_owned()).or_default() += sampled_duration_ms;
+            role_capacity
+                .entry(role.to_owned())
+                .and_modify(|capacity| *capacity = (*capacity).min(current.resource_capacity.unwrap_or(1).max(1)))
+                .or_insert(current.resource_capacity.unwrap_or(1).max(1));
+        }
         if current.node_type == BpmnNodeType::EndEvent {
             completed_tokens += 1;
             estimated_duration_ms = estimated_duration_ms.max(completed_at_ms);
@@ -672,6 +687,16 @@ struct BpmnSimulationResult {
     p95_duration_ms: u64,
     max_duration_ms: u64,
     mean_cost: f64,
+    role_utilization: Vec<BpmnRoleUtilization>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BpmnRoleUtilization {
+    role: String,
+    capacity: u32,
+    mean_workload_ms: u64,
+    utilization: f64,
 }
 
 fn percentile(values: &[u64], percentile: f64) -> u64 {
@@ -693,10 +718,21 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     let mut random_state = Some(seed);
     let mut durations = Vec::with_capacity(runs as usize);
     let mut costs = Vec::with_capacity(runs as usize);
+    let mut role_workloads: HashMap<String, u128> = HashMap::new();
+    let mut role_capacities: HashMap<String, u32> = HashMap::new();
     for _ in 0..runs {
         let run = run_bpmn_model(&model, &mut random_state)?;
         durations.push(run.estimated_duration_ms);
         costs.push(run.estimated_cost);
+        for (role, workload) in run.role_workload_ms {
+            *role_workloads.entry(role).or_default() += workload as u128;
+        }
+        for (role, capacity) in run.role_capacity {
+            role_capacities
+                .entry(role)
+                .and_modify(|current| *current = (*current).min(capacity))
+                .or_insert(capacity);
+        }
     }
     durations.sort_unstable();
     let total_duration: u128 = durations.iter().map(|duration| *duration as u128).sum();
@@ -706,6 +742,24 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         .map(|duration| (*duration as f64 - mean_duration_ms as f64).powi(2))
         .sum::<f64>()
         / runs as f64;
+    let mut role_utilization: Vec<BpmnRoleUtilization> = role_workloads
+        .into_iter()
+        .map(|(role, workload)| {
+            let capacity = role_capacities.get(&role).copied().unwrap_or(1).max(1);
+            let mean_workload_ms = (workload / runs as u128) as u64;
+            BpmnRoleUtilization {
+                utilization: if mean_duration_ms == 0 {
+                    0.0
+                } else {
+                    mean_workload_ms as f64 / (mean_duration_ms as f64 * capacity as f64)
+                },
+                role,
+                capacity,
+                mean_workload_ms,
+            }
+        })
+        .collect();
+    role_utilization.sort_by(|left, right| right.utilization.total_cmp(&left.utilization));
     let result = BpmnSimulationResult {
         seed,
         runs,
@@ -718,6 +772,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         p95_duration_ms: percentile(&durations, 0.95),
         max_duration_ms: *durations.last().expect("simulation has at least one run"),
         mean_cost: costs.iter().sum::<f64>() / runs as f64,
+        role_utilization,
     };
     serde_json::to_string(&result)
         .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN simulation: {error}")))
@@ -973,6 +1028,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         duration_max_ms: None,
                         resource_role: None,
                         cost_per_hour: None,
+                        resource_capacity: None,
                         x: None,
                         y: None,
                         width: None,
@@ -1067,6 +1123,7 @@ mod tests {
                     duration_max_ms: None,
                     resource_role: None,
                     cost_per_hour: None,
+                    resource_capacity: None,
                     x: Some(10.0),
                     y: Some(20.0),
                     width: Some(36.0),
@@ -1084,6 +1141,7 @@ mod tests {
                     duration_max_ms: None,
                     resource_role: None,
                     cost_per_hour: None,
+                    resource_capacity: None,
                     x: Some(100.0),
                     y: Some(20.0),
                     width: Some(160.0),
@@ -1101,6 +1159,7 @@ mod tests {
                     duration_max_ms: None,
                     resource_role: None,
                     cost_per_hour: None,
+                    resource_capacity: None,
                     x: Some(300.0),
                     y: Some(20.0),
                     width: Some(36.0),

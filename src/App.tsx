@@ -42,6 +42,7 @@ type BpmnSimulationResult = {
   p95DurationMs: number
   maxDurationMs: number
   meanCost: number
+  roleUtilization: { role: string; capacity: number; meanWorkloadMs: number; utilization: number }[]
 }
 
 interface BoardElement {
@@ -68,6 +69,7 @@ interface BoardElement {
   bpmnDurationMaxMs?: number
   bpmnResourceRole?: string
   bpmnCostPerHour?: number
+  bpmnResourceCapacity?: number
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
 }
 
@@ -248,6 +250,7 @@ export default function App() {
         durationMaxMs: element.bpmnDurationMaxMs,
         resourceRole: element.bpmnResourceRole,
         costPerHour: element.bpmnCostPerHour,
+        resourceCapacity: element.bpmnResourceCapacity,
         x: element.x,
         y: element.y,
         width: element.w,
@@ -1687,6 +1690,9 @@ export default function App() {
           <label className={`text-[11px] font-semibold ${textSec}`}>€/ч
             <input type="number" min="0" step="0.01" value={selectedBpmnTask.bpmnCostPerHour ?? ''} onChange={(event) => { const value = event.target.value; const cost = value === '' ? undefined : Number(value); if (cost === undefined || (Number.isFinite(cost) && cost >= 0)) updateElement(selectedBpmnTask.id, { bpmnCostPerHour: cost }) }} className={`ml-1 w-16 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
           </label>
+          <label className={`text-[11px] font-semibold ${textSec}`}>Capacity
+            <input type="number" min="1" max="1000" step="1" value={selectedBpmnTask.bpmnResourceCapacity ?? 1} onChange={(event) => { const capacity = Number(event.target.value); if (Number.isInteger(capacity) && capacity >= 1 && capacity <= 1000) updateElement(selectedBpmnTask.id, { bpmnResourceCapacity: capacity }) }} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
+          </label>
         </div>
       )}
       {selectedBpmnFlow && !contextMenu && (
@@ -1787,6 +1793,12 @@ export default function App() {
                   <span className={`text-[10px] font-semibold ${textSec}`}>Средняя стоимость: </span>
                   <span className="text-sm font-bold">€{bpmnSimulationResult.meanCost.toFixed(2)}</span>
                 </div>
+                {bpmnSimulationResult.roleUtilization.map((role) => (
+                  <div key={role.role} className="col-span-3 flex items-center justify-between border-t border-black/10 pt-2 text-[11px]">
+                    <span className={textSec}>{role.role} · capacity {role.capacity} · {(role.meanWorkloadMs / 1000).toFixed(1)}с</span>
+                    <span className="font-bold">{(role.utilization * 100).toFixed(0)}%</span>
+                  </div>
+                ))}
               </div>
             )}
           </section>
