@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
-import { clamp_scale, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
+import { clamp_scale, export_bpmn_xml, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
@@ -159,25 +159,30 @@ export default function App() {
   const awarenessRef = useRef<any>(null)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
 
-  const bpmnIssues = useMemo(() => {
+  const createBpmnModel = useCallback(() => {
     const nodes = elements
       .filter((element) => element.bpmnNodeType)
       .map((element) => ({
         id: element.id,
         type: element.bpmnNodeType,
         poolId: 'default',
+        name: element.text,
       }))
-    if (nodes.length === 0) return []
-
     const flows = elements
       .filter((element) => element.bpmnFlow)
       .map((element) => ({
         id: element.id,
         ...element.bpmnFlow,
       }))
+    return { nodes, flows }
+  }, [elements])
+
+  const bpmnIssues = useMemo(() => {
+    const model = createBpmnModel()
+    if (model.nodes.length === 0) return []
 
     try {
-      return JSON.parse(validate_bpmn(JSON.stringify({ nodes, flows }))).issues as {
+      return JSON.parse(validate_bpmn(JSON.stringify(model))).issues as {
         severity: 'error' | 'warning'
         message: string
         elementId?: string
@@ -185,7 +190,7 @@ export default function App() {
     } catch {
       return [{ severity: 'error' as const, message: 'Не удалось проверить BPMN-модель.' }]
     }
-  }, [elements])
+  }, [createBpmnModel])
 
   const user = useMemo(() => {
     const saved = localStorage.getItem('miro-user')
@@ -458,6 +463,21 @@ export default function App() {
     }
     img.src = url
   }, [elements.length, roomId])
+
+  const exportToBpmn = useCallback(() => {
+    try {
+      const xml = export_bpmn_xml(JSON.stringify(createBpmnModel()))
+      const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `miroboard-${roomId.slice(0, 6)}.bpmn`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'BPMN-модель нельзя экспортировать.')
+    }
+  }, [createBpmnModel, roomId])
 
   // ======================== POINTER HANDLERS ========================
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -1325,6 +1345,12 @@ export default function App() {
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
             📋 Шаблоны
           </button>
+          {elements.some(element => element.bpmnNodeType) && (
+            <button onClick={() => { exportToBpmn(); setShowMore(false) }}
+              className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+              ⇩ BPMN
+            </button>
+          )}
           <button onClick={() => { exportToPNG(); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg> PNG

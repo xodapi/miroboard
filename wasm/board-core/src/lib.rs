@@ -40,6 +40,8 @@ struct BpmnNode {
     node_type: BpmnNodeType,
     #[serde(default)]
     pool_id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -320,6 +322,97 @@ pub fn validate_bpmn(model_json: &str) -> String {
     serde_json::to_string(&result).expect("BPMN validation result must serialize")
 }
 
+fn escape_xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn bpmn_tag(node_type: &BpmnNodeType) -> &'static str {
+    match node_type {
+        BpmnNodeType::StartEvent => "bpmn:startEvent",
+        BpmnNodeType::EndEvent => "bpmn:endEvent",
+        BpmnNodeType::IntermediateEvent => "bpmn:intermediateCatchEvent",
+        BpmnNodeType::Task => "bpmn:task",
+        BpmnNodeType::ServiceTask => "bpmn:serviceTask",
+        BpmnNodeType::UserTask => "bpmn:userTask",
+        BpmnNodeType::XorGateway => "bpmn:exclusiveGateway",
+        BpmnNodeType::AndGateway => "bpmn:parallelGateway",
+        BpmnNodeType::OrGateway => "bpmn:inclusiveGateway",
+    }
+}
+
+/// Exports a validated BPMN graph as portable BPMN 2.0 XML. This preserves the
+/// executable process graph; BPMN-DI coordinates will follow in a later phase.
+#[wasm_bindgen]
+pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
+    let model: BpmnModel = serde_json::from_str(model_json)
+        .map_err(|error| JsValue::from_str(&format!("Could not parse BPMN model JSON: {error}")))?;
+    let validation = validate_bpmn_model(&model);
+    let errors: Vec<&BpmnIssue> = validation
+        .issues
+        .iter()
+        .filter(|issue| issue.severity == IssueSeverity::Error)
+        .collect();
+    if !errors.is_empty() {
+        let messages = errors
+            .iter()
+            .map(|issue| issue.message.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Err(JsValue::from_str(&format!(
+            "Cannot export an invalid BPMN model: {messages}"
+        )));
+    }
+
+    let mut xml = String::from(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  id="MiroBoard_Definitions"
+                  targetNamespace="https://miroboard.app/bpmn">
+  <bpmn:process id="MiroBoard_Process" isExecutable="false">
+"#,
+    );
+    for node in &model.nodes {
+        let name = node
+            .name
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| format!(r#" name="{}""#, escape_xml(name)))
+            .unwrap_or_default();
+        xml.push_str(&format!(
+            r#"    <{} id="{}"{} />
+"#,
+            bpmn_tag(&node.node_type),
+            escape_xml(&node.id),
+            name,
+        ));
+    }
+    for flow in &model.flows {
+        let tag = match flow.flow_type {
+            BpmnFlowType::Sequence => "bpmn:sequenceFlow",
+            BpmnFlowType::Message => "bpmn:messageFlow",
+        };
+        xml.push_str(&format!(
+            r#"    <{} id="{}" sourceRef="{}" targetRef="{}" />
+"#,
+            tag,
+            escape_xml(&flow.id),
+            escape_xml(&flow.source_id),
+            escape_xml(&flow.target_id),
+        ));
+    }
+    xml.push_str(
+        r#"  </bpmn:process>
+</bpmn:definitions>
+"#,
+    );
+    Ok(xml)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,16 +443,19 @@ mod tests {
                     id: "start".into(),
                     node_type: BpmnNodeType::StartEvent,
                     pool_id: Some("pool-a".into()),
+                    name: Some("Start".into()),
                 },
                 BpmnNode {
                     id: "task".into(),
                     node_type: BpmnNodeType::Task,
                     pool_id: Some("pool-a".into()),
+                    name: Some("Review & approve".into()),
                 },
                 BpmnNode {
                     id: "end".into(),
                     node_type: BpmnNodeType::EndEvent,
                     pool_id: Some("pool-a".into()),
+                    name: Some("End".into()),
                 },
             ],
             flows: vec![
@@ -401,5 +497,26 @@ mod tests {
         );
 
         assert!(result.contains("sequence-flow-crosses-pool"));
+    }
+
+    #[test]
+    fn exports_valid_bpmn_xml_with_escaped_names() {
+        let xml = export_bpmn_xml(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent","name":"Start"},
+                {"id":"task","type":"task","name":"Review & approve"},
+                {"id":"end","type":"endEvent","name":"End"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"task"},
+                {"id":"f2","sourceId":"task","targetId":"end"}
+              ]
+            }"#,
+        )
+        .expect("valid process should export");
+
+        assert!(xml.contains(r#"<bpmn:task id="task" name="Review &amp; approve" />"#));
+        assert!(xml.contains(r#"<bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="task" />"#));
     }
 }

@@ -7,6 +7,12 @@
 export function clamp_scale(value: number): number;
 
 /**
+ * Exports a validated BPMN graph as portable BPMN 2.0 XML. This preserves the
+ * executable process graph; BPMN-DI coordinates will follow in a later phase.
+ */
+export function export_bpmn_xml(model_json: string): string;
+
+/**
  * Rounds a world-coordinate to the nearest grid intersection.
  */
 export function snap_to_grid(value: number, grid_size: number): number;
@@ -21,12 +27,14 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly export_bpmn_xml: (a: number, b: number) => [number, number, number, number];
     readonly snap_to_grid: (a: number, b: number) => number;
     readonly validate_bpmn: (a: number, b: number) => [number, number];
     readonly clamp_scale: (a: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_start: () => void;
 }
