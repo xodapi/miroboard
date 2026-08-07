@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
+import { clamp_scale, snap_to_grid } from './wasm/board-core/board_core'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
@@ -98,7 +99,7 @@ function smoothPathD(points: Point[]): string {
   return d
 }
 
-function snapVal(v: number, grid = 20) { return Math.round(v / grid) * grid }
+function snapVal(v: number, grid = 20) { return snap_to_grid(v, grid) }
 
 // ======================== MAIN APP ========================
 export default function App() {
@@ -640,7 +641,7 @@ export default function App() {
       if (lastPinchDist) {
         const s = dist / lastPinchDist
         setTransform(t => {
-          const ns = Math.min(Math.max(t.scale * s, 0.15), 5)
+          const ns = clamp_scale(t.scale * s)
           const wc = screenToWorld(cx, cy)
           return { scale: ns, x: cx - wc.x * ns, y: cy - wc.y * ns }
         })
@@ -656,7 +657,7 @@ export default function App() {
     const scale = delta > 0 ? 1.08 : 0.92
     const point = screenToWorld(e.clientX, e.clientY)
     setTransform(t => {
-      const ns = Math.min(Math.max(t.scale * scale, 0.15), 5)
+      const ns = clamp_scale(t.scale * scale)
       return { scale: ns, x: e.clientX - point.x * ns, y: e.clientY - point.y * ns }
     })
   }, [screenToWorld])
@@ -1289,7 +1290,7 @@ export default function App() {
       {/* ===== ZOOM CONTROLS ===== */}
       <div className="absolute right-3 bottom-[120px] z-20 flex flex-col gap-1.5" data-ui>
         <div className={`flex flex-col rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC} overflow-hidden`}>
-          <button onClick={() => setTransform(t => ({ ...t, scale: Math.min(t.scale * 1.2, 5) }))}
+          <button onClick={() => setTransform(t => ({ ...t, scale: clamp_scale(t.scale * 1.2) }))}
             className={`size-10 grid place-items-center ${hoverBg} ${textSec}`}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14" /></svg>
           </button>

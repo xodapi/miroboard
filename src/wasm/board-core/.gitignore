@@ -1,0 +1,3 @@
+# Generated WebAssembly bindings are committed so the Vite build works
+# immediately after checkout. Regenerate with `wasm-pack build` from
+# wasm/board-core when the Rust source changes.
