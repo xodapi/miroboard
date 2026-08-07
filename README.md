@@ -38,6 +38,7 @@ npm run build
 Полезные команды: `jj status`, `jj log`, `jj op log` и `jj undo`. GitHub продолжает
 работать через обычный Git remote `origin`. Правила использования jj и безопасного
 резервного копирования приведены в [docs/HISTORY_AND_BACKUP.md](docs/HISTORY_AND_BACKUP.md).
+В приложении кнопка `История` открывает учебную хронологию подтверждённых Git-этапов.
 
 ## Дальнейшая миграция
 

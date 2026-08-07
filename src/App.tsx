@@ -9,6 +9,23 @@ type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 const DISPLAY_VERSION = 'df774ad'
+const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
+const PROJECT_HISTORY = [
+  ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
+  ['2026-08-07 15:30 UTC+07', '3771d26', 'Rust/WASM core для геометрии доски'],
+  ['2026-08-07 15:55 UTC+07', '4ec3c49', 'BPMN-валидация графа'],
+  ['2026-08-07 16:15 UTC+07', 'addff28', 'Интерактивная BPMN-палитра'],
+  ['2026-08-07 16:31 UTC+07', 'b96f15c', 'Создание BPMN sequence flow'],
+  ['2026-08-07 16:42 UTC+07', 'a88d178', 'Экспорт BPMN XML'],
+  ['2026-08-07 16:56 UTC+07', 'c65e7aa', 'Импорт BPMN XML'],
+  ['2026-08-07 17:14 UTC+07', 'cf91a74', 'Сохранение BPMN-DI геометрии'],
+  ['2026-08-07 17:27 UTC+07', 'df774ad', 'Привязка стрелок к границам фигур'],
+  ['2026-08-07 18:23 UTC+07', '0af0309', 'Первый BPMN token runner'],
+  ['2026-08-07 19:21 UTC+07', '6fe4932', 'Видимая версия и Jujutsu workflow'],
+  ['2026-08-07 20:56 UTC+07', '4843635', 'Параллельные BPMN AND split/join'],
+  ['2026-08-07 21:11 UTC+07', 'ada449b', 'Критический путь и оценка длительности'],
+  ['2026-08-07 21:47 UTC+07', '58587e3', 'Редактирование длительности BPMN-задач'],
+] as const
 type ImportedBpmnModel = {
   nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number }[]
   flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message' }[]
@@ -155,6 +172,7 @@ export default function App() {
   const [editValue, setEditValue] = useState('')
   const [darkMode, setDarkMode] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
+  const [showProjectHistory, setShowProjectHistory] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [bpmnFlowSourceId, setBpmnFlowSourceId] = useState<string | null>(null)
@@ -1187,6 +1205,13 @@ export default function App() {
             <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-mono font-semibold ${dk ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
               {DISPLAY_VERSION}
             </span>
+            <button
+              onClick={() => setShowProjectHistory(true)}
+              className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`}
+              title="История проекта"
+            >
+              История
+            </button>
           </div>
           <div className={`h-4 w-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
           {/* Undo/Redo */}
@@ -1566,6 +1591,59 @@ export default function App() {
             <button key={c} onClick={() => updateElement(selectedId, { color: c, fill: c })}
               className="size-7 rounded-full ring-1 ring-black/10 active:scale-90 transition" style={{ background: c }} />
           ))}
+        </div>
+      )}
+
+      {/* ===== PROJECT HISTORY MODAL ===== */}
+      {showProjectHistory && (
+        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowProjectHistory(false)} data-ui>
+          <section className={`w-full max-w-3xl max-h-[82vh] overflow-y-auto rounded-[28px] ${dk ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'} shadow-2xl p-6`} onClick={event => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <div>
+                <h2 className="text-xl font-bold">История проекта</h2>
+                <p className={`mt-1 text-sm ${textSec}`}>Учебная хронология разработки MiroBoard, зафиксированная Git-коммитами.</p>
+              </div>
+              <button onClick={() => setShowProjectHistory(false)} className={`size-9 rounded-xl text-lg ${hoverBg}`} aria-label="Закрыть историю">×</button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 mb-6">
+              <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer" className={`rounded-2xl p-3 ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-50 hover:bg-slate-100'} transition`}>
+                <div className={`text-[11px] font-semibold ${textSec}`}>Репозиторий</div>
+                <div className="mt-1 text-sm font-bold">GitHub ↗</div>
+              </a>
+              <div className={`rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-slate-50'}`}>
+                <div className={`text-[11px] font-semibold ${textSec}`}>Автономный релиз</div>
+                <div className="mt-1 text-sm font-bold">Один HTML-файл</div>
+              </div>
+              <div className={`rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-slate-50'}`}>
+                <div className={`text-[11px] font-semibold ${textSec}`}>Токены модели</div>
+                <div className="mt-1 text-sm font-bold">Не измеряются достоверно</div>
+              </div>
+            </div>
+
+            <div className={`rounded-2xl p-4 mb-5 ${dk ? 'bg-indigo-950/70' : 'bg-indigo-50'}`}>
+              <h3 className="text-sm font-bold">Стек и engineering harness</h3>
+              <p className={`mt-1 text-[13px] leading-5 ${textSec}`}>
+                React, TypeScript, Vite, Tailwind, Yjs, WebRTC, IndexedDB и Rust/WASM. Factory Droid harness выполняет scoped-изменения, Rust/TypeScript-проверки, production build, Git commit/push и ведёт локальную операционную историю через jj.
+              </p>
+              <p className={`mt-2 text-[12px] leading-5 ${textSec}`}>
+                Git не содержит точных usage-метрик LLM, поэтому число токенов не выводится как оценка. Достоверный учёт возможен только при подключении telemetry API провайдера модели.
+              </p>
+            </div>
+
+            <h3 className="text-sm font-bold mb-3">Этапы</h3>
+            <ol className="space-y-3">
+              {PROJECT_HISTORY.map(([timestamp, commit, title]) => (
+                <li key={commit} className={`relative pl-5 border-l-2 ${dk ? 'border-slate-600' : 'border-slate-200'}`}>
+                  <span className={`absolute -left-[5px] top-1.5 size-2 rounded-full ${dk ? 'bg-violet-400' : 'bg-violet-500'}`} />
+                  <div className={`text-[11px] font-mono ${textSec}`}>{timestamp}</div>
+                  <a href={`${GITHUB_REPOSITORY}/commit/${commit}`} target="_blank" rel="noreferrer" className="text-[13px] font-semibold hover:underline">
+                    {title} <span className={`font-mono text-[11px] ${textSec}`}>{commit} ↗</span>
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </section>
         </div>
       )}
 
