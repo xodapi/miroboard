@@ -28,7 +28,7 @@ const PROJECT_HISTORY = [
 ] as const
 type ImportedBpmnModel = {
   nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number }[]
-  flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message' }[]
+  flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }[]
 }
 
 interface BoardElement {
@@ -49,7 +49,7 @@ interface BoardElement {
   zIndex?: number
   bpmnNodeType?: BpmnNodeType
   bpmnDurationMs?: number
-  bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message' }
+  bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
 }
 
 interface Cursor {
@@ -250,6 +250,14 @@ export default function App() {
   const selectedBpmnTask = useMemo(
     () => elements.find((element) => element.id === selectedId && element.bpmnNodeType === 'task') ?? null,
     [elements, selectedId],
+  )
+  const selectedBpmnFlow = useMemo(
+    () => elements.find((element) => element.id === selectedId && element.bpmnFlow) ?? null,
+    [elements, selectedId],
+  )
+  const selectedBpmnFlowIsXor = useMemo(
+    () => selectedBpmnFlow?.bpmnFlow && elements.find((element) => element.id === selectedBpmnFlow.bpmnFlow!.sourceId)?.bpmnNodeType === 'xorGateway',
+    [elements, selectedBpmnFlow],
   )
 
   const user = useMemo(() => {
@@ -601,7 +609,14 @@ export default function App() {
           yElements.current!.push([{
             id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2,
             fill: 'transparent', createdBy: user.id,
-            bpmnFlow: { sourceId: flow.sourceId, targetId: flow.targetId, flowType: flow.flowType || 'sequence' },
+            bpmnFlow: {
+              sourceId: flow.sourceId,
+              targetId: flow.targetId,
+              flowType: flow.flowType || 'sequence',
+              condition: flow.condition,
+              probability: flow.probability,
+              isDefault: flow.isDefault,
+            },
           }])
         }
       })
@@ -1583,6 +1598,53 @@ export default function App() {
             }}
             className={`w-16 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
           />
+        </div>
+      )}
+      {selectedBpmnFlow && !contextMenu && (
+        <div className={`absolute left-1/2 -translate-x-1/2 bottom-[204px] z-30 flex items-center gap-2 px-3 py-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
+          <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-condition">Условие</label>
+          <input
+            id="bpmn-flow-condition"
+            value={selectedBpmnFlow.bpmnFlow?.condition || ''}
+            placeholder="true"
+            onChange={(event) => updateElement(selectedBpmnFlow.id, {
+              bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, condition: event.target.value || undefined },
+            })}
+            className={`w-20 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+          />
+          {selectedBpmnFlowIsXor && (
+            <>
+              <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-probability">P</label>
+              <input
+                id="bpmn-flow-probability"
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                value={selectedBpmnFlow.bpmnFlow?.probability ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value
+                  const probability = value === '' ? undefined : Number(value)
+                  if (probability === undefined || (Number.isFinite(probability) && probability >= 0 && probability <= 1)) {
+                    updateElement(selectedBpmnFlow.id, {
+                      bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, probability },
+                    })
+                  }
+                }}
+                className={`w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+              />
+              <label className={`flex items-center gap-1 text-[11px] font-semibold ${textSec}`}>
+                <input
+                  type="checkbox"
+                  checked={selectedBpmnFlow.bpmnFlow?.isDefault || false}
+                  onChange={(event) => updateElement(selectedBpmnFlow.id, {
+                    bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, isDefault: event.target.checked },
+                  })}
+                />
+                default
+              </label>
+            </>
+          )}
         </div>
       )}
       {selectedId && elements.find(e => e.id === selectedId && (e.type === 'sticky' || e.type === 'rect' || e.type === 'circle')) && !contextMenu && (

@@ -55,7 +55,7 @@ struct BpmnNode {
     height: Option<f64>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct BpmnFlow {
     id: String,
@@ -63,6 +63,12 @@ struct BpmnFlow {
     target_id: String,
     #[serde(default)]
     flow_type: BpmnFlowType,
+    #[serde(default)]
+    condition: Option<String>,
+    #[serde(default)]
+    probability: Option<f64>,
+    #[serde(default)]
+    is_default: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -286,6 +292,59 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
             }
             _ => {}
         }
+
+        if node.node_type == BpmnNodeType::XorGateway {
+            let sequence_flows: Vec<&BpmnFlow> = outgoing
+                .get(node.id.as_str())
+                .into_iter()
+                .flatten()
+                .filter(|flow| flow.flow_type == BpmnFlowType::Sequence)
+                .copied()
+                .collect();
+            let defaults: Vec<&BpmnFlow> = sequence_flows
+                .iter()
+                .copied()
+                .filter(|flow| flow.is_default)
+                .collect();
+            if defaults.len() > 1 {
+                result.error(
+                    "xor-multiple-default-flows",
+                    "An XOR gateway can have only one default sequence flow.",
+                    Some(&node.id),
+                );
+            }
+            let probability_sum: f64 = sequence_flows
+                .iter()
+                .filter_map(|flow| flow.probability)
+                .sum();
+            if sequence_flows.iter().any(|flow| {
+                flow.probability
+                    .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+            }) {
+                result.error(
+                    "xor-probability-invalid",
+                    "XOR sequence-flow probabilities must be finite values from 0 to 1.",
+                    Some(&node.id),
+                );
+            } else if probability_sum > 1.0 + f64::EPSILON {
+                result.error(
+                    "xor-probability-sum",
+                    "XOR sequence-flow probabilities cannot sum to more than 1.",
+                    Some(&node.id),
+                );
+            }
+        } else if let Some(flow) = outgoing
+            .get(node.id.as_str())
+            .into_iter()
+            .flatten()
+            .find(|flow| flow.is_default)
+        {
+            result.warning(
+                "default-flow-non-xor",
+                "Default-flow selection is currently supported only for XOR gateways.",
+                Some(&flow.id),
+            );
+        }
     }
 
     let mut reachable = HashSet::new();
@@ -428,6 +487,22 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
             .ok_or_else(|| {
                 JsValue::from_str("The token reached a node without an outgoing sequence flow.")
             })?;
+        let selected_flow = || {
+            if current.node_type == BpmnNodeType::XorGateway {
+                flows
+                    .iter()
+                    .find(|flow| {
+                        flow.condition.as_deref().is_some_and(|condition| {
+                            condition.trim().eq_ignore_ascii_case("true")
+                        })
+                    })
+                    .copied()
+                    .or_else(|| flows.iter().find(|flow| flow.is_default).copied())
+                    .unwrap_or(flows[0])
+            } else {
+                flows[0]
+            }
+        };
 
         if current.node_type == BpmnNodeType::AndGateway
             && incoming.get(current_id).map_or(0, Vec::len) > 1
@@ -446,7 +521,7 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
                     active_tokens.push_back((flow.target_id.as_str(), synchronized_at_ms));
                 }
             } else {
-                active_tokens.push_back((flows[0].target_id.as_str(), synchronized_at_ms));
+                active_tokens.push_back((selected_flow().target_id.as_str(), synchronized_at_ms));
             }
             continue;
         }
@@ -456,7 +531,7 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
                 active_tokens.push_back((flow.target_id.as_str(), completed_at_ms));
             }
         } else {
-            active_tokens.push_back((flows[0].target_id.as_str(), completed_at_ms));
+            active_tokens.push_back((selected_flow().target_id.as_str(), completed_at_ms));
         }
     }
 
@@ -733,6 +808,9 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         } else {
                             BpmnFlowType::Sequence
                         },
+                        condition: None,
+                        probability: None,
+                        is_default: false,
                     });
                 }
             }
@@ -828,12 +906,18 @@ mod tests {
                     source_id: "start".into(),
                     target_id: "task".into(),
                     flow_type: BpmnFlowType::Sequence,
+                    condition: None,
+                    probability: None,
+                    is_default: false,
                 },
                 BpmnFlow {
                     id: "flow-2".into(),
                     source_id: "task".into(),
                     target_id: "end".into(),
                     flow_type: BpmnFlowType::Sequence,
+                    condition: None,
+                    probability: None,
+                    is_default: false,
                 },
             ],
         };
@@ -897,6 +981,54 @@ mod tests {
         assert_eq!(run.matches(r#""join""#).count(), 2);
         assert_eq!(run.matches(r#""end""#).count(), 1);
         assert!(run.contains(r#""estimatedDurationMs":2000"#));
+    }
+
+    #[test]
+    fn xor_runner_prefers_true_condition_then_default_flow() {
+        let run = run_bpmn(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"gateway","type":"xorGateway"},
+                {"id":"approved","type":"task"},
+                {"id":"fallback","type":"task"},
+                {"id":"end1","type":"endEvent"},
+                {"id":"end2","type":"endEvent"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"gateway"},
+                {"id":"f2","sourceId":"gateway","targetId":"approved","condition":"true"},
+                {"id":"f3","sourceId":"gateway","targetId":"fallback","isDefault":true},
+                {"id":"f4","sourceId":"approved","targetId":"end1"},
+                {"id":"f5","sourceId":"fallback","targetId":"end2"}
+              ]
+            }"#,
+        )
+        .expect("valid XOR process should run");
+
+        assert!(run.contains(r#""approved""#));
+        assert!(!run.contains(r#""fallback""#));
+    }
+
+    #[test]
+    fn rejects_multiple_xor_default_flows() {
+        let result = validate_bpmn(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"gateway","type":"xorGateway"},
+                {"id":"left","type":"endEvent"},
+                {"id":"right","type":"endEvent"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"gateway"},
+                {"id":"f2","sourceId":"gateway","targetId":"left","isDefault":true},
+                {"id":"f3","sourceId":"gateway","targetId":"right","isDefault":true}
+              ]
+            }"#,
+        );
+
+        assert!(result.contains("xor-multiple-default-flows"));
     }
 
     #[test]
