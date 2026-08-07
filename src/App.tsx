@@ -6,7 +6,7 @@ import { clamp_scale, snap_to_grid, validate_bpmn } from './wasm/board-core/boar
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
-type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji'
+type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 
 interface BoardElement {
@@ -128,6 +128,7 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
   const [showMore, setShowMore] = useState(false)
+  const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
   const [snapGrid, setSnapGrid] = useState(false)
@@ -465,6 +466,7 @@ export default function App() {
     setContextMenu(null)
     setShowTemplates(false)
     setShowMore(false)
+    setShowBpmnPalette(false)
 
     const point = screenToWorld(e.clientX, e.clientY)
     updateCursor(point.x, point.y, tool === 'laser')
@@ -541,6 +543,33 @@ export default function App() {
     if (tool === 'eraser') {
       const el = target.closest('[data-id]') as HTMLElement
       if (el?.dataset.id) deleteElement(el.dataset.id)
+      return
+    }
+
+    const bpmnNodeByTool: Partial<Record<Tool, { type: BpmnNodeType; text: string; w: number; h: number; color: string }>> = {
+      bpmnStart: { type: 'startEvent', text: 'Старт', w: 72, h: 72, color: '#6BCB77' },
+      bpmnTask: { type: 'task', text: 'Задача', w: 176, h: 76, color: '#4D96FF' },
+      bpmnEnd: { type: 'endEvent', text: 'Конец', w: 72, h: 72, color: '#FF5D5D' },
+      bpmnGateway: { type: 'xorGateway', text: 'X', w: 78, h: 78, color: '#FFB020' },
+    }
+    const bpmnNode = bpmnNodeByTool[tool]
+    if (bpmnNode) {
+      const id = genId()
+      const newEl: BoardElement = {
+        id,
+        type: 'sticky',
+        x: point.x - bpmnNode.w / 2,
+        y: point.y - bpmnNode.h / 2,
+        w: bpmnNode.w,
+        h: bpmnNode.h,
+        text: bpmnNode.text,
+        color: bpmnNode.color,
+        fill: bpmnNode.color,
+        createdBy: user.id,
+        bpmnNodeType: bpmnNode.type,
+      }
+      addElement(newEl)
+      setSelectedId(id)
       return
     }
 
@@ -725,6 +754,31 @@ export default function App() {
   const renderElement = (el: BoardElement) => {
     const isSelected = selectedId === el.id
     const invS = 1 / transform.scale
+
+    if (el.bpmnNodeType) {
+      const width = el.w || 80
+      const height = el.h || 80
+      const centerX = width / 2
+      const centerY = height / 2
+      const isGateway = el.bpmnNodeType === 'xorGateway' || el.bpmnNodeType === 'andGateway' || el.bpmnNodeType === 'orGateway'
+      const isEvent = el.bpmnNodeType === 'startEvent' || el.bpmnNodeType === 'endEvent'
+      return (
+        <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
+          {el.bpmnNodeType === 'startEvent' && <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={3} />}
+          {el.bpmnNodeType === 'endEvent' && <>
+            <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={5} />
+            <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 10} fill="none" stroke={el.color} strokeWidth={1.5} />
+          </>}
+          {el.bpmnNodeType === 'task' && <rect width={width} height={height} rx={10} fill="white" stroke={el.color} strokeWidth={3} />}
+          {isGateway && <polygon points={`${centerX},2 ${width - 2},${centerY} ${centerX},${height - 2} 2,${centerY}`} fill="white" stroke={el.color} strokeWidth={3} />}
+          <text x={centerX} y={centerY + 5} textAnchor="middle" fontSize={isEvent ? 11 : isGateway ? 24 : 14} fontWeight={isGateway ? 700 : 600} fill="#1f2937" className="pointer-events-none">
+            {el.text}
+          </text>
+          {isSelected && <rect x={-4} y={-4} width={width + 8} height={height + 8}
+            fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={isEvent ? width / 2 : 6} />}
+        </g>
+      )
+    }
 
     switch (el.type) {
       case 'path': {
@@ -1104,6 +1158,26 @@ export default function App() {
             </div>
           )}
 
+          {showBpmnPalette && (
+            <div className={`mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
+              <div className="flex gap-1.5">
+                {([
+                  { id: 'bpmnStart', label: 'Старт', icon: '○' },
+                  { id: 'bpmnTask', label: 'Задача', icon: '▭' },
+                  { id: 'bpmnGateway', label: 'Шлюз XOR', icon: '◇' },
+                  { id: 'bpmnEnd', label: 'Конец', icon: '◉' },
+                ] as { id: Tool; label: string; icon: string }[]).map(item => (
+                  <button key={item.id} onClick={() => { setTool(item.id); setShowBpmnPalette(false); setShowMore(false) }}
+                    className={`min-w-14 h-12 px-2 rounded-xl grid place-items-center text-center transition active:scale-90 ${tool === item.id ? 'bg-violet-600 text-white' : hoverBg}`}
+                    title={item.label}>
+                    <span className="text-xl leading-none">{item.icon}</span>
+                    <span className="text-[10px] leading-none mt-0.5">{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Color picker */}
           {showColorPicker && (
             <div className={`mb-2 mx-auto w-fit flex items-center gap-1.5 p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
@@ -1184,6 +1258,10 @@ export default function App() {
           <button onClick={() => { setTool('eraser'); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'eraser' ? 'bg-black text-white' : hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 20H7L3 16a1.9 1.9 0 0 1 0-2.8L14.2 2h.8l6 6v.8L9.8 20" /></svg> Ластик
+          </button>
+          <button onClick={() => { setShowBpmnPalette(!showBpmnPalette); setShowMore(false); setShowEmoji(false) }}
+            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${showBpmnPalette ? 'bg-violet-600 text-white' : hoverBg}`}>
+            ◇ BPMN
           </button>
           <div className={`w-px h-6 ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
           <button onClick={() => { setShowTemplates(true); setShowMore(false) }}
