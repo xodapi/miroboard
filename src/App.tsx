@@ -30,6 +30,17 @@ type ImportedBpmnModel = {
   nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number }[]
   flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }[]
 }
+type BpmnSimulationResult = {
+  seed: number
+  runs: number
+  completedRuns: number
+  minDurationMs: number
+  meanDurationMs: number
+  p50DurationMs: number
+  p90DurationMs: number
+  p95DurationMs: number
+  maxDurationMs: number
+}
 
 interface BoardElement {
   id: string
@@ -173,12 +184,16 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
   const [showProjectHistory, setShowProjectHistory] = useState(false)
+  const [showSimulationPanel, setShowSimulationPanel] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [bpmnFlowSourceId, setBpmnFlowSourceId] = useState<string | null>(null)
   const [activeBpmnTokenId, setActiveBpmnTokenId] = useState<string | null>(null)
   const [bpmnRunSummary, setBpmnRunSummary] = useState<string | null>(null)
   const [bpmnSimulationSummary, setBpmnSimulationSummary] = useState<string | null>(null)
+  const [bpmnSimulationResult, setBpmnSimulationResult] = useState<BpmnSimulationResult | null>(null)
+  const [simulationSeed, setSimulationSeed] = useState('42')
+  const [simulationRuns, setSimulationRuns] = useState('500')
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
   const [snapGrid, setSnapGrid] = useState(false)
@@ -576,19 +591,18 @@ export default function App() {
 
   const simulateBpmn = useCallback(() => {
     try {
-      const result = JSON.parse(simulate_bpmn(JSON.stringify(createBpmnModel()), 42n, 500)) as {
-        runs: number
-        p50DurationMs: number
-        p90DurationMs: number
-        p95DurationMs: number
-      }
+      const seed = BigInt(simulationSeed)
+      const runs = Number(simulationRuns)
+      if (!Number.isInteger(runs) || runs < 1 || runs > 10000) throw new Error('Количество прогонов должно быть целым числом от 1 до 10000.')
+      const result = JSON.parse(simulate_bpmn(JSON.stringify(createBpmnModel()), seed, runs)) as BpmnSimulationResult
       const seconds = (value: number) => `${(value / 1000).toFixed(1)}с`
+      setBpmnSimulationResult(result)
       setBpmnSimulationSummary(`MC ${result.runs}: P50 ${seconds(result.p50DurationMs)} · P90 ${seconds(result.p90DurationMs)} · P95 ${seconds(result.p95DurationMs)}`)
     } catch (error) {
       setBpmnSimulationSummary(null)
       window.alert(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.')
     }
-  }, [createBpmnModel])
+  }, [createBpmnModel, simulationRuns, simulationSeed])
 
   const importFromBpmn = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -1561,9 +1575,9 @@ export default function App() {
                 className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
                 ▶ Запуск
               </button>
-              <button onClick={() => { simulateBpmn(); setShowMore(false) }}
+              <button onClick={() => { setShowSimulationPanel(true); setShowMore(false) }}
                 className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-                ◌ MC 500
+                ◌ Симуляция
               </button>
               <button onClick={() => { exportToBpmn(); setShowMore(false) }}
                 className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
@@ -1679,6 +1693,49 @@ export default function App() {
             <button key={c} onClick={() => updateElement(selectedId, { color: c, fill: c })}
               className="size-7 rounded-full ring-1 ring-black/10 active:scale-90 transition" style={{ background: c }} />
           ))}
+        </div>
+      )}
+
+      {/* ===== SIMULATION MODAL ===== */}
+      {showSimulationPanel && (
+        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowSimulationPanel(false)} data-ui>
+          <section className={`w-full max-w-md rounded-[28px] ${dk ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'} shadow-2xl p-6`} onClick={event => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <div>
+                <h2 className="text-xl font-bold">Monte Carlo симуляция</h2>
+                <p className={`mt-1 text-sm ${textSec}`}>Вероятности XOR, фиксированный seed и воспроизводимый результат.</p>
+              </div>
+              <button onClick={() => setShowSimulationPanel(false)} className={`size-9 rounded-xl text-lg ${hoverBg}`} aria-label="Закрыть симуляцию">×</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <label className={`text-[12px] font-semibold ${textSec}`}>Seed
+                <input value={simulationSeed} onChange={event => setSimulationSeed(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+              </label>
+              <label className={`text-[12px] font-semibold ${textSec}`}>Прогоны
+                <input type="number" min="1" max="10000" value={simulationRuns} onChange={event => setSimulationRuns(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+              </label>
+            </div>
+            <button onClick={simulateBpmn} className="w-full rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-4 py-2.5 text-sm font-bold text-white">
+              Запустить симуляцию
+            </button>
+            {bpmnSimulationResult && (
+              <div className={`mt-5 grid grid-cols-3 gap-2 rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-slate-50'}`}>
+                {([
+                  ['Min', bpmnSimulationResult.minDurationMs],
+                  ['Mean', bpmnSimulationResult.meanDurationMs],
+                  ['P50', bpmnSimulationResult.p50DurationMs],
+                  ['P90', bpmnSimulationResult.p90DurationMs],
+                  ['P95', bpmnSimulationResult.p95DurationMs],
+                  ['Max', bpmnSimulationResult.maxDurationMs],
+                ] as const).map(([label, milliseconds]) => (
+                  <div key={label} className="text-center">
+                    <div className={`text-[10px] font-semibold ${textSec}`}>{label}</div>
+                    <div className="text-sm font-bold">{(milliseconds / 1000).toFixed(1)}с</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       )}
 
