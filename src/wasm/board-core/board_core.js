@@ -65,9 +65,8 @@ export function import_bpmn_xml(xml) {
 }
 
 /**
- * Executes a deterministic BPMN process. XOR/OR choices select the first
- * declared sequence flow. AND gateways split into all outgoing sequence flows
- * and synchronize all incoming paths before continuing.
+ * Executes a deterministic BPMN process. XOR gateways select literal `true`
+ * conditions, then their default-flow, then the first declared flow.
  * @param {string} model_json
  * @returns {string}
  */
@@ -78,6 +77,36 @@ export function run_bpmn(model_json) {
         const ptr0 = passStringToWasm0(model_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.run_bpmn(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * Runs a seeded, reproducible Monte Carlo simulation. Only XOR flows with
+ * `probability` values consume random numbers; all other BPMN semantics remain
+ * deterministic.
+ * @param {string} model_json
+ * @param {bigint} seed
+ * @param {number} runs
+ * @returns {string}
+ */
+export function simulate_bpmn(model_json, seed, runs) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(model_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.simulate_bpmn(ptr0, len0, seed, runs);
         var ptr2 = ret[0];
         var len2 = ret[1];
         if (ret[3]) {

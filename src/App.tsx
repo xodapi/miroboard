@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
-import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
+import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
@@ -178,6 +178,7 @@ export default function App() {
   const [bpmnFlowSourceId, setBpmnFlowSourceId] = useState<string | null>(null)
   const [activeBpmnTokenId, setActiveBpmnTokenId] = useState<string | null>(null)
   const [bpmnRunSummary, setBpmnRunSummary] = useState<string | null>(null)
+  const [bpmnSimulationSummary, setBpmnSimulationSummary] = useState<string | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
   const [snapGrid, setSnapGrid] = useState(false)
@@ -570,6 +571,22 @@ export default function App() {
       setActiveBpmnTokenId(null)
       setBpmnRunSummary(null)
       window.alert(error instanceof Error ? error.message : 'Не удалось запустить BPMN-модель.')
+    }
+  }, [createBpmnModel])
+
+  const simulateBpmn = useCallback(() => {
+    try {
+      const result = JSON.parse(simulate_bpmn(JSON.stringify(createBpmnModel()), 42n, 500)) as {
+        runs: number
+        p50DurationMs: number
+        p90DurationMs: number
+        p95DurationMs: number
+      }
+      const seconds = (value: number) => `${(value / 1000).toFixed(1)}с`
+      setBpmnSimulationSummary(`MC ${result.runs}: P50 ${seconds(result.p50DurationMs)} · P90 ${seconds(result.p90DurationMs)} · P95 ${seconds(result.p95DurationMs)}`)
+    } catch (error) {
+      setBpmnSimulationSummary(null)
+      window.alert(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.')
     }
   }, [createBpmnModel])
 
@@ -1260,6 +1277,11 @@ export default function App() {
                   {bpmnRunSummary}
                 </div>
               )}
+              {bpmnSimulationSummary && (
+                <div className={`h-7 max-w-[340px] truncate px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-fuchsia-950 text-fuchsia-200' : 'bg-fuchsia-50 text-fuchsia-700'}`} title={bpmnSimulationSummary}>
+                  {bpmnSimulationSummary}
+                </div>
+              )}
             </>
           )}
           {/* Snap */}
@@ -1538,6 +1560,10 @@ export default function App() {
               <button onClick={() => { runBpmn(); setShowMore(false) }}
                 className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
                 ▶ Запуск
+              </button>
+              <button onClick={() => { simulateBpmn(); setShowMore(false) }}
+                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+                ◌ MC 500
               </button>
               <button onClick={() => { exportToBpmn(); setShowMore(false) }}
                 className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>

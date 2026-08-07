@@ -407,11 +407,49 @@ fn node_duration_ms(node: &BpmnNode) -> u64 {
     })
 }
 
-/// Executes a deterministic BPMN process. XOR/OR choices select the first
-/// declared sequence flow. AND gateways split into all outgoing sequence flows
-/// and synchronize all incoming paths before continuing.
-#[wasm_bindgen]
-pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
+fn next_random_unit(state: &mut u64) -> f64 {
+    *state = state
+        .wrapping_mul(6_364_136_223_846_793_005)
+        .wrapping_add(1_442_695_040_888_963_407);
+    ((*state >> 11) as f64) / ((1u64 << 53) as f64)
+}
+
+fn select_flow<'a>(
+    node: &BpmnNode,
+    flows: &'a [&'a BpmnFlow],
+    random_state: &mut Option<u64>,
+) -> &'a BpmnFlow {
+    if node.node_type != BpmnNodeType::XorGateway {
+        return flows[0];
+    }
+    if let Some(flow) = flows.iter().find(|flow| {
+        flow.condition
+            .as_deref()
+            .is_some_and(|condition| condition.trim().eq_ignore_ascii_case("true"))
+    }) {
+        return flow;
+    }
+    if let Some(state) = random_state {
+        let total_probability: f64 = flows.iter().filter_map(|flow| flow.probability).sum();
+        if total_probability > 0.0 {
+            let random_value = next_random_unit(state);
+            let mut cumulative_probability = 0.0;
+            for flow in flows.iter().filter(|flow| flow.probability.is_some()) {
+                cumulative_probability += flow.probability.unwrap_or_default();
+                if random_value < cumulative_probability {
+                    return flow;
+                }
+            }
+        }
+    }
+    flows
+        .iter()
+        .find(|flow| flow.is_default)
+        .copied()
+        .unwrap_or(flows[0])
+}
+
+fn parse_and_validate_bpmn(model_json: &str) -> Result<BpmnModel, JsValue> {
     let model: BpmnModel = serde_json::from_str(model_json)
         .map_err(|error| JsValue::from_str(&format!("Could not parse BPMN model JSON: {error}")))?;
     let validation = validate_bpmn_model(&model);
@@ -425,7 +463,15 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
             "Cannot run BPMN model until validation errors are resolved.",
         ));
     }
+    Ok(model)
+}
 
+/// Executes a BPMN process. Supplying a random state enables seeded
+/// probability selection for XOR gateways.
+fn run_bpmn_model(
+    model: &BpmnModel,
+    random_state: &mut Option<u64>,
+) -> Result<BpmnRunResult, JsValue> {
     let nodes_by_id: HashMap<&str, &BpmnNode> = model
         .nodes
         .iter()
@@ -461,12 +507,11 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
     for _ in 0..=step_limit {
         let Some((current_id, arrived_at_ms)) = active_tokens.pop_front() else {
             if waiting_at_parallel_join.is_empty() && completed_tokens > 0 {
-                return serde_json::to_string(&BpmnRunResult {
+                return Ok(BpmnRunResult {
                     completed: true,
                     token_path,
                     estimated_duration_ms,
-                })
-                .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN run: {error}")));
+                });
             }
             return Err(JsValue::from_str(
                 "A parallel gateway is waiting for tokens from unfinished branches.",
@@ -487,23 +532,6 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
             .ok_or_else(|| {
                 JsValue::from_str("The token reached a node without an outgoing sequence flow.")
             })?;
-        let selected_flow = || {
-            if current.node_type == BpmnNodeType::XorGateway {
-                flows
-                    .iter()
-                    .find(|flow| {
-                        flow.condition.as_deref().is_some_and(|condition| {
-                            condition.trim().eq_ignore_ascii_case("true")
-                        })
-                    })
-                    .copied()
-                    .or_else(|| flows.iter().find(|flow| flow.is_default).copied())
-                    .unwrap_or(flows[0])
-            } else {
-                flows[0]
-            }
-        };
-
         if current.node_type == BpmnNodeType::AndGateway
             && incoming.get(current_id).map_or(0, Vec::len) > 1
         {
@@ -521,7 +549,7 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
                     active_tokens.push_back((flow.target_id.as_str(), synchronized_at_ms));
                 }
             } else {
-                active_tokens.push_back((selected_flow().target_id.as_str(), synchronized_at_ms));
+                active_tokens.push_back((select_flow(current, flows, random_state).target_id.as_str(), synchronized_at_ms));
             }
             continue;
         }
@@ -531,13 +559,74 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
                 active_tokens.push_back((flow.target_id.as_str(), completed_at_ms));
             }
         } else {
-            active_tokens.push_back((selected_flow().target_id.as_str(), completed_at_ms));
+            active_tokens.push_back((select_flow(current, flows, random_state).target_id.as_str(), completed_at_ms));
         }
     }
 
     Err(JsValue::from_str(
         "The BPMN runner exceeded its deterministic step limit. Add a terminating branch or use simulation controls.",
     ))
+}
+
+/// Executes a deterministic BPMN process. XOR gateways select literal `true`
+/// conditions, then their default-flow, then the first declared flow.
+#[wasm_bindgen]
+pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
+    let model = parse_and_validate_bpmn(model_json)?;
+    serde_json::to_string(&run_bpmn_model(&model, &mut None)?)
+        .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN run: {error}")))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BpmnSimulationResult {
+    seed: u64,
+    runs: u32,
+    completed_runs: u32,
+    min_duration_ms: u64,
+    mean_duration_ms: u64,
+    p50_duration_ms: u64,
+    p90_duration_ms: u64,
+    p95_duration_ms: u64,
+    max_duration_ms: u64,
+}
+
+fn percentile(values: &[u64], percentile: f64) -> u64 {
+    let index = ((values.len() - 1) as f64 * percentile).ceil() as usize;
+    values[index]
+}
+
+/// Runs a seeded, reproducible Monte Carlo simulation. Only XOR flows with
+/// `probability` values consume random numbers; all other BPMN semantics remain
+/// deterministic.
+#[wasm_bindgen]
+pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, JsValue> {
+    if runs == 0 || runs > 10_000 {
+        return Err(JsValue::from_str(
+            "Simulation runs must be between 1 and 10000.",
+        ));
+    }
+    let model = parse_and_validate_bpmn(model_json)?;
+    let mut random_state = Some(seed);
+    let mut durations = Vec::with_capacity(runs as usize);
+    for _ in 0..runs {
+        durations.push(run_bpmn_model(&model, &mut random_state)?.estimated_duration_ms);
+    }
+    durations.sort_unstable();
+    let total_duration: u128 = durations.iter().map(|duration| *duration as u128).sum();
+    let result = BpmnSimulationResult {
+        seed,
+        runs,
+        completed_runs: runs,
+        min_duration_ms: durations[0],
+        mean_duration_ms: (total_duration / runs as u128) as u64,
+        p50_duration_ms: percentile(&durations, 0.50),
+        p90_duration_ms: percentile(&durations, 0.90),
+        p95_duration_ms: percentile(&durations, 0.95),
+        max_duration_ms: *durations.last().expect("simulation has at least one run"),
+    };
+    serde_json::to_string(&result)
+        .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN simulation: {error}")))
 }
 
 fn escape_xml(value: &str) -> String {
@@ -1029,6 +1118,34 @@ mod tests {
         );
 
         assert!(result.contains("xor-multiple-default-flows"));
+    }
+
+    #[test]
+    fn seeded_simulation_is_reproducible() {
+        let model = r#"{
+          "nodes":[
+            {"id":"start","type":"startEvent"},
+            {"id":"gateway","type":"xorGateway"},
+            {"id":"fast","type":"task","durationMs":1000},
+            {"id":"slow","type":"task","durationMs":5000},
+            {"id":"end1","type":"endEvent"},
+            {"id":"end2","type":"endEvent"}
+          ],
+          "flows":[
+            {"id":"f1","sourceId":"start","targetId":"gateway"},
+            {"id":"f2","sourceId":"gateway","targetId":"fast","probability":0.5},
+            {"id":"f3","sourceId":"gateway","targetId":"slow","probability":0.5},
+            {"id":"f4","sourceId":"fast","targetId":"end1"},
+            {"id":"f5","sourceId":"slow","targetId":"end2"}
+          ]
+        }"#;
+        let first = simulate_bpmn(model, 42, 100).expect("simulation should run");
+        let second = simulate_bpmn(model, 42, 100).expect("same seed should run");
+
+        assert_eq!(first, second);
+        assert!(first.contains(r#""runs":100"#));
+        assert!(first.contains(r#""minDurationMs":1000"#));
+        assert!(first.contains(r#""maxDurationMs":5000"#));
     }
 
     #[test]

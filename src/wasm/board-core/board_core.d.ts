@@ -19,11 +19,17 @@ export function export_bpmn_xml(model_json: string): string;
 export function import_bpmn_xml(xml: string): string;
 
 /**
- * Executes a deterministic BPMN process. XOR/OR choices select the first
- * declared sequence flow. AND gateways split into all outgoing sequence flows
- * and synchronize all incoming paths before continuing.
+ * Executes a deterministic BPMN process. XOR gateways select literal `true`
+ * conditions, then their default-flow, then the first declared flow.
  */
 export function run_bpmn(model_json: string): string;
+
+/**
+ * Runs a seeded, reproducible Monte Carlo simulation. Only XOR flows with
+ * `probability` values consume random numbers; all other BPMN semantics remain
+ * deterministic.
+ */
+export function simulate_bpmn(model_json: string, seed: bigint, runs: number): string;
 
 /**
  * Rounds a world-coordinate to the nearest grid intersection.
@@ -43,6 +49,7 @@ export interface InitOutput {
     readonly export_bpmn_xml: (a: number, b: number) => [number, number, number, number];
     readonly import_bpmn_xml: (a: number, b: number) => [number, number, number, number];
     readonly run_bpmn: (a: number, b: number) => [number, number, number, number];
+    readonly simulate_bpmn: (a: number, b: number, c: bigint, d: number) => [number, number, number, number];
     readonly snap_to_grid: (a: number, b: number) => number;
     readonly validate_bpmn: (a: number, b: number) => [number, number];
     readonly clamp_scale: (a: number) => number;
