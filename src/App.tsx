@@ -108,6 +108,28 @@ function smoothPathD(points: Point[]): string {
 
 function snapVal(v: number, grid = 20) { return snap_to_grid(v, grid) }
 
+function bpmnEdgeAnchor(element: BoardElement, towardX: number, towardY: number): Point {
+  const width = element.w || 0
+  const height = element.h || 0
+  const centerX = element.x + width / 2
+  const centerY = element.y + height / 2
+  const dx = towardX - centerX
+  const dy = towardY - centerY
+  if (dx === 0 && dy === 0) return { x: centerX, y: centerY }
+
+  const halfWidth = width / 2
+  const halfHeight = height / 2
+  let scale: number
+  if (element.bpmnNodeType === 'startEvent' || element.bpmnNodeType === 'endEvent') {
+    scale = Math.min(halfWidth, halfHeight) / Math.hypot(dx, dy)
+  } else if (element.bpmnNodeType === 'xorGateway' || element.bpmnNodeType === 'andGateway' || element.bpmnNodeType === 'orGateway') {
+    scale = 1 / (Math.abs(dx) / halfWidth + Math.abs(dy) / halfHeight)
+  } else {
+    scale = 1 / Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight)
+  }
+  return { x: centerX + dx * scale, y: centerY + dy * scale }
+}
+
 // ======================== MAIN APP ========================
 export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -1000,10 +1022,14 @@ export default function App() {
       case 'arrow': {
         const source = el.bpmnFlow ? elements.find(node => node.id === el.bpmnFlow?.sourceId) : undefined
         const target = el.bpmnFlow ? elements.find(node => node.id === el.bpmnFlow?.targetId) : undefined
-        const startX = source ? source.x + (source.w || 0) / 2 : el.x
-        const startY = source ? source.y + (source.h || 0) / 2 : el.y
-        const x2 = target ? target.x + (target.w || 0) / 2 - startX : el.w || 0
-        const y2 = target ? target.y + (target.h || 0) / 2 - startY : el.h || 0
+        const sourceCenter = source ? { x: source.x + (source.w || 0) / 2, y: source.y + (source.h || 0) / 2 } : undefined
+        const targetCenter = target ? { x: target.x + (target.w || 0) / 2, y: target.y + (target.h || 0) / 2 } : undefined
+        const start = source && targetCenter ? bpmnEdgeAnchor(source, targetCenter.x, targetCenter.y) : { x: el.x, y: el.y }
+        const end = target && sourceCenter ? bpmnEdgeAnchor(target, sourceCenter.x, sourceCenter.y) : { x: el.x + (el.w || 0), y: el.y + (el.h || 0) }
+        const startX = start.x
+        const startY = start.y
+        const x2 = end.x - startX
+        const y2 = end.y - startY
         const angle = Math.atan2(y2, x2)
         const hs = 12
         return (
