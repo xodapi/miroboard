@@ -19,6 +19,13 @@ export function export_bpmn_xml(model_json: string): string;
 export function import_bpmn_xml(xml: string): string;
 
 /**
+ * Executes the deterministic path through a validated BPMN process. XOR/OR
+ * choices currently select the first declared sequence flow; parallel gateway
+ * token splitting is intentionally deferred to the simulation milestone.
+ */
+export function run_bpmn(model_json: string): string;
+
+/**
  * Rounds a world-coordinate to the nearest grid intersection.
  */
 export function snap_to_grid(value: number, grid_size: number): number;
@@ -35,6 +42,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly export_bpmn_xml: (a: number, b: number) => [number, number, number, number];
     readonly import_bpmn_xml: (a: number, b: number) => [number, number, number, number];
+    readonly run_bpmn: (a: number, b: number) => [number, number, number, number];
     readonly snap_to_grid: (a: number, b: number) => number;
     readonly validate_bpmn: (a: number, b: number) => [number, number];
     readonly clamp_scale: (a: number) => number;

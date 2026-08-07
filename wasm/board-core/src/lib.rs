@@ -331,6 +331,86 @@ pub fn validate_bpmn(model_json: &str) -> String {
     serde_json::to_string(&result).expect("BPMN validation result must serialize")
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BpmnRunResult {
+    completed: bool,
+    token_path: Vec<String>,
+}
+
+/// Executes the deterministic path through a validated BPMN process. XOR/OR
+/// choices currently select the first declared sequence flow; parallel gateway
+/// token splitting is intentionally deferred to the simulation milestone.
+#[wasm_bindgen]
+pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
+    let model: BpmnModel = serde_json::from_str(model_json)
+        .map_err(|error| JsValue::from_str(&format!("Could not parse BPMN model JSON: {error}")))?;
+    let validation = validate_bpmn_model(&model);
+    let errors: Vec<&BpmnIssue> = validation
+        .issues
+        .iter()
+        .filter(|issue| issue.severity == IssueSeverity::Error)
+        .collect();
+    if !errors.is_empty() {
+        return Err(JsValue::from_str(
+            "Cannot run BPMN model until validation errors are resolved.",
+        ));
+    }
+
+    let nodes_by_id: HashMap<&str, &BpmnNode> = model
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    let mut outgoing: HashMap<&str, Vec<&BpmnFlow>> = HashMap::new();
+    for flow in &model.flows {
+        if flow.flow_type == BpmnFlowType::Sequence {
+            outgoing
+                .entry(flow.source_id.as_str())
+                .or_default()
+                .push(flow);
+        }
+    }
+    let start = model
+        .nodes
+        .iter()
+        .find(|node| node.node_type == BpmnNodeType::StartEvent)
+        .ok_or_else(|| JsValue::from_str("Cannot run BPMN model without a start event."))?;
+
+    let mut current_id = start.id.as_str();
+    let mut token_path = Vec::new();
+    let mut visited = HashSet::new();
+    for _ in 0..=model.nodes.len() * 2 {
+        if !visited.insert(current_id) {
+            return Err(JsValue::from_str(
+                "The deterministic token path entered a loop. Add a terminating branch or use simulation controls.",
+            ));
+        }
+        token_path.push(current_id.to_owned());
+        let current = nodes_by_id
+            .get(current_id)
+            .ok_or_else(|| JsValue::from_str("Token reached a missing BPMN node."))?;
+        if current.node_type == BpmnNodeType::EndEvent {
+            return serde_json::to_string(&BpmnRunResult {
+                completed: true,
+                token_path,
+            })
+            .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN run: {error}")));
+        }
+        let flow = outgoing
+            .get(current_id)
+            .and_then(|flows| flows.first())
+            .ok_or_else(|| {
+                JsValue::from_str("The token reached a node without an outgoing sequence flow.")
+            })?;
+        current_id = flow.target_id.as_str();
+    }
+
+    Err(JsValue::from_str(
+        "The BPMN runner exceeded its deterministic step limit.",
+    ))
+}
+
 fn escape_xml(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -708,6 +788,27 @@ mod tests {
         let result = validate_bpmn(r#"{"nodes":[{"id":"start","type":"startEvent"}],"flows":[]}"#);
 
         assert!(result.contains("start-event-has-no-outgoing"));
+    }
+
+    #[test]
+    fn runs_a_valid_process_from_start_to_end() {
+        let run = run_bpmn(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"task","type":"task"},
+                {"id":"end","type":"endEvent"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"task"},
+                {"id":"f2","sourceId":"task","targetId":"end"}
+              ]
+            }"#,
+        )
+        .expect("valid process should run");
+
+        assert!(run.contains(r#""completed":true"#));
+        assert!(run.contains(r#""tokenPath":["start","task","end"]"#));
     }
 
     #[test]

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
-import { clamp_scale, export_bpmn_xml, import_bpmn_xml, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
+import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
@@ -156,6 +156,7 @@ export default function App() {
   const [showMore, setShowMore] = useState(false)
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [bpmnFlowSourceId, setBpmnFlowSourceId] = useState<string | null>(null)
+  const [activeBpmnTokenId, setActiveBpmnTokenId] = useState<string | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
   const [snapGrid, setSnapGrid] = useState(false)
@@ -178,6 +179,7 @@ export default function App() {
   // Long press
   const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null)
   const bpmnImportRef = useRef<HTMLInputElement>(null)
+  const bpmnRunTimersRef = useRef<number[]>([])
 
   // Yjs
   const ydoc = useMemo(() => new Y.Doc(), [])
@@ -509,6 +511,29 @@ export default function App() {
       window.alert(error instanceof Error ? error.message : 'BPMN-модель нельзя экспортировать.')
     }
   }, [createBpmnModel, roomId])
+
+  const runBpmn = useCallback(() => {
+    bpmnRunTimersRef.current.forEach(window.clearTimeout)
+    bpmnRunTimersRef.current = []
+    try {
+      const result = JSON.parse(run_bpmn(JSON.stringify(createBpmnModel()))) as {
+        completed: boolean
+        tokenPath: string[]
+      }
+      result.tokenPath.forEach((nodeId, index) => {
+        bpmnRunTimersRef.current.push(window.setTimeout(() => {
+          setActiveBpmnTokenId(nodeId)
+        }, index * 650))
+      })
+      bpmnRunTimersRef.current.push(window.setTimeout(() => {
+        setActiveBpmnTokenId(null)
+        bpmnRunTimersRef.current = []
+      }, result.tokenPath.length * 650 + 350))
+    } catch (error) {
+      setActiveBpmnTokenId(null)
+      window.alert(error instanceof Error ? error.message : 'Не удалось запустить BPMN-модель.')
+    }
+  }, [createBpmnModel])
 
   const importFromBpmn = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -876,6 +901,10 @@ export default function App() {
     if (tool !== 'bpmnSequence') setBpmnFlowSourceId(null)
   }, [tool])
 
+  useEffect(() => () => {
+    bpmnRunTimersRef.current.forEach(window.clearTimeout)
+  }, [])
+
   // Keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -905,6 +934,7 @@ export default function App() {
       const height = el.h || 80
       const centerX = width / 2
       const centerY = height / 2
+      const isTokenActive = activeBpmnTokenId === el.id
       const isGateway = el.bpmnNodeType === 'xorGateway' || el.bpmnNodeType === 'andGateway' || el.bpmnNodeType === 'orGateway'
       const isEvent = el.bpmnNodeType === 'startEvent' || el.bpmnNodeType === 'endEvent'
       return (
@@ -916,6 +946,10 @@ export default function App() {
           </>}
           {el.bpmnNodeType === 'task' && <rect width={width} height={height} rx={10} fill="white" stroke={el.color} strokeWidth={3} />}
           {isGateway && <polygon points={`${centerX},2 ${width - 2},${centerY} ${centerX},${height - 2} 2,${centerY}`} fill="white" stroke={el.color} strokeWidth={3} />}
+          {isTokenActive && <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 + 8} fill="none" stroke="#8B5CF6" strokeWidth={3 * invS}>
+            <animate attributeName="r" values={`${Math.min(width, height) / 2 + 4};${Math.min(width, height) / 2 + 12};${Math.min(width, height) / 2 + 4}`} dur="0.65s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="1;0.35;1" dur="0.65s" repeatCount="indefinite" />
+          </circle>}
           <text x={centerX} y={centerY + 5} textAnchor="middle" fontSize={isEvent ? 11 : isGateway ? 24 : 14} fontWeight={isGateway ? 700 : 600} fill="#1f2937" className="pointer-events-none">
             {el.text}
           </text>
@@ -1434,10 +1468,16 @@ export default function App() {
             ⇧ BPMN
           </button>
           {elements.some(element => element.bpmnNodeType) && (
-            <button onClick={() => { exportToBpmn(); setShowMore(false) }}
-              className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-              ⇩ BPMN
-            </button>
+            <>
+              <button onClick={() => { runBpmn(); setShowMore(false) }}
+                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+                ▶ Запуск
+              </button>
+              <button onClick={() => { exportToBpmn(); setShowMore(false) }}
+                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+                ⇩ BPMN
+              </button>
+            </>
           )}
           <button onClick={() => { exportToPNG(); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>

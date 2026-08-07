@@ -65,6 +65,34 @@ export function import_bpmn_xml(xml) {
 }
 
 /**
+ * Executes the deterministic path through a validated BPMN process. XOR/OR
+ * choices currently select the first declared sequence flow; parallel gateway
+ * token splitting is intentionally deferred to the simulation milestone.
+ * @param {string} model_json
+ * @returns {string}
+ */
+export function run_bpmn(model_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(model_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.run_bpmn(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Rounds a world-coordinate to the nearest grid intersection.
  * @param {number} value
  * @param {number} grid_size
