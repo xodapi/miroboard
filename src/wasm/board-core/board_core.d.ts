@@ -13,6 +13,12 @@ export function clamp_scale(value: number): number;
 export function export_bpmn_xml(model_json: string): string;
 
 /**
+ * Imports the executable graph from BPMN 2.0 XML. Unsupported BPMN elements
+ * are left untouched in the source file and omitted from the current editor.
+ */
+export function import_bpmn_xml(xml: string): string;
+
+/**
  * Rounds a world-coordinate to the nearest grid intersection.
  */
 export function snap_to_grid(value: number, grid_size: number): number;
@@ -28,6 +34,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly export_bpmn_xml: (a: number, b: number) => [number, number, number, number];
+    readonly import_bpmn_xml: (a: number, b: number) => [number, number, number, number];
     readonly snap_to_grid: (a: number, b: number) => number;
     readonly validate_bpmn: (a: number, b: number) => [number, number];
     readonly clamp_scale: (a: number) => number;

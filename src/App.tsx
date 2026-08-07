@@ -2,12 +2,16 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
-import { clamp_scale, export_bpmn_xml, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
+import { clamp_scale, export_bpmn_xml, import_bpmn_xml, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
+type ImportedBpmnModel = {
+  nodes: { id: string; type: string; name?: string }[]
+  flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message' }[]
+}
 
 interface BoardElement {
   id: string
@@ -151,6 +155,7 @@ export default function App() {
 
   // Long press
   const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null)
+  const bpmnImportRef = useRef<HTMLInputElement>(null)
 
   // Yjs
   const ydoc = useMemo(() => new Y.Doc(), [])
@@ -478,6 +483,54 @@ export default function App() {
       window.alert(error instanceof Error ? error.message : 'BPMN-модель нельзя экспортировать.')
     }
   }, [createBpmnModel, roomId])
+
+  const importFromBpmn = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file || !yElements.current) return
+
+    try {
+      const imported = JSON.parse(import_bpmn_xml(await file.text())) as ImportedBpmnModel
+      const normalizeType = (type: string): BpmnNodeType => {
+        if (type === 'startEvent' || type === 'endEvent' || type === 'xorGateway' || type === 'andGateway' || type === 'orGateway') return type
+        return 'task'
+      }
+      const colorForType = (type: BpmnNodeType) => ({
+        startEvent: '#6BCB77', endEvent: '#FF5D5D', task: '#4D96FF',
+        xorGateway: '#FFB020', andGateway: '#FFB020', orGateway: '#FFB020',
+      }[type])
+      const nodeById = new Map(imported.nodes.map((node, index) => {
+        const type = normalizeType(node.type)
+        const width = type === 'task' ? 176 : 78
+        const height = type === 'task' ? 76 : 78
+        const column = index % 3
+        const row = Math.floor(index / 3)
+        return [node.id, {
+          id: node.id, type: 'sticky' as const, x: 100 + column * 260, y: 130 + row * 180,
+          w: width, h: height, text: node.name || (type === 'task' ? 'Задача' : ''),
+          color: colorForType(type), fill: colorForType(type), createdBy: user.id, bpmnNodeType: type,
+        }]
+      }))
+
+      ydoc.transact(() => {
+        while (yElements.current!.length > 0) yElements.current!.delete(0, 1)
+        for (const node of nodeById.values()) yElements.current!.push([node])
+        for (const flow of imported.flows) {
+          if (!nodeById.has(flow.sourceId) || !nodeById.has(flow.targetId)) continue
+          yElements.current!.push([{
+            id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2,
+            fill: 'transparent', createdBy: user.id,
+            bpmnFlow: { sourceId: flow.sourceId, targetId: flow.targetId, flowType: flow.flowType || 'sequence' },
+          }])
+        }
+      })
+      setSelectedId(null)
+      setTransform({ x: 0, y: 0, scale: 1 })
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось импортировать BPMN-файл.')
+    } finally {
+      event.target.value = ''
+    }
+  }, [user.id, ydoc])
 
   // ======================== POINTER HANDLERS ========================
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -1042,6 +1095,7 @@ export default function App() {
 
   return (
     <div className={`fixed inset-0 overflow-hidden select-none ${dk ? 'bg-slate-900 text-white' : 'bg-[#F7F7F5] text-black'}`}>
+      <input ref={bpmnImportRef} type="file" accept=".bpmn,.xml,application/xml,text/xml" className="hidden" onChange={importFromBpmn} />
 
       {/* ===== HEADER ===== */}
       <div className={`absolute top-0 left-0 right-0 z-30 h-[52px] flex items-center justify-between px-3 ${dk ? 'bg-slate-900/90' : 'bg-white/90'} backdrop-blur-xl border-b ${borderC}`} data-ui>
@@ -1344,6 +1398,10 @@ export default function App() {
           <button onClick={() => { setShowTemplates(true); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
             📋 Шаблоны
+          </button>
+          <button onClick={() => { bpmnImportRef.current?.click(); setShowMore(false) }}
+            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+            ⇧ BPMN
           </button>
           {elements.some(element => element.bpmnNodeType) && (
             <button onClick={() => { exportToBpmn(); setShowMore(false) }}

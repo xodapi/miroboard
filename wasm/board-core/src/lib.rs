@@ -1,3 +1,4 @@
+use quick_xml::{events::Event, Reader};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wasm_bindgen::prelude::*;
@@ -25,14 +26,14 @@ pub fn clamp_scale(value: f64) -> f64 {
     value.clamp(MIN_SCALE, MAX_SCALE)
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct BpmnModel {
     nodes: Vec<BpmnNode>,
     flows: Vec<BpmnFlow>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct BpmnNode {
     id: String,
@@ -44,7 +45,7 @@ struct BpmnNode {
     name: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct BpmnFlow {
     id: String,
@@ -54,7 +55,7 @@ struct BpmnFlow {
     flow_type: BpmnFlowType,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 enum BpmnNodeType {
     StartEvent,
@@ -68,7 +69,7 @@ enum BpmnNodeType {
     OrGateway,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 enum BpmnFlowType {
     #[default]
@@ -413,6 +414,118 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
     Ok(xml)
 }
 
+fn imported_node_type(tag: &str) -> Option<BpmnNodeType> {
+    match tag {
+        "startEvent" => Some(BpmnNodeType::StartEvent),
+        "endEvent" => Some(BpmnNodeType::EndEvent),
+        "intermediateCatchEvent" | "intermediateThrowEvent" => {
+            Some(BpmnNodeType::IntermediateEvent)
+        }
+        "task" => Some(BpmnNodeType::Task),
+        "serviceTask" => Some(BpmnNodeType::ServiceTask),
+        "userTask" => Some(BpmnNodeType::UserTask),
+        "exclusiveGateway" => Some(BpmnNodeType::XorGateway),
+        "parallelGateway" => Some(BpmnNodeType::AndGateway),
+        "inclusiveGateway" => Some(BpmnNodeType::OrGateway),
+        _ => None,
+    }
+}
+
+fn local_xml_name(name: &[u8]) -> Result<&str, JsValue> {
+    let raw = std::str::from_utf8(name)
+        .map_err(|error| JsValue::from_str(&format!("Invalid XML element name: {error}")))?;
+    Ok(raw.rsplit(':').next().unwrap_or(raw))
+}
+
+/// Imports the executable graph from BPMN 2.0 XML. Unsupported BPMN elements
+/// are left untouched in the source file and omitted from the current editor.
+#[wasm_bindgen]
+pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut nodes = Vec::new();
+    let mut flows = Vec::new();
+    let mut buffer = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(element)) | Ok(Event::Empty(element)) => {
+                let element_name = element.name();
+                let tag = local_xml_name(element_name.as_ref())?;
+                let mut id = None;
+                let mut name = None;
+                let mut source_id = None;
+                let mut target_id = None;
+                for attribute in element.attributes().with_checks(false).flatten() {
+                    let key = local_xml_name(attribute.key.as_ref())?;
+                    let value = attribute
+                        .decode_and_unescape_value(reader.decoder())
+                        .map_err(|error| {
+                            JsValue::from_str(&format!("Invalid XML attribute: {error}"))
+                        })?
+                        .into_owned();
+                    match key {
+                        "id" => id = Some(value),
+                        "name" => name = Some(value),
+                        "sourceRef" => source_id = Some(value),
+                        "targetRef" => target_id = Some(value),
+                        _ => {}
+                    }
+                }
+
+                if let Some(node_type) = imported_node_type(tag) {
+                    let id = id.ok_or_else(|| {
+                        JsValue::from_str(&format!("BPMN {tag} is missing required id attribute."))
+                    })?;
+                    nodes.push(BpmnNode {
+                        id,
+                        node_type,
+                        pool_id: None,
+                        name,
+                    });
+                } else if matches!(tag, "sequenceFlow" | "messageFlow") {
+                    let id = id.ok_or_else(|| {
+                        JsValue::from_str(&format!("BPMN {tag} is missing required id attribute."))
+                    })?;
+                    let source_id = source_id.ok_or_else(|| {
+                        JsValue::from_str(&format!("BPMN flow '{id}' is missing sourceRef."))
+                    })?;
+                    let target_id = target_id.ok_or_else(|| {
+                        JsValue::from_str(&format!("BPMN flow '{id}' is missing targetRef."))
+                    })?;
+                    flows.push(BpmnFlow {
+                        id,
+                        source_id,
+                        target_id,
+                        flow_type: if tag == "messageFlow" {
+                            BpmnFlowType::Message
+                        } else {
+                            BpmnFlowType::Sequence
+                        },
+                    });
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(error) => {
+                return Err(JsValue::from_str(&format!(
+                    "Could not parse BPMN XML: {error}"
+                )));
+            }
+            _ => {}
+        }
+        buffer.clear();
+    }
+
+    if nodes.is_empty() {
+        return Err(JsValue::from_str(
+            "No supported BPMN nodes were found in the XML file.",
+        ));
+    }
+
+    serde_json::to_string(&BpmnModel { nodes, flows })
+        .map_err(|error| JsValue::from_str(&format!("Could not serialize imported BPMN: {error}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,5 +631,28 @@ mod tests {
 
         assert!(xml.contains(r#"<bpmn:task id="task" name="Review &amp; approve" />"#));
         assert!(xml.contains(r#"<bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="task" />"#));
+    }
+
+    #[test]
+    fn imports_a_standard_bpmn_process() {
+        let imported = import_bpmn_xml(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+            <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">
+              <bpmn:process id="p">
+                <bpmn:startEvent id="start" name="Start" />
+                <bpmn:task id="task" name="Review" />
+                <bpmn:endEvent id="end" name="End" />
+                <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="task" />
+                <bpmn:sequenceFlow id="f2" sourceRef="task" targetRef="end" />
+              </bpmn:process>
+            </bpmn:definitions>"#,
+        )
+        .expect("standard BPMN should import");
+
+        let model: BpmnModel = serde_json::from_str(&imported).expect("import result is JSON");
+        assert_eq!(model.nodes.len(), 3);
+        assert_eq!(model.flows.len(), 2);
+        assert_eq!(model.nodes[1].node_type, BpmnNodeType::Task);
+        assert_eq!(model.nodes[1].name.as_deref(), Some("Review"));
     }
 }
