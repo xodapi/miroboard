@@ -46,6 +46,14 @@ struct BpmnNode {
     #[serde(default)]
     duration_ms: Option<u64>,
     #[serde(default)]
+    duration_distribution: BpmnDurationDistribution,
+    #[serde(default)]
+    duration_min_ms: Option<u64>,
+    #[serde(default)]
+    duration_mode_ms: Option<u64>,
+    #[serde(default)]
+    duration_max_ms: Option<u64>,
+    #[serde(default)]
     x: Option<f64>,
     #[serde(default)]
     y: Option<f64>,
@@ -83,6 +91,15 @@ enum BpmnNodeType {
     XorGateway,
     AndGateway,
     OrGateway,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+enum BpmnDurationDistribution {
+    #[default]
+    Fixed,
+    Uniform,
+    Triangular,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -164,6 +181,25 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
                 format!("Node '{}' appears more than once.", node.id),
                 Some(&node.id),
             );
+        }
+        if node.duration_distribution != BpmnDurationDistribution::Fixed {
+            let min = node.duration_min_ms;
+            let max = node.duration_max_ms;
+            if min.is_none() || max.is_none() || min > max {
+                result.error(
+                    "duration-range-invalid",
+                    "Duration distributions require minDurationMs and maxDurationMs with min less than or equal to max.",
+                    Some(&node.id),
+                );
+            } else if node.duration_distribution == BpmnDurationDistribution::Triangular
+                && !node.duration_mode_ms.is_some_and(|mode| mode >= min.unwrap() && mode <= max.unwrap())
+            {
+                result.error(
+                    "duration-mode-invalid",
+                    "Triangular duration distributions require modeDurationMs inside the min/max range.",
+                    Some(&node.id),
+                );
+            }
         }
         nodes_by_id.insert(node.id.as_str(), node);
     }
@@ -400,7 +436,7 @@ struct BpmnRunResult {
     estimated_duration_ms: u64,
 }
 
-fn node_duration_ms(node: &BpmnNode) -> u64 {
+fn fixed_duration_ms(node: &BpmnNode) -> u64 {
     node.duration_ms.unwrap_or(match node.node_type {
         BpmnNodeType::Task | BpmnNodeType::ServiceTask | BpmnNodeType::UserTask => 1_000,
         _ => 0,
@@ -412,6 +448,35 @@ fn next_random_unit(state: &mut u64) -> f64 {
         .wrapping_mul(6_364_136_223_846_793_005)
         .wrapping_add(1_442_695_040_888_963_407);
     ((*state >> 11) as f64) / ((1u64 << 53) as f64)
+}
+
+fn sampled_duration_ms(node: &BpmnNode, random_state: &mut Option<u64>) -> u64 {
+    let Some(state) = random_state else {
+        return match node.duration_distribution {
+            BpmnDurationDistribution::Triangular => node.duration_mode_ms.unwrap_or_else(|| fixed_duration_ms(node)),
+            _ => fixed_duration_ms(node),
+        };
+    };
+    let min = node.duration_min_ms.unwrap_or_else(|| fixed_duration_ms(node));
+    let max = node.duration_max_ms.unwrap_or_else(|| fixed_duration_ms(node));
+    match node.duration_distribution {
+        BpmnDurationDistribution::Fixed => fixed_duration_ms(node),
+        BpmnDurationDistribution::Uniform => {
+            min.saturating_add((next_random_unit(state) * (max.saturating_sub(min) as f64 + 1.0)) as u64)
+                .min(max)
+        }
+        BpmnDurationDistribution::Triangular => {
+            let mode = node.duration_mode_ms.unwrap_or(min).clamp(min, max);
+            let sample = next_random_unit(state);
+            let span = max.saturating_sub(min) as f64;
+            let pivot = if max == min { 0.0 } else { (mode.saturating_sub(min) as f64) / span };
+            if sample <= pivot {
+                min.saturating_add((sample * span * mode.saturating_sub(min) as f64).sqrt() as u64)
+            } else {
+                max.saturating_sub((((1.0 - sample) * span * max.saturating_sub(mode) as f64).sqrt()) as u64)
+            }
+        }
+    }
 }
 
 fn select_flow<'a>(
@@ -521,7 +586,7 @@ fn run_bpmn_model(
         let current = nodes_by_id
             .get(current_id)
             .ok_or_else(|| JsValue::from_str("Token reached a missing BPMN node."))?;
-        let completed_at_ms = arrived_at_ms.saturating_add(node_duration_ms(current));
+        let completed_at_ms = arrived_at_ms.saturating_add(sampled_duration_ms(current, random_state));
         if current.node_type == BpmnNodeType::EndEvent {
             completed_tokens += 1;
             estimated_duration_ms = estimated_duration_ms.max(completed_at_ms);
@@ -585,6 +650,7 @@ struct BpmnSimulationResult {
     completed_runs: u32,
     min_duration_ms: u64,
     mean_duration_ms: u64,
+    standard_deviation_ms: u64,
     p50_duration_ms: u64,
     p90_duration_ms: u64,
     p95_duration_ms: u64,
@@ -614,12 +680,19 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     }
     durations.sort_unstable();
     let total_duration: u128 = durations.iter().map(|duration| *duration as u128).sum();
+    let mean_duration_ms = (total_duration / runs as u128) as u64;
+    let variance = durations
+        .iter()
+        .map(|duration| (*duration as f64 - mean_duration_ms as f64).powi(2))
+        .sum::<f64>()
+        / runs as f64;
     let result = BpmnSimulationResult {
         seed,
         runs,
         completed_runs: runs,
         min_duration_ms: durations[0],
-        mean_duration_ms: (total_duration / runs as u128) as u64,
+        mean_duration_ms,
+        standard_deviation_ms: variance.sqrt().round() as u64,
         p50_duration_ms: percentile(&durations, 0.50),
         p90_duration_ms: percentile(&durations, 0.90),
         p95_duration_ms: percentile(&durations, 0.95),
@@ -873,6 +946,10 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         pool_id: None,
                         name,
                         duration_ms: None,
+                        duration_distribution: BpmnDurationDistribution::Fixed,
+                        duration_min_ms: None,
+                        duration_mode_ms: None,
+                        duration_max_ms: None,
                         x: None,
                         y: None,
                         width: None,
@@ -961,6 +1038,10 @@ mod tests {
                     pool_id: Some("pool-a".into()),
                     name: Some("Start".into()),
                     duration_ms: None,
+                    duration_distribution: BpmnDurationDistribution::Fixed,
+                    duration_min_ms: None,
+                    duration_mode_ms: None,
+                    duration_max_ms: None,
                     x: Some(10.0),
                     y: Some(20.0),
                     width: Some(36.0),
@@ -972,6 +1053,10 @@ mod tests {
                     pool_id: Some("pool-a".into()),
                     name: Some("Review & approve".into()),
                     duration_ms: None,
+                    duration_distribution: BpmnDurationDistribution::Fixed,
+                    duration_min_ms: None,
+                    duration_mode_ms: None,
+                    duration_max_ms: None,
                     x: Some(100.0),
                     y: Some(20.0),
                     width: Some(160.0),
@@ -983,6 +1068,10 @@ mod tests {
                     pool_id: Some("pool-a".into()),
                     name: Some("End".into()),
                     duration_ms: None,
+                    duration_distribution: BpmnDurationDistribution::Fixed,
+                    duration_min_ms: None,
+                    duration_mode_ms: None,
+                    duration_max_ms: None,
                     x: Some(300.0),
                     y: Some(20.0),
                     width: Some(36.0),
@@ -1146,6 +1235,25 @@ mod tests {
         assert!(first.contains(r#""runs":100"#));
         assert!(first.contains(r#""minDurationMs":1000"#));
         assert!(first.contains(r#""maxDurationMs":5000"#));
+    }
+
+    #[test]
+    fn validates_duration_distribution_ranges() {
+        let result = validate_bpmn(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"task","type":"task","durationDistribution":"triangular","durationMinMs":3000,"durationModeMs":1000,"durationMaxMs":2000},
+                {"id":"end","type":"endEvent"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"task"},
+                {"id":"f2","sourceId":"task","targetId":"end"}
+              ]
+            }"#,
+        );
+
+        assert!(result.contains("duration-range-invalid"));
     }
 
     #[test]

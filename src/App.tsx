@@ -36,6 +36,7 @@ type BpmnSimulationResult = {
   completedRuns: number
   minDurationMs: number
   meanDurationMs: number
+  standardDeviationMs: number
   p50DurationMs: number
   p90DurationMs: number
   p95DurationMs: number
@@ -60,6 +61,10 @@ interface BoardElement {
   zIndex?: number
   bpmnNodeType?: BpmnNodeType
   bpmnDurationMs?: number
+  bpmnDurationDistribution?: 'fixed' | 'uniform' | 'triangular'
+  bpmnDurationMinMs?: number
+  bpmnDurationModeMs?: number
+  bpmnDurationMaxMs?: number
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
 }
 
@@ -234,6 +239,10 @@ export default function App() {
         poolId: 'default',
         name: element.text,
         durationMs: element.bpmnDurationMs,
+        durationDistribution: element.bpmnDurationDistribution,
+        durationMinMs: element.bpmnDurationMinMs,
+        durationModeMs: element.bpmnDurationModeMs,
+        durationMaxMs: element.bpmnDurationMaxMs,
         x: element.x,
         y: element.y,
         width: element.w,
@@ -1621,7 +1630,7 @@ export default function App() {
 
       {/* ===== STICKY COLORS ===== */}
       {selectedBpmnTask && !contextMenu && (
-        <div className={`absolute left-1/2 -translate-x-1/2 bottom-[154px] z-30 flex items-center gap-2 px-3 py-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
+        <div className={`absolute left-1/2 -translate-x-1/2 bottom-[154px] z-30 flex max-w-[calc(100vw-24px)] flex-wrap items-center justify-center gap-2 px-3 py-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
           <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-duration">Длительность, с</label>
           <input
             id="bpmn-duration"
@@ -1638,6 +1647,35 @@ export default function App() {
             }}
             className={`w-16 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
           />
+          <select
+            value={selectedBpmnTask.bpmnDurationDistribution || 'fixed'}
+            onChange={(event) => updateElement(selectedBpmnTask.id, {
+              bpmnDurationDistribution: event.target.value as 'fixed' | 'uniform' | 'triangular',
+              bpmnDurationMinMs: selectedBpmnTask.bpmnDurationMinMs ?? selectedBpmnTask.bpmnDurationMs ?? 1000,
+              bpmnDurationModeMs: selectedBpmnTask.bpmnDurationModeMs ?? selectedBpmnTask.bpmnDurationMs ?? 1000,
+              bpmnDurationMaxMs: selectedBpmnTask.bpmnDurationMaxMs ?? selectedBpmnTask.bpmnDurationMs ?? 1000,
+            })}
+            className={`rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+          >
+            <option value="fixed">Fixed</option>
+            <option value="uniform">Uniform</option>
+            <option value="triangular">Triangular</option>
+          </select>
+          {(selectedBpmnTask.bpmnDurationDistribution === 'uniform' || selectedBpmnTask.bpmnDurationDistribution === 'triangular') && (
+            <>
+              <label className={`text-[11px] font-semibold ${textSec}`}>Min
+                <input type="number" min="0" value={(selectedBpmnTask.bpmnDurationMinMs ?? 1000) / 1000} onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnDurationMinMs: Math.max(0, Number(event.target.value) * 1000) })} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
+              </label>
+              {selectedBpmnTask.bpmnDurationDistribution === 'triangular' && (
+                <label className={`text-[11px] font-semibold ${textSec}`}>Mode
+                  <input type="number" min="0" value={(selectedBpmnTask.bpmnDurationModeMs ?? 1000) / 1000} onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnDurationModeMs: Math.max(0, Number(event.target.value) * 1000) })} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
+                </label>
+              )}
+              <label className={`text-[11px] font-semibold ${textSec}`}>Max
+                <input type="number" min="0" value={(selectedBpmnTask.bpmnDurationMaxMs ?? 1000) / 1000} onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnDurationMaxMs: Math.max(0, Number(event.target.value) * 1000) })} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
+              </label>
+            </>
+          )}
         </div>
       )}
       {selectedBpmnFlow && !contextMenu && (
@@ -1723,6 +1761,7 @@ export default function App() {
                 {([
                   ['Min', bpmnSimulationResult.minDurationMs],
                   ['Mean', bpmnSimulationResult.meanDurationMs],
+                  ['σ', bpmnSimulationResult.standardDeviationMs],
                   ['P50', bpmnSimulationResult.p50DurationMs],
                   ['P90', bpmnSimulationResult.p90DurationMs],
                   ['P95', bpmnSimulationResult.p95DurationMs],
