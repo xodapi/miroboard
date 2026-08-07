@@ -338,9 +338,9 @@ struct BpmnRunResult {
     token_path: Vec<String>,
 }
 
-/// Executes the deterministic path through a validated BPMN process. XOR/OR
-/// choices currently select the first declared sequence flow; parallel gateway
-/// token splitting is intentionally deferred to the simulation milestone.
+/// Executes a deterministic BPMN process. XOR/OR choices select the first
+/// declared sequence flow. AND gateways split into all outgoing sequence flows
+/// and synchronize all incoming paths before continuing.
 #[wasm_bindgen]
 pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
     let model: BpmnModel = serde_json::from_str(model_json)
@@ -363,10 +363,15 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
         .map(|node| (node.id.as_str(), node))
         .collect();
     let mut outgoing: HashMap<&str, Vec<&BpmnFlow>> = HashMap::new();
+    let mut incoming: HashMap<&str, Vec<&BpmnFlow>> = HashMap::new();
     for flow in &model.flows {
         if flow.flow_type == BpmnFlowType::Sequence {
             outgoing
                 .entry(flow.source_id.as_str())
+                .or_default()
+                .push(flow);
+            incoming
+                .entry(flow.target_id.as_str())
                 .or_default()
                 .push(flow);
         }
@@ -377,37 +382,62 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
         .find(|node| node.node_type == BpmnNodeType::StartEvent)
         .ok_or_else(|| JsValue::from_str("Cannot run BPMN model without a start event."))?;
 
-    let mut current_id = start.id.as_str();
+    let mut active_tokens = VecDeque::from([start.id.as_str()]);
+    let mut waiting_at_parallel_join: HashMap<&str, usize> = HashMap::new();
     let mut token_path = Vec::new();
-    let mut visited = HashSet::new();
-    for _ in 0..=model.nodes.len() * 2 {
-        if !visited.insert(current_id) {
+    let mut completed_tokens = 0usize;
+    let step_limit = model.nodes.len().saturating_mul(model.flows.len().max(1)).saturating_mul(4);
+
+    for _ in 0..=step_limit {
+        let Some(current_id) = active_tokens.pop_front() else {
+            if waiting_at_parallel_join.is_empty() && completed_tokens > 0 {
+                return serde_json::to_string(&BpmnRunResult {
+                    completed: true,
+                    token_path,
+                })
+                .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN run: {error}")));
+            }
             return Err(JsValue::from_str(
-                "The deterministic token path entered a loop. Add a terminating branch or use simulation controls.",
+                "A parallel gateway is waiting for tokens from unfinished branches.",
             ));
-        }
+        };
         token_path.push(current_id.to_owned());
         let current = nodes_by_id
             .get(current_id)
             .ok_or_else(|| JsValue::from_str("Token reached a missing BPMN node."))?;
         if current.node_type == BpmnNodeType::EndEvent {
-            return serde_json::to_string(&BpmnRunResult {
-                completed: true,
-                token_path,
-            })
-            .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN run: {error}")));
+            completed_tokens += 1;
+            continue;
         }
-        let flow = outgoing
+        let flows = outgoing
             .get(current_id)
-            .and_then(|flows| flows.first())
             .ok_or_else(|| {
                 JsValue::from_str("The token reached a node without an outgoing sequence flow.")
             })?;
-        current_id = flow.target_id.as_str();
+
+        if current.node_type == BpmnNodeType::AndGateway
+            && incoming.get(current_id).map_or(0, Vec::len) > 1
+        {
+            let required = incoming.get(current_id).map_or(0, Vec::len);
+            let arrived = waiting_at_parallel_join.entry(current_id).or_default();
+            *arrived += 1;
+            if *arrived < required {
+                continue;
+            }
+            waiting_at_parallel_join.remove(current_id);
+        }
+
+        if current.node_type == BpmnNodeType::AndGateway && flows.len() > 1 {
+            for flow in flows {
+                active_tokens.push_back(flow.target_id.as_str());
+            }
+        } else {
+            active_tokens.push_back(flows[0].target_id.as_str());
+        }
     }
 
     Err(JsValue::from_str(
-        "The BPMN runner exceeded its deterministic step limit.",
+        "The BPMN runner exceeded its deterministic step limit. Add a terminating branch or use simulation controls.",
     ))
 }
 
@@ -809,6 +839,35 @@ mod tests {
 
         assert!(run.contains(r#""completed":true"#));
         assert!(run.contains(r#""tokenPath":["start","task","end"]"#));
+    }
+
+    #[test]
+    fn runs_parallel_branches_and_synchronizes_at_join() {
+        let run = run_bpmn(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"split","type":"andGateway"},
+                {"id":"left","type":"task"},
+                {"id":"right","type":"task"},
+                {"id":"join","type":"andGateway"},
+                {"id":"end","type":"endEvent"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"split"},
+                {"id":"f2","sourceId":"split","targetId":"left"},
+                {"id":"f3","sourceId":"split","targetId":"right"},
+                {"id":"f4","sourceId":"left","targetId":"join"},
+                {"id":"f5","sourceId":"right","targetId":"join"},
+                {"id":"f6","sourceId":"join","targetId":"end"}
+              ]
+            }"#,
+        )
+        .expect("parallel process should run");
+
+        assert!(run.contains(r#""completed":true"#));
+        assert_eq!(run.matches(r#""join""#).count(), 2);
+        assert_eq!(run.matches(r#""end""#).count(), 1);
     }
 
     #[test]

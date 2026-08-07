@@ -6,7 +6,7 @@ import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, snap_to_grid, 
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
-type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnSequence'
+type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 const DISPLAY_VERSION = 'df774ad'
 type ImportedBpmnModel = {
@@ -718,6 +718,7 @@ export default function App() {
       bpmnTask: { type: 'task', text: 'Задача', w: 176, h: 76, color: '#4D96FF' },
       bpmnEnd: { type: 'endEvent', text: 'Конец', w: 72, h: 72, color: '#FF5D5D' },
       bpmnGateway: { type: 'xorGateway', text: 'X', w: 78, h: 78, color: '#FFB020' },
+      bpmnParallel: { type: 'andGateway', text: '+', w: 78, h: 78, color: '#FFB020' },
     }
     const bpmnNode = bpmnNodeByTool[tool]
     if (bpmnNode) {
@@ -1363,6 +1364,7 @@ export default function App() {
                   { id: 'bpmnStart', label: 'Старт', icon: '○' },
                   { id: 'bpmnTask', label: 'Задача', icon: '▭' },
                   { id: 'bpmnGateway', label: 'Шлюз XOR', icon: '◇' },
+                  { id: 'bpmnParallel', label: 'Шлюз AND', icon: '+' },
                   { id: 'bpmnEnd', label: 'Конец', icon: '◉' },
                   { id: 'bpmnSequence', label: 'Поток', icon: '→' },
                 ] as { id: Tool; label: string; icon: string }[]).map(item => (

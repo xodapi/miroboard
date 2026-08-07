@@ -65,9 +65,9 @@ export function import_bpmn_xml(xml) {
 }
 
 /**
- * Executes the deterministic path through a validated BPMN process. XOR/OR
- * choices currently select the first declared sequence flow; parallel gateway
- * token splitting is intentionally deferred to the simulation milestone.
+ * Executes a deterministic BPMN process. XOR/OR choices select the first
+ * declared sequence flow. AND gateways split into all outgoing sequence flows
+ * and synchronize all incoming paths before continuing.
  * @param {string} model_json
  * @returns {string}
  */
