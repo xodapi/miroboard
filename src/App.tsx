@@ -229,6 +229,11 @@ export default function App() {
     }
   }, [createBpmnModel])
 
+  const selectedBpmnTask = useMemo(
+    () => elements.find((element) => element.id === selectedId && element.bpmnNodeType === 'task') ?? null,
+    [elements, selectedId],
+  )
+
   const user = useMemo(() => {
     const saved = localStorage.getItem('miro-user')
     if (saved) return JSON.parse(saved)
@@ -1535,6 +1540,26 @@ export default function App() {
       )}
 
       {/* ===== STICKY COLORS ===== */}
+      {selectedBpmnTask && !contextMenu && (
+        <div className={`absolute left-1/2 -translate-x-1/2 bottom-[154px] z-30 flex items-center gap-2 px-3 py-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
+          <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-duration">Длительность, с</label>
+          <input
+            id="bpmn-duration"
+            type="number"
+            min="0"
+            max="3600"
+            step="0.1"
+            value={(selectedBpmnTask.bpmnDurationMs ?? 1000) / 1000}
+            onChange={(event) => {
+              const seconds = Number(event.target.value)
+              if (Number.isFinite(seconds) && seconds >= 0) {
+                updateElement(selectedBpmnTask.id, { bpmnDurationMs: Math.round(Math.min(seconds, 3600) * 1000) })
+              }
+            }}
+            className={`w-16 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+          />
+        </div>
+      )}
       {selectedId && elements.find(e => e.id === selectedId && (e.type === 'sticky' || e.type === 'rect' || e.type === 'circle')) && !contextMenu && (
         <div className={`absolute left-1/2 -translate-x-1/2 bottom-[104px] z-30 flex items-center gap-1 p-1.5 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
           {STICKY_COLORS.map(c => (
