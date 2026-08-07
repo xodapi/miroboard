@@ -8,6 +8,7 @@ import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, snap_to_grid, 
 type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
+const DISPLAY_VERSION = 'df774ad'
 type ImportedBpmnModel = {
   nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number }[]
   flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message' }[]
@@ -1169,6 +1170,9 @@ export default function App() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
             </div>
             <span className={`text-[15px] font-bold tracking-tight ${textC}`}>MiroBoard</span>
+            <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-mono font-semibold ${dk ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+              {DISPLAY_VERSION}
+            </span>
           </div>
           <div className={`h-4 w-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
           {/* Undo/Redo */}
