@@ -6,7 +6,7 @@ import { clamp_scale, snap_to_grid, validate_bpmn } from './wasm/board-core/boar
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
-type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway'
+type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 
 interface BoardElement {
@@ -129,6 +129,7 @@ export default function App() {
   const [showTemplates, setShowTemplates] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
+  const [bpmnFlowSourceId, setBpmnFlowSourceId] = useState<string | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
   const [snapGrid, setSnapGrid] = useState(false)
@@ -546,6 +547,47 @@ export default function App() {
       return
     }
 
+    if (tool === 'bpmnSequence') {
+      const elementTarget = target.closest('[data-id]') as HTMLElement
+      const targetId = elementTarget?.dataset.id
+      const targetNode = targetId ? elements.find(element => element.id === targetId && element.bpmnNodeType) : undefined
+      if (!targetNode) return
+
+      if (!bpmnFlowSourceId) {
+        setBpmnFlowSourceId(targetNode.id)
+        setSelectedId(targetNode.id)
+        return
+      }
+
+      const sourceNode = elements.find(element => element.id === bpmnFlowSourceId && element.bpmnNodeType)
+      if (!sourceNode || sourceNode.id === targetNode.id) {
+        setBpmnFlowSourceId(null)
+        return
+      }
+
+      const sourceX = sourceNode.x + (sourceNode.w || 0) / 2
+      const sourceY = sourceNode.y + (sourceNode.h || 0) / 2
+      const targetX = targetNode.x + (targetNode.w || 0) / 2
+      const targetY = targetNode.y + (targetNode.h || 0) / 2
+      const flowId = genId()
+      addElement({
+        id: flowId,
+        type: 'arrow',
+        x: sourceX,
+        y: sourceY,
+        w: targetX - sourceX,
+        h: targetY - sourceY,
+        color: '#334155',
+        stroke: 2,
+        fill: 'transparent',
+        createdBy: user.id,
+        bpmnFlow: { sourceId: sourceNode.id, targetId: targetNode.id, flowType: 'sequence' },
+      })
+      setBpmnFlowSourceId(null)
+      setSelectedId(flowId)
+      return
+    }
+
     const bpmnNodeByTool: Partial<Record<Tool, { type: BpmnNodeType; text: string; w: number; h: number; color: string }>> = {
       bpmnStart: { type: 'startEvent', text: 'Старт', w: 72, h: 72, color: '#6BCB77' },
       bpmnTask: { type: 'task', text: 'Задача', w: 176, h: 76, color: '#4D96FF' },
@@ -606,7 +648,7 @@ export default function App() {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, updateCursor, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji])
+  }, [tool, screenToWorld, updateCursor, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
@@ -730,6 +772,10 @@ export default function App() {
       return { scale: ns, x: e.clientX - point.x * ns, y: e.clientY - point.y * ns }
     })
   }, [screenToWorld])
+
+  useEffect(() => {
+    if (tool !== 'bpmnSequence') setBpmnFlowSourceId(null)
+  }, [tool])
 
   // Keyboard
   useEffect(() => {
@@ -875,11 +921,16 @@ export default function App() {
         )
 
       case 'arrow': {
-        const x2 = el.w || 0, y2 = el.h || 0
+        const source = el.bpmnFlow ? elements.find(node => node.id === el.bpmnFlow?.sourceId) : undefined
+        const target = el.bpmnFlow ? elements.find(node => node.id === el.bpmnFlow?.targetId) : undefined
+        const startX = source ? source.x + (source.w || 0) / 2 : el.x
+        const startY = source ? source.y + (source.h || 0) / 2 : el.y
+        const x2 = target ? target.x + (target.w || 0) / 2 - startX : el.w || 0
+        const y2 = target ? target.y + (target.h || 0) / 2 - startY : el.h || 0
         const angle = Math.atan2(y2, x2)
         const hs = 12
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
+          <g key={el.id} data-id={el.id} transform={`translate(${startX},${startY})`} className="touch-none cursor-move">
             <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} />
             <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
               fill={el.color} />
@@ -994,6 +1045,11 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
+          {tool === 'bpmnSequence' && (
+            <div className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-violet-900 text-violet-100' : 'bg-violet-100 text-violet-700'}`}>
+              {bpmnFlowSourceId ? 'Поток: выберите цель' : 'Поток: выберите источник'}
+            </div>
+          )}
           {elements.some(element => element.bpmnNodeType) && (
             <div
               className={`h-7 px-2 rounded-lg text-[11px] font-semibold flex items-center gap-1 ${bpmnIssues.some(issue => issue.severity === 'error') ? 'bg-red-100 text-red-700' : bpmnIssues.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}
@@ -1166,6 +1222,7 @@ export default function App() {
                   { id: 'bpmnTask', label: 'Задача', icon: '▭' },
                   { id: 'bpmnGateway', label: 'Шлюз XOR', icon: '◇' },
                   { id: 'bpmnEnd', label: 'Конец', icon: '◉' },
+                  { id: 'bpmnSequence', label: 'Поток', icon: '→' },
                 ] as { id: Tool; label: string; icon: string }[]).map(item => (
                   <button key={item.id} onClick={() => { setTool(item.id); setShowBpmnPalette(false); setShowMore(false) }}
                     className={`min-w-14 h-12 px-2 rounded-xl grid place-items-center text-center transition active:scale-90 ${tool === item.id ? 'bg-violet-600 text-white' : hoverBg}`}
