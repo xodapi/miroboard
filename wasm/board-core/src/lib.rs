@@ -54,6 +54,10 @@ struct BpmnNode {
     #[serde(default)]
     duration_max_ms: Option<u64>,
     #[serde(default)]
+    resource_role: Option<String>,
+    #[serde(default)]
+    cost_per_hour: Option<f64>,
+    #[serde(default)]
     x: Option<f64>,
     #[serde(default)]
     y: Option<f64>,
@@ -200,6 +204,13 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
                     Some(&node.id),
                 );
             }
+        }
+        if node.cost_per_hour.is_some_and(|cost| !cost.is_finite() || cost < 0.0) {
+            result.error(
+                "cost-per-hour-invalid",
+                "Cost per hour must be a finite non-negative value.",
+                Some(&node.id),
+            );
         }
         nodes_by_id.insert(node.id.as_str(), node);
     }
@@ -434,6 +445,7 @@ struct BpmnRunResult {
     completed: bool,
     token_path: Vec<String>,
     estimated_duration_ms: u64,
+    estimated_cost: f64,
 }
 
 fn fixed_duration_ms(node: &BpmnNode) -> u64 {
@@ -567,6 +579,7 @@ fn run_bpmn_model(
     let mut token_path = Vec::new();
     let mut completed_tokens = 0usize;
     let mut estimated_duration_ms = 0u64;
+    let mut estimated_cost = 0.0;
     let step_limit = model.nodes.len().saturating_mul(model.flows.len().max(1)).saturating_mul(4);
 
     for _ in 0..=step_limit {
@@ -576,6 +589,7 @@ fn run_bpmn_model(
                     completed: true,
                     token_path,
                     estimated_duration_ms,
+                    estimated_cost,
                 });
             }
             return Err(JsValue::from_str(
@@ -586,7 +600,9 @@ fn run_bpmn_model(
         let current = nodes_by_id
             .get(current_id)
             .ok_or_else(|| JsValue::from_str("Token reached a missing BPMN node."))?;
-        let completed_at_ms = arrived_at_ms.saturating_add(sampled_duration_ms(current, random_state));
+        let sampled_duration_ms = sampled_duration_ms(current, random_state);
+        let completed_at_ms = arrived_at_ms.saturating_add(sampled_duration_ms);
+        estimated_cost += sampled_duration_ms as f64 / 3_600_000.0 * current.cost_per_hour.unwrap_or(0.0);
         if current.node_type == BpmnNodeType::EndEvent {
             completed_tokens += 1;
             estimated_duration_ms = estimated_duration_ms.max(completed_at_ms);
@@ -655,6 +671,7 @@ struct BpmnSimulationResult {
     p90_duration_ms: u64,
     p95_duration_ms: u64,
     max_duration_ms: u64,
+    mean_cost: f64,
 }
 
 fn percentile(values: &[u64], percentile: f64) -> u64 {
@@ -675,8 +692,11 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     let model = parse_and_validate_bpmn(model_json)?;
     let mut random_state = Some(seed);
     let mut durations = Vec::with_capacity(runs as usize);
+    let mut costs = Vec::with_capacity(runs as usize);
     for _ in 0..runs {
-        durations.push(run_bpmn_model(&model, &mut random_state)?.estimated_duration_ms);
+        let run = run_bpmn_model(&model, &mut random_state)?;
+        durations.push(run.estimated_duration_ms);
+        costs.push(run.estimated_cost);
     }
     durations.sort_unstable();
     let total_duration: u128 = durations.iter().map(|duration| *duration as u128).sum();
@@ -697,6 +717,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         p90_duration_ms: percentile(&durations, 0.90),
         p95_duration_ms: percentile(&durations, 0.95),
         max_duration_ms: *durations.last().expect("simulation has at least one run"),
+        mean_cost: costs.iter().sum::<f64>() / runs as f64,
     };
     serde_json::to_string(&result)
         .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN simulation: {error}")))
@@ -950,6 +971,8 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         duration_min_ms: None,
                         duration_mode_ms: None,
                         duration_max_ms: None,
+                        resource_role: None,
+                        cost_per_hour: None,
                         x: None,
                         y: None,
                         width: None,
@@ -1042,6 +1065,8 @@ mod tests {
                     duration_min_ms: None,
                     duration_mode_ms: None,
                     duration_max_ms: None,
+                    resource_role: None,
+                    cost_per_hour: None,
                     x: Some(10.0),
                     y: Some(20.0),
                     width: Some(36.0),
@@ -1057,6 +1082,8 @@ mod tests {
                     duration_min_ms: None,
                     duration_mode_ms: None,
                     duration_max_ms: None,
+                    resource_role: None,
+                    cost_per_hour: None,
                     x: Some(100.0),
                     y: Some(20.0),
                     width: Some(160.0),
@@ -1072,6 +1099,8 @@ mod tests {
                     duration_min_ms: None,
                     duration_mode_ms: None,
                     duration_max_ms: None,
+                    resource_role: None,
+                    cost_per_hour: None,
                     x: Some(300.0),
                     y: Some(20.0),
                     width: Some(36.0),

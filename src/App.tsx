@@ -41,6 +41,7 @@ type BpmnSimulationResult = {
   p90DurationMs: number
   p95DurationMs: number
   maxDurationMs: number
+  meanCost: number
 }
 
 interface BoardElement {
@@ -65,6 +66,8 @@ interface BoardElement {
   bpmnDurationMinMs?: number
   bpmnDurationModeMs?: number
   bpmnDurationMaxMs?: number
+  bpmnResourceRole?: string
+  bpmnCostPerHour?: number
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
 }
 
@@ -243,6 +246,8 @@ export default function App() {
         durationMinMs: element.bpmnDurationMinMs,
         durationModeMs: element.bpmnDurationModeMs,
         durationMaxMs: element.bpmnDurationMaxMs,
+        resourceRole: element.bpmnResourceRole,
+        costPerHour: element.bpmnCostPerHour,
         x: element.x,
         y: element.y,
         width: element.w,
@@ -1676,6 +1681,12 @@ export default function App() {
               </label>
             </>
           )}
+          <label className={`text-[11px] font-semibold ${textSec}`}>Роль
+            <input value={selectedBpmnTask.bpmnResourceRole || ''} placeholder="Аналитик" onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnResourceRole: event.target.value || undefined })} className={`ml-1 w-20 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
+          </label>
+          <label className={`text-[11px] font-semibold ${textSec}`}>€/ч
+            <input type="number" min="0" step="0.01" value={selectedBpmnTask.bpmnCostPerHour ?? ''} onChange={(event) => { const value = event.target.value; const cost = value === '' ? undefined : Number(value); if (cost === undefined || (Number.isFinite(cost) && cost >= 0)) updateElement(selectedBpmnTask.id, { bpmnCostPerHour: cost }) }} className={`ml-1 w-16 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
+          </label>
         </div>
       )}
       {selectedBpmnFlow && !contextMenu && (
@@ -1772,6 +1783,10 @@ export default function App() {
                     <div className="text-sm font-bold">{(milliseconds / 1000).toFixed(1)}с</div>
                   </div>
                 ))}
+                <div className="col-span-3 mt-1 border-t border-black/10 pt-2 text-center">
+                  <span className={`text-[10px] font-semibold ${textSec}`}>Средняя стоимость: </span>
+                  <span className="text-sm font-bold">€{bpmnSimulationResult.meanCost.toFixed(2)}</span>
+                </div>
               </div>
             )}
           </section>
