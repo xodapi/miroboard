@@ -31,6 +31,7 @@ interface BoardElement {
   emoji?: string
   zIndex?: number
   bpmnNodeType?: BpmnNodeType
+  bpmnDurationMs?: number
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message' }
 }
 
@@ -158,6 +159,7 @@ export default function App() {
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [bpmnFlowSourceId, setBpmnFlowSourceId] = useState<string | null>(null)
   const [activeBpmnTokenId, setActiveBpmnTokenId] = useState<string | null>(null)
+  const [bpmnRunSummary, setBpmnRunSummary] = useState<string | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
   const [snapGrid, setSnapGrid] = useState(false)
@@ -197,6 +199,7 @@ export default function App() {
         type: element.bpmnNodeType,
         poolId: 'default',
         name: element.text,
+        durationMs: element.bpmnDurationMs,
         x: element.x,
         y: element.y,
         width: element.w,
@@ -520,7 +523,9 @@ export default function App() {
       const result = JSON.parse(run_bpmn(JSON.stringify(createBpmnModel()))) as {
         completed: boolean
         tokenPath: string[]
+        estimatedDurationMs: number
       }
+      setBpmnRunSummary(`Оценка: ${(result.estimatedDurationMs / 1000).toFixed(1)} с`)
       result.tokenPath.forEach((nodeId, index) => {
         bpmnRunTimersRef.current.push(window.setTimeout(() => {
           setActiveBpmnTokenId(nodeId)
@@ -532,6 +537,7 @@ export default function App() {
       }, result.tokenPath.length * 650 + 350))
     } catch (error) {
       setActiveBpmnTokenId(null)
+      setBpmnRunSummary(null)
       window.alert(error instanceof Error ? error.message : 'Не удалось запустить BPMN-модель.')
     }
   }, [createBpmnModel])
@@ -560,6 +566,7 @@ export default function App() {
           id: node.id, type: 'sticky' as const, x: node.x ?? 100 + column * 260, y: node.y ?? 130 + row * 180,
           w: node.width ?? width, h: node.height ?? height, text: node.name || (type === 'task' ? 'Задача' : ''),
           color: colorForType(type), fill: colorForType(type), createdBy: user.id, bpmnNodeType: type,
+          bpmnDurationMs: type === 'task' ? 1000 : undefined,
         }]
       }))
 
@@ -713,9 +720,9 @@ export default function App() {
       return
     }
 
-    const bpmnNodeByTool: Partial<Record<Tool, { type: BpmnNodeType; text: string; w: number; h: number; color: string }>> = {
+    const bpmnNodeByTool: Partial<Record<Tool, { type: BpmnNodeType; text: string; w: number; h: number; color: string; durationMs?: number }>> = {
       bpmnStart: { type: 'startEvent', text: 'Старт', w: 72, h: 72, color: '#6BCB77' },
-      bpmnTask: { type: 'task', text: 'Задача', w: 176, h: 76, color: '#4D96FF' },
+      bpmnTask: { type: 'task', text: 'Задача', w: 176, h: 76, color: '#4D96FF', durationMs: 1000 },
       bpmnEnd: { type: 'endEvent', text: 'Конец', w: 72, h: 72, color: '#FF5D5D' },
       bpmnGateway: { type: 'xorGateway', text: 'X', w: 78, h: 78, color: '#FFB020' },
       bpmnParallel: { type: 'andGateway', text: '+', w: 78, h: 78, color: '#FFB020' },
@@ -735,6 +742,7 @@ export default function App() {
         fill: bpmnNode.color,
         createdBy: user.id,
         bpmnNodeType: bpmnNode.type,
+        bpmnDurationMs: bpmnNode.durationMs,
       }
       addElement(newEl)
       setSelectedId(id)
@@ -1194,13 +1202,20 @@ export default function App() {
             </div>
           )}
           {elements.some(element => element.bpmnNodeType) && (
-            <div
-              className={`h-7 px-2 rounded-lg text-[11px] font-semibold flex items-center gap-1 ${bpmnIssues.some(issue => issue.severity === 'error') ? 'bg-red-100 text-red-700' : bpmnIssues.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}
-              title={bpmnIssues.map(issue => issue.message).join('\n') || 'BPMN-модель корректна'}
-            >
-              <span>{bpmnIssues.some(issue => issue.severity === 'error') ? '!' : '✓'}</span>
-              BPMN {bpmnIssues.length || 'OK'}
-            </div>
+            <>
+              <div
+                className={`h-7 px-2 rounded-lg text-[11px] font-semibold flex items-center gap-1 ${bpmnIssues.some(issue => issue.severity === 'error') ? 'bg-red-100 text-red-700' : bpmnIssues.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}
+                title={bpmnIssues.map(issue => issue.message).join('\n') || 'BPMN-модель корректна'}
+              >
+                <span>{bpmnIssues.some(issue => issue.severity === 'error') ? '!' : '✓'}</span>
+                BPMN {bpmnIssues.length || 'OK'}
+              </div>
+              {bpmnRunSummary && (
+                <div className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-indigo-950 text-indigo-200' : 'bg-indigo-50 text-indigo-700'}`}>
+                  {bpmnRunSummary}
+                </div>
+              )}
+            </>
           )}
           {/* Snap */}
           <button onClick={() => setSnapGrid(!snapGrid)}

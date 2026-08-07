@@ -44,6 +44,8 @@ struct BpmnNode {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
+    duration_ms: Option<u64>,
+    #[serde(default)]
     x: Option<f64>,
     #[serde(default)]
     y: Option<f64>,
@@ -336,6 +338,14 @@ pub fn validate_bpmn(model_json: &str) -> String {
 struct BpmnRunResult {
     completed: bool,
     token_path: Vec<String>,
+    estimated_duration_ms: u64,
+}
+
+fn node_duration_ms(node: &BpmnNode) -> u64 {
+    node.duration_ms.unwrap_or(match node.node_type {
+        BpmnNodeType::Task | BpmnNodeType::ServiceTask | BpmnNodeType::UserTask => 1_000,
+        _ => 0,
+    })
 }
 
 /// Executes a deterministic BPMN process. XOR/OR choices select the first
@@ -382,18 +392,20 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
         .find(|node| node.node_type == BpmnNodeType::StartEvent)
         .ok_or_else(|| JsValue::from_str("Cannot run BPMN model without a start event."))?;
 
-    let mut active_tokens = VecDeque::from([start.id.as_str()]);
-    let mut waiting_at_parallel_join: HashMap<&str, usize> = HashMap::new();
+    let mut active_tokens = VecDeque::from([(start.id.as_str(), 0u64)]);
+    let mut waiting_at_parallel_join: HashMap<&str, (usize, u64)> = HashMap::new();
     let mut token_path = Vec::new();
     let mut completed_tokens = 0usize;
+    let mut estimated_duration_ms = 0u64;
     let step_limit = model.nodes.len().saturating_mul(model.flows.len().max(1)).saturating_mul(4);
 
     for _ in 0..=step_limit {
-        let Some(current_id) = active_tokens.pop_front() else {
+        let Some((current_id, arrived_at_ms)) = active_tokens.pop_front() else {
             if waiting_at_parallel_join.is_empty() && completed_tokens > 0 {
                 return serde_json::to_string(&BpmnRunResult {
                     completed: true,
                     token_path,
+                    estimated_duration_ms,
                 })
                 .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN run: {error}")));
             }
@@ -405,8 +417,10 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
         let current = nodes_by_id
             .get(current_id)
             .ok_or_else(|| JsValue::from_str("Token reached a missing BPMN node."))?;
+        let completed_at_ms = arrived_at_ms.saturating_add(node_duration_ms(current));
         if current.node_type == BpmnNodeType::EndEvent {
             completed_tokens += 1;
+            estimated_duration_ms = estimated_duration_ms.max(completed_at_ms);
             continue;
         }
         let flows = outgoing
@@ -419,20 +433,30 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
             && incoming.get(current_id).map_or(0, Vec::len) > 1
         {
             let required = incoming.get(current_id).map_or(0, Vec::len);
-            let arrived = waiting_at_parallel_join.entry(current_id).or_default();
-            *arrived += 1;
-            if *arrived < required {
+            let waiting = waiting_at_parallel_join.entry(current_id).or_default();
+            waiting.0 += 1;
+            waiting.1 = waiting.1.max(completed_at_ms);
+            if waiting.0 < required {
                 continue;
             }
+            let synchronized_at_ms = waiting.1;
             waiting_at_parallel_join.remove(current_id);
+            if current.node_type == BpmnNodeType::AndGateway && flows.len() > 1 {
+                for flow in flows {
+                    active_tokens.push_back((flow.target_id.as_str(), synchronized_at_ms));
+                }
+            } else {
+                active_tokens.push_back((flows[0].target_id.as_str(), synchronized_at_ms));
+            }
+            continue;
         }
 
         if current.node_type == BpmnNodeType::AndGateway && flows.len() > 1 {
             for flow in flows {
-                active_tokens.push_back(flow.target_id.as_str());
+                active_tokens.push_back((flow.target_id.as_str(), completed_at_ms));
             }
         } else {
-            active_tokens.push_back(flows[0].target_id.as_str());
+            active_tokens.push_back((flows[0].target_id.as_str(), completed_at_ms));
         }
     }
 
@@ -684,6 +708,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         node_type,
                         pool_id: None,
                         name,
+                        duration_ms: None,
                         x: None,
                         y: None,
                         width: None,
@@ -768,6 +793,7 @@ mod tests {
                     node_type: BpmnNodeType::StartEvent,
                     pool_id: Some("pool-a".into()),
                     name: Some("Start".into()),
+                    duration_ms: None,
                     x: Some(10.0),
                     y: Some(20.0),
                     width: Some(36.0),
@@ -778,6 +804,7 @@ mod tests {
                     node_type: BpmnNodeType::Task,
                     pool_id: Some("pool-a".into()),
                     name: Some("Review & approve".into()),
+                    duration_ms: None,
                     x: Some(100.0),
                     y: Some(20.0),
                     width: Some(160.0),
@@ -788,6 +815,7 @@ mod tests {
                     node_type: BpmnNodeType::EndEvent,
                     pool_id: Some("pool-a".into()),
                     name: Some("End".into()),
+                    duration_ms: None,
                     x: Some(300.0),
                     y: Some(20.0),
                     width: Some(36.0),
@@ -848,8 +876,8 @@ mod tests {
               "nodes":[
                 {"id":"start","type":"startEvent"},
                 {"id":"split","type":"andGateway"},
-                {"id":"left","type":"task"},
-                {"id":"right","type":"task"},
+                {"id":"left","type":"task","durationMs":500},
+                {"id":"right","type":"task","durationMs":2000},
                 {"id":"join","type":"andGateway"},
                 {"id":"end","type":"endEvent"}
               ],
@@ -868,6 +896,7 @@ mod tests {
         assert!(run.contains(r#""completed":true"#));
         assert_eq!(run.matches(r#""join""#).count(), 2);
         assert_eq!(run.matches(r#""end""#).count(), 1);
+        assert!(run.contains(r#""estimatedDurationMs":2000"#));
     }
 
     #[test]
