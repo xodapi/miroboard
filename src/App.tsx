@@ -13,8 +13,8 @@ type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' |
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.8.0'
-const RELEASE_COMMIT = 'e074c0a'
+const RELEASE_VERSION = 'v0.8.1'
+const RELEASE_COMMIT = 'ac1cb6e'
 const PROJECT_HISTORY = [
   ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
   ['2026-08-07 15:30 UTC+07', '3771d26', 'Rust/WASM core для геометрии доски'],
@@ -1080,10 +1080,36 @@ export default function App() {
     })
   }, [screenToWorld])
 
+  const fitToContent = useCallback(() => {
+    const scoped = workspaceMode === 'board'
+      ? elements.filter(element => !element.bpmnNodeType && !element.bpmnFlow)
+      : elements.filter(element => element.bpmnNodeType || element.bpmnFlow)
+    const visible = scoped.length ? scoped : elements
+    if (!visible.length) {
+      setTransform({ x: 0, y: 0, scale: 1 })
+      return
+    }
+    const minX = Math.min(...visible.map(element => element.x))
+    const minY = Math.min(...visible.map(element => element.y))
+    const maxX = Math.max(...visible.map(element => element.x + (element.w || 48)))
+    const maxY = Math.max(...visible.map(element => element.y + (element.h || 48)))
+    const padding = 64
+    const scale = clamp_scale(Math.min(
+      (window.innerWidth - padding * 2) / Math.max(maxX - minX, 1),
+      (window.innerHeight - 170) / Math.max(maxY - minY, 1),
+    ))
+    setTransform({
+      scale,
+      x: (window.innerWidth - (maxX - minX) * scale) / 2 - minX * scale,
+      y: (window.innerHeight - (maxY - minY) * scale) / 2 - minY * scale,
+    })
+  }, [elements, workspaceMode])
+
   useEffect(() => {
     if (tool !== 'bpmnSequence') setBpmnFlowSourceId(null)
   }, [tool])
-
+      const target = document.activeElement
+      if (editingText || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return
   useEffect(() => () => {
     bpmnRunTimersRef.current.forEach(window.clearTimeout)
   }, [])
@@ -1100,12 +1126,20 @@ export default function App() {
         v: 'select', h: 'pan', p: 'pen', m: 'marker', e: 'eraser',
         s: 'sticky', t: 'text', r: 'rect', o: 'circle', a: 'arrow', l: 'line'
       }
+      const bpmnMap: Record<string, Tool> = {
+        s: 'bpmnStart', e: 'bpmnEnd', x: 'bpmnGateway', f: 'bpmnSequence',
+      }
+      if (!e.metaKey && !e.ctrlKey && workspaceMode === 'bpmn' && bpmnMap[e.key.toLowerCase()]) {
+        setTool(bpmnMap[e.key.toLowerCase()])
+        return
+      }
       if (!e.metaKey && !e.ctrlKey && map[e.key]) setTool(map[e.key])
+      if (!e.metaKey && !e.ctrlKey && e.key.toLowerCase() === '0') fitToContent()
       if (e.key === 'Escape') { setSelectedId(null); setContextMenu(null) }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement])
+  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent])
 
   // ======================== RENDER ELEMENT ========================
   const renderElement = (el: BoardElement) => {
@@ -2157,6 +2191,10 @@ export default function App() {
           <button onClick={() => setTransform(t => ({ ...t, scale: Math.max(t.scale / 1.2, 0.15) }))}
             className={`size-10 grid place-items-center ${hoverBg} ${textSec}`}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14" /></svg>
+          </button>
+          <div className={`h-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
+          <button onClick={fitToContent} title="Подогнать содержимое (0)" className={`size-10 grid place-items-center ${hoverBg} ${textSec}`}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
           </button>
         </div>
         <div className={`h-8 px-2.5 grid place-items-center rounded-xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC} text-[11px] font-medium ${dk ? 'text-slate-300' : 'text-black/60'} tabular-nums`}>
