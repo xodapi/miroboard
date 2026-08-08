@@ -180,6 +180,20 @@ impl BpmnValidationResult {
 
 fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
     let mut result = BpmnValidationResult::new();
+    match (model.calendar_work_start_ms, model.calendar_work_end_ms) {
+        (Some(start), Some(end)) if start < end && end <= 86_400_000 => {}
+        (Some(_), Some(_)) => result.error(
+            "calendar-range-invalid",
+            "Calendar work window must satisfy 0 <= start < end <= 24 hours.",
+            None,
+        ),
+        (Some(_), None) | (None, Some(_)) => result.error(
+            "calendar-range-incomplete",
+            "Calendar work start and end must be provided together.",
+            None,
+        ),
+        (None, None) => {}
+    }
     let mut nodes_by_id = HashMap::new();
     let mut node_ids = HashSet::new();
     let mut flow_ids = HashSet::new();
@@ -493,6 +507,9 @@ fn calendar_add(model: &BpmnModel, start_ms: u64, duration_ms: u64) -> u64 {
         return start_ms.saturating_add(duration_ms);
     }
     let (work_start, work_end) = (model.calendar_work_start_ms.unwrap(), model.calendar_work_end_ms.unwrap());
+    if work_end <= work_start || work_end > 86_400_000 {
+        return start_ms.saturating_add(duration_ms);
+    }
     let mut cursor = calendar_start(model, start_ms);
     let mut remaining = duration_ms;
     while remaining > 0 {
@@ -1468,6 +1485,23 @@ mod tests {
         let result = simulate_bpmn(model, 42, 1).expect("calendar model should simulate");
 
         assert!(result.contains(r#""maxDurationMs":86403000"#));
+    }
+
+    #[test]
+    fn rejects_invalid_calendar_window_before_running_wasm() {
+        let result = validate_bpmn(
+            r#"{
+              "calendarWorkStartMs":6000,
+              "calendarWorkEndMs":5000,
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"end","type":"endEvent"}
+              ],
+              "flows":[{"id":"f1","sourceId":"start","targetId":"end"}]
+            }"#,
+        );
+
+        assert!(result.contains("calendar-range-invalid"));
     }
 
     #[test]

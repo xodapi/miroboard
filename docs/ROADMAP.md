@@ -20,3 +20,9 @@
 GitHub хранит опубликованную историю. Git и jj обеспечивают локальную историю и
 undo. Rust/WASM содержит детерминированную доменную логику, React/Yjs — UI и
 совместную работу. Новые функции сначала получают учебный fixture и тест.
+
+## Production hardening
+
+- Заменить публичные Yjs signaling-серверы управляемым собственным signaling;
+- разделить большой UI-компонент и добавить browser-level тесты для Simulation;
+- сохранять Git history в UI через build-time generated manifest, а не вручную.

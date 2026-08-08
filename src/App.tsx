@@ -12,8 +12,8 @@ type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.7.1'
-const RELEASE_COMMIT = 'e7f9925'
+const RELEASE_VERSION = 'v0.7.2'
+const RELEASE_COMMIT = 'e074c0a'
 const PROJECT_HISTORY = [
   ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
   ['2026-08-07 15:30 UTC+07', '3771d26', 'Rust/WASM core для геометрии доски'],
@@ -326,13 +326,25 @@ export default function App() {
 
   const user = useMemo(() => {
     const saved = localStorage.getItem('miro-user')
-    if (saved) return JSON.parse(saved)
+    if (saved) {
+      try {
+        const parsed: unknown = JSON.parse(saved)
+        if (typeof parsed === 'object' && parsed !== null
+          && typeof (parsed as { id?: unknown }).id === 'string'
+          && typeof (parsed as { name?: unknown }).name === 'string'
+          && typeof (parsed as { color?: unknown }).color === 'string') {
+          return parsed as { id: string; name: string; color: string }
+        }
+      } catch {
+        console.warn('Ignoring invalid local user profile')
+      }
+    }
     const u = {
       id: genId(),
       name: RUSSIAN_NAMES[Math.floor(Math.random() * RUSSIAN_NAMES.length)],
       color: USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)]
     }
-    localStorage.setItem('miro-user', JSON.stringify(u))
+    try { localStorage.setItem('miro-user', JSON.stringify(u)) } catch { console.warn('Could not save local user profile') }
     return u
   }, [])
 
@@ -418,7 +430,11 @@ export default function App() {
 
     // Auto-save
     const si = setInterval(() => {
-      localStorage.setItem(`board-${roomId}`, JSON.stringify(yarray.toArray()))
+      try {
+        localStorage.setItem(`board-${roomId}`, JSON.stringify(yarray.toArray()))
+      } catch (error) {
+        console.warn('Could not autosave board to localStorage', error)
+      }
     }, 3000)
 
     return () => {
