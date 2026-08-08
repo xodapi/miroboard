@@ -92,3 +92,11 @@ test('onboarding can be reopened after clearing local state', async ({ page }) =
   await page.reload()
   await expect(page.getByRole('button', { name: 'Пропустить' })).toBeVisible()
 })
+
+test('runs the BPMN token runner on a loaded educational process', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
+  await page.getByRole('button', { name: 'BPMN' }).click()
+  await page.getByTitle('Проверить поток').click()
+  await expect(page.getByText('Оценка:', { exact: false })).toBeVisible()
+})
