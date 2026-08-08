@@ -56,3 +56,19 @@ test('Simulation remains usable on a mobile viewport', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Monte Carlo симуляция' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Запустить симуляцию' })).toBeVisible()
 })
+
+test('selecting a BPMN task exposes priority settings in Property Panel', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Приоритеты в очереди', { exact: true }).click()
+  await page.getByText('Срочная заявка', { exact: true }).click({ force: true })
+  await expect(page.getByText('Priority', { exact: true })).toBeVisible()
+  await expect(page.getByText('Capacity', { exact: true })).toBeVisible()
+})
+
+test('batch workload reports batch metadata after Monte Carlo execution', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Поток заявок: несколько instances', { exact: true }).click()
+  await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+  await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
+  await expect(page.getByText('Средняя стоимость:')).toBeVisible()
+})
