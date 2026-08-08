@@ -1123,6 +1123,15 @@ export default function App() {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (editingText) return
+      if (showSimulationPanel && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        return
+      }
+      if (document.activeElement?.matches('input, textarea, select, [contenteditable="true"]')) return
+      if (showSimulationPanel) return
+      const target = (e.target as HTMLElement | null) || document.activeElement as HTMLElement | null
+      if (target?.isContentEditable || (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
       if (e.key === 'Delete' || e.key === 'Backspace') { if (selectedId) deleteElement(selectedId) }
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo() }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); handleRedo() }
@@ -1142,9 +1151,9 @@ export default function App() {
       if (!e.metaKey && !e.ctrlKey && e.key.toLowerCase() === '0') fitToContent()
       if (e.key === 'Escape') { setSelectedId(null); setContextMenu(null) }
     }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent])
+    window.addEventListener('keydown', h, true)
+    return () => window.removeEventListener('keydown', h, true)
+  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel])
 
   // ======================== RENDER ELEMENT ========================
   const renderElement = (el: BoardElement) => {
@@ -1985,7 +1994,7 @@ export default function App() {
       {/* ===== SIMULATION MODAL ===== */}
       {showSimulationPanel && (
         <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowSimulationPanel(false)} data-ui>
-          <section className={`w-full max-w-md rounded-[28px] ${dk ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'} shadow-2xl p-6`} onClick={event => event.stopPropagation()}>
+          <section className={`w-full max-w-md rounded-[28px] ${dk ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'} shadow-2xl p-6`} onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) { if (event.key === 'Delete' || event.key === 'Backspace') event.preventDefault(); event.stopPropagation() } }}>
             <div className="flex items-start justify-between gap-4 mb-5">
               <div>
                 <h2 className="text-xl font-bold">Monte Carlo симуляция</h2>
@@ -1995,7 +2004,7 @@ export default function App() {
             </div>
             <div className="grid grid-cols-4 gap-3 mb-5">
               <label className={`text-[12px] font-semibold ${textSec}`}>Seed
-                <input value={simulationSeed} onChange={event => setSimulationSeed(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+                <input value={simulationSeed} onChange={event => setSimulationSeed(event.target.value)} onKeyDown={event => { if (event.key === 'Delete' || event.key === 'Backspace') event.preventDefault(); event.stopPropagation() }} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
               </label>
               <label className={`text-[12px] font-semibold ${textSec}`}>Прогоны
                 <input type="number" min="1" max="10000" value={simulationRuns} onChange={event => setSimulationRuns(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
