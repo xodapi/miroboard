@@ -13,8 +13,8 @@ type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' |
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.10.0'
-const RELEASE_COMMIT = 'fbbd6e7'
+const RELEASE_VERSION = 'v0.10.1'
+const RELEASE_COMMIT = '6bb6976'
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
@@ -202,6 +202,7 @@ export default function App() {
   const [showMore, setShowMore] = useState(false)
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [bpmnFlowSourceId, setBpmnFlowSourceId] = useState<string | null>(null)
+  const [flowPreviewPoint, setFlowPreviewPoint] = useState<Point | null>(null)
   const [activeBpmnTokenId, setActiveBpmnTokenId] = useState<string | null>(null)
   const [bpmnRunSummary, setBpmnRunSummary] = useState<string | null>(null)
   const [bpmnSimulationSummary, setBpmnSimulationSummary] = useState<string | null>(null)
@@ -836,6 +837,7 @@ export default function App() {
       if (!bpmnFlowSourceId) {
         setBpmnFlowSourceId(targetNode.id)
         setSelectedId(targetNode.id)
+        setFlowPreviewPoint({ x: targetNode.x + (targetNode.w || 0) / 2, y: targetNode.y + (targetNode.h || 0) / 2 })
         showToast('Источник выбран. Теперь выберите целевой BPMN-узел.', 'info')
         return
       }
@@ -843,6 +845,7 @@ export default function App() {
       const sourceNode = elements.find(element => element.id === bpmnFlowSourceId && element.bpmnNodeType)
       if (!sourceNode || sourceNode.id === targetNode.id) {
         setBpmnFlowSourceId(null)
+        setFlowPreviewPoint(null)
         return
       }
 
@@ -865,6 +868,7 @@ export default function App() {
         bpmnFlow: { sourceId: sourceNode.id, targetId: targetNode.id, flowType: 'sequence' },
       })
       setBpmnFlowSourceId(null)
+      setFlowPreviewPoint(null)
       setSelectedId(flowId)
       setTool('select')
       showToast('Sequence flow создан.', 'success')
@@ -941,6 +945,7 @@ export default function App() {
     const isLaser = tool === 'laser'
     updateCursor(point.x, point.y, isLaser)
     if (isLaser) setLaserPos(point)
+    if (tool === 'bpmnSequence' && bpmnFlowSourceId) setFlowPreviewPoint(point)
 
     // Cancel long press if moved
     if (longPressRef.current) {
@@ -1516,6 +1521,12 @@ export default function App() {
 
           <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
             {elements.map(renderElement)}
+            {bpmnFlowSourceId && flowPreviewPoint && (() => {
+              const source = elements.find(element => element.id === bpmnFlowSourceId)
+              if (!source) return null
+              const start = { x: source.x + (source.w || 0) / 2, y: source.y + (source.h || 0) / 2 }
+              return <line x1={start.x} y1={start.y} x2={flowPreviewPoint.x} y2={flowPreviewPoint.y} stroke="#7C3AED" strokeWidth={2} strokeDasharray="7 6" pointerEvents="none" />
+            })()}
 
             {/* Current drawing path */}
             {isDrawing && currentPath.length > 1 && (tool === 'pen' || tool === 'marker') && (
@@ -1797,7 +1808,7 @@ export default function App() {
 
       {/* ===== STICKY COLORS ===== */}
       {selectedBpmnTask && !contextMenu && (
-        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC}`} data-ui>
+        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC} max-md:inset-x-3 max-md:top-auto max-md:bottom-20 max-md:w-auto max-md:max-h-[46vh] max-md:overflow-y-auto`} data-ui>
           <div className="text-xs font-bold text-slate-400">Свойства задачи</div>
           <div className="grid grid-cols-2 gap-2">
           <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-duration">Длительность, с</label>
@@ -1858,7 +1869,7 @@ export default function App() {
         </aside>
       )}
       {selectedBpmnFlow && !contextMenu && (
-        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC}`} data-ui>
+        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC} max-md:inset-x-3 max-md:top-auto max-md:bottom-20 max-md:w-auto max-md:max-h-[46vh] max-md:overflow-y-auto`} data-ui>
           <div className="text-xs font-bold text-slate-400">Свойства sequence flow</div>
           <div className="flex flex-col gap-3">
           <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-condition">Условие</label>
