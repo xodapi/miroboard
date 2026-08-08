@@ -32,3 +32,12 @@ test('simulation opens from the explicit mode', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Monte Carlo симуляция' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Запустить симуляцию' })).toBeVisible()
 })
+
+test('runs Monte Carlo on a loaded priority learning module', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Приоритеты в очереди', { exact: true }).click()
+  await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+  await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
+  await expect(page.getByText('Средняя стоимость:')).toBeVisible()
+  await expect(page.getByText('Оператор · capacity 1', { exact: false })).toBeVisible()
+})
