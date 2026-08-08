@@ -3,12 +3,15 @@ import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
+import basicFixedExample from '../examples/basic-fixed.json'
+import parallelQueueExample from '../examples/parallel-queue.json'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
-const DISPLAY_VERSION = 'df774ad'
+declare const __MIROBOARD_VERSION__: string
+const DISPLAY_VERSION = __MIROBOARD_VERSION__
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
 const PROJECT_HISTORY = [
   ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
@@ -27,7 +30,7 @@ const PROJECT_HISTORY = [
   ['2026-08-07 21:47 UTC+07', '58587e3', 'Редактирование длительности BPMN-задач'],
 ] as const
 type ImportedBpmnModel = {
-  nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number }[]
+  nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number }[]
   flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }[]
 }
 type BpmnSimulationResult = {
@@ -42,8 +45,15 @@ type BpmnSimulationResult = {
   p95DurationMs: number
   maxDurationMs: number
   meanCost: number
-  roleUtilization: { role: string; capacity: number; meanWorkloadMs: number; utilization: number }[]
+  roleUtilization: { role: string; capacity: number; meanWorkloadMs: number; meanWaitingMs: number; utilization: number }[]
 }
+type EducationalExample = {
+  title: string
+  explanation: string
+  checks: string[]
+  model: ImportedBpmnModel
+}
+const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample] as unknown as EducationalExample[]
 
 interface BoardElement {
   id: string
@@ -677,6 +687,35 @@ export default function App() {
     }
   }, [user.id, ydoc])
 
+  const loadEducationalExample = useCallback((example: EducationalExample) => {
+    if (!yElements.current) return
+    const colorForType = (type: BpmnNodeType) => ({
+      startEvent: '#6BCB77', endEvent: '#FF5D5D', task: '#4D96FF',
+      xorGateway: '#FFB020', andGateway: '#FFB020', orGateway: '#FFB020',
+    }[type])
+    const normalizeType = (type: string): BpmnNodeType => ['startEvent', 'endEvent', 'xorGateway', 'andGateway', 'orGateway'].includes(type) ? type as BpmnNodeType : 'task'
+    ydoc.transact(() => {
+      while (yElements.current!.length) yElements.current!.delete(0, 1)
+      for (const node of example.model.nodes) {
+        const type = normalizeType(node.type)
+        const color = colorForType(type)
+        yElements.current!.push([{
+          id: node.id, type: 'sticky', x: node.x ?? 100, y: node.y ?? 100, w: node.width ?? (type === 'task' ? 176 : 78), h: node.height ?? (type === 'task' ? 76 : 78),
+          text: node.name || (type === 'task' ? 'Задача' : ''), color, fill: color, createdBy: user.id, bpmnNodeType: type,
+          bpmnDurationMs: node.durationMs, bpmnDurationDistribution: node.durationDistribution, bpmnDurationMinMs: node.durationMinMs, bpmnDurationModeMs: node.durationModeMs, bpmnDurationMaxMs: node.durationMaxMs,
+          bpmnResourceRole: node.resourceRole, bpmnCostPerHour: node.costPerHour, bpmnResourceCapacity: node.resourceCapacity,
+        }])
+      }
+      for (const flow of example.model.flows) yElements.current!.push([{
+        id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: user.id,
+        bpmnFlow: { sourceId: flow.sourceId, targetId: flow.targetId, flowType: flow.flowType || 'sequence', condition: flow.condition, probability: flow.probability, isDefault: flow.isDefault },
+      }])
+    })
+    setSelectedId(null)
+    setTransform({ x: 0, y: 0, scale: 1 })
+    window.alert(`${example.title}\n\n${example.explanation}\n\nПроверка:\n• ${example.checks.join('\n• ')}`)
+  }, [user.id, ydoc])
+
   // ======================== POINTER HANDLERS ========================
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     const target = e.target as Element
@@ -1266,7 +1305,7 @@ export default function App() {
             </div>
             <span className={`text-[15px] font-bold tracking-tight ${textC}`}>MiroBoard</span>
             <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-mono font-semibold ${dk ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
-              {DISPLAY_VERSION}
+              <a href={`${GITHUB_REPOSITORY}/commit/${DISPLAY_VERSION}`} target="_blank" rel="noreferrer" className="hover:underline" title="Открыть commit на GitHub">{DISPLAY_VERSION}</a>
             </span>
             <button
               onClick={() => setShowProjectHistory(true)}
@@ -1275,6 +1314,13 @@ export default function App() {
             >
               История
             </button>
+            <div className="flex gap-1">
+              {EDUCATIONAL_EXAMPLES.map((example) => (
+                <button key={example.title} onClick={() => loadEducationalExample(example)} className={`h-7 px-2 rounded-lg text-[10px] font-semibold transition ${hoverBg} ${textSec}`} title={example.explanation}>
+                  Учебный: {example.title.split(':')[0]}
+                </button>
+              ))}
+            </div>
           </div>
           <div className={`h-4 w-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
           {/* Undo/Redo */}
@@ -1795,7 +1841,7 @@ export default function App() {
                 </div>
                 {bpmnSimulationResult.roleUtilization.map((role) => (
                   <div key={role.role} className="col-span-3 flex items-center justify-between border-t border-black/10 pt-2 text-[11px]">
-                    <span className={textSec}>{role.role} · capacity {role.capacity} · {(role.meanWorkloadMs / 1000).toFixed(1)}с</span>
+                    <span className={textSec}>{role.role} · capacity {role.capacity} · work {(role.meanWorkloadMs / 1000).toFixed(1)}с · wait {(role.meanWaitingMs / 1000).toFixed(1)}с</span>
                     <span className="font-bold">{(role.utilization * 100).toFixed(0)}%</span>
                   </div>
                 ))}

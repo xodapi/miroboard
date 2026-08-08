@@ -450,6 +450,7 @@ struct BpmnRunResult {
     estimated_cost: f64,
     role_workload_ms: HashMap<String, u64>,
     role_capacity: HashMap<String, u32>,
+    role_waiting_ms: HashMap<String, u64>,
 }
 
 fn fixed_duration_ms(node: &BpmnNode) -> u64 {
@@ -586,6 +587,8 @@ fn run_bpmn_model(
     let mut estimated_cost = 0.0;
     let mut role_workload_ms = HashMap::new();
     let mut role_capacity = HashMap::new();
+    let mut role_waiting_ms = HashMap::new();
+    let mut resource_slots: HashMap<String, Vec<u64>> = HashMap::new();
     let step_limit = model.nodes.len().saturating_mul(model.flows.len().max(1)).saturating_mul(4);
 
     for _ in 0..=step_limit {
@@ -598,6 +601,7 @@ fn run_bpmn_model(
                     estimated_cost,
                     role_workload_ms,
                     role_capacity,
+                    role_waiting_ms,
                 });
             }
             return Err(JsValue::from_str(
@@ -609,7 +613,16 @@ fn run_bpmn_model(
             .get(current_id)
             .ok_or_else(|| JsValue::from_str("Token reached a missing BPMN node."))?;
         let sampled_duration_ms = sampled_duration_ms(current, random_state);
-        let completed_at_ms = arrived_at_ms.saturating_add(sampled_duration_ms);
+        let mut task_start_ms = arrived_at_ms;
+        if let Some(role) = current.resource_role.as_deref().filter(|role| !role.trim().is_empty()) {
+            let capacity = current.resource_capacity.unwrap_or(1).max(1) as usize;
+            let slots = resource_slots.entry(role.to_owned()).or_insert_with(|| vec![0; capacity]);
+            let slot_index = slots.iter().enumerate().min_by_key(|(_, finish)| *finish).map(|(index, _)| index).unwrap_or(0);
+            task_start_ms = task_start_ms.max(slots[slot_index]);
+            *role_waiting_ms.entry(role.to_owned()).or_default() += task_start_ms.saturating_sub(arrived_at_ms);
+            slots[slot_index] = task_start_ms.saturating_add(sampled_duration_ms);
+        }
+        let completed_at_ms = task_start_ms.saturating_add(sampled_duration_ms);
         estimated_cost += sampled_duration_ms as f64 / 3_600_000.0 * current.cost_per_hour.unwrap_or(0.0);
         if let Some(role) = current.resource_role.as_deref().filter(|role| !role.trim().is_empty()) {
             *role_workload_ms.entry(role.to_owned()).or_default() += sampled_duration_ms;
@@ -697,6 +710,7 @@ struct BpmnRoleUtilization {
     capacity: u32,
     mean_workload_ms: u64,
     utilization: f64,
+    mean_waiting_ms: u64,
 }
 
 fn percentile(values: &[u64], percentile: f64) -> u64 {
@@ -720,6 +734,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     let mut costs = Vec::with_capacity(runs as usize);
     let mut role_workloads: HashMap<String, u128> = HashMap::new();
     let mut role_capacities: HashMap<String, u32> = HashMap::new();
+    let mut role_waiting: HashMap<String, u128> = HashMap::new();
     for _ in 0..runs {
         let run = run_bpmn_model(&model, &mut random_state)?;
         durations.push(run.estimated_duration_ms);
@@ -732,6 +747,9 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
                 .entry(role)
                 .and_modify(|current| *current = (*current).min(capacity))
                 .or_insert(capacity);
+        }
+        for (role, waiting) in run.role_waiting_ms {
+            *role_waiting.entry(role).or_default() += waiting as u128;
         }
     }
     durations.sort_unstable();
@@ -747,6 +765,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         .map(|(role, workload)| {
             let capacity = role_capacities.get(&role).copied().unwrap_or(1).max(1);
             let mean_workload_ms = (workload / runs as u128) as u64;
+            let mean_waiting_ms = (role_waiting.get(&role).copied().unwrap_or(0) / runs as u128) as u64;
             BpmnRoleUtilization {
                 utilization: if mean_duration_ms == 0 {
                     0.0
@@ -756,6 +775,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
                 role,
                 capacity,
                 mean_workload_ms,
+                mean_waiting_ms,
             }
         })
         .collect();
@@ -1323,6 +1343,32 @@ mod tests {
         assert!(first.contains(r#""runs":100"#));
         assert!(first.contains(r#""minDurationMs":1000"#));
         assert!(first.contains(r#""maxDurationMs":5000"#));
+    }
+
+    #[test]
+    fn queues_parallel_tasks_that_share_a_single_resource_slot() {
+        let model = r#"{
+          "nodes":[
+            {"id":"start","type":"startEvent"},
+            {"id":"split","type":"andGateway"},
+            {"id":"left","type":"task","durationMs":4000,"resourceRole":"operator","resourceCapacity":1},
+            {"id":"right","type":"task","durationMs":3000,"resourceRole":"operator","resourceCapacity":1},
+            {"id":"join","type":"andGateway"},
+            {"id":"end","type":"endEvent"}
+          ],
+          "flows":[
+            {"id":"f1","sourceId":"start","targetId":"split"},
+            {"id":"f2","sourceId":"split","targetId":"left"},
+            {"id":"f3","sourceId":"split","targetId":"right"},
+            {"id":"f4","sourceId":"left","targetId":"join"},
+            {"id":"f5","sourceId":"right","targetId":"join"},
+            {"id":"f6","sourceId":"join","targetId":"end"}
+          ]
+        }"#;
+        let result = simulate_bpmn(model, 42, 1).expect("queue model should simulate");
+
+        assert!(result.contains(r#""maxDurationMs":7000"#));
+        assert!(result.contains(r#""meanWaitingMs":4000"#));
     }
 
     #[test]

@@ -1,0 +1,27 @@
+{
+  "title": "Параллельные задачи и очередь ресурса",
+  "explanation": "После AND split запускаются две задачи одной роли. При capacity 1 вторая задача ждёт освобождения единственного исполнителя.",
+  "checks": [
+    "Валидация проходит без ошибок.",
+    "Обе ветви завершаются через AND join.",
+    "Среднее waiting time роли больше нуля при capacity 1."
+  ],
+  "model": {
+    "nodes": [
+      {"id":"start","type":"startEvent","name":"Старт","x":40,"y":160},
+      {"id":"split","type":"andGateway","name":"AND split","x":150,"y":160},
+      {"id":"left","type":"task","name":"Собрать данные","durationMs":4000,"resourceRole":"Оператор","costPerHour":25,"resourceCapacity":1,"x":280,"y":80},
+      {"id":"right","type":"task","name":"Сверить данные","durationMs":3000,"resourceRole":"Оператор","costPerHour":25,"resourceCapacity":1,"x":280,"y":240},
+      {"id":"join","type":"andGateway","name":"AND join","x":470,"y":160},
+      {"id":"end","type":"endEvent","name":"Финиш","x":600,"y":160}
+    ],
+    "flows": [
+      {"id":"f1","sourceId":"start","targetId":"split"},
+      {"id":"f2","sourceId":"split","targetId":"left"},
+      {"id":"f3","sourceId":"split","targetId":"right"},
+      {"id":"f4","sourceId":"left","targetId":"join"},
+      {"id":"f5","sourceId":"right","targetId":"join"},
+      {"id":"f6","sourceId":"join","targetId":"end"}
+    ]
+  }
+}

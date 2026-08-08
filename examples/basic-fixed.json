@@ -1,0 +1,22 @@
+{
+  "title": "Линейный процесс: фиксированная длительность",
+  "explanation": "Базовая проверка BPMN runner. Две задачи выполняются последовательно, поэтому длительность процесса равна сумме длительностей задач.",
+  "checks": [
+    "Валидация проходит без ошибок.",
+    "Итоговая длительность равна 8 секундам.",
+    "Процесс завершается одним конечным событием."
+  ],
+  "model": {
+    "nodes": [
+      {"id":"start","type":"startEvent","name":"Старт","x":40,"y":100},
+      {"id":"prepare","type":"task","name":"Подготовить данные","durationMs":3000,"resourceRole":"Аналитик","costPerHour":40,"resourceCapacity":1,"x":160,"y":100},
+      {"id":"review","type":"task","name":"Проверить результат","durationMs":5000,"resourceRole":"Аналитик","costPerHour":40,"resourceCapacity":1,"x":380,"y":100},
+      {"id":"end","type":"endEvent","name":"Финиш","x":600,"y":100}
+    ],
+    "flows": [
+      {"id":"f1","sourceId":"start","targetId":"prepare"},
+      {"id":"f2","sourceId":"prepare","targetId":"review"},
+      {"id":"f3","sourceId":"review","targetId":"end"}
+    ]
+  }
+}
