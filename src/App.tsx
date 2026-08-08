@@ -13,31 +13,10 @@ type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' |
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.9.0'
-const RELEASE_COMMIT = 'ed09c8f'
-const PROJECT_HISTORY = [
-  ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
-  ['2026-08-07 15:30 UTC+07', '3771d26', 'Rust/WASM core для геометрии доски'],
-  ['2026-08-07 15:55 UTC+07', '4ec3c49', 'BPMN-валидация графа'],
-  ['2026-08-07 16:15 UTC+07', 'addff28', 'Интерактивная BPMN-палитра'],
-  ['2026-08-07 16:31 UTC+07', 'b96f15c', 'Создание BPMN sequence flow'],
-  ['2026-08-07 16:42 UTC+07', 'a88d178', 'Экспорт BPMN XML'],
-  ['2026-08-07 16:56 UTC+07', 'c65e7aa', 'Импорт BPMN XML'],
-  ['2026-08-07 17:14 UTC+07', 'cf91a74', 'Сохранение BPMN-DI геометрии'],
-  ['2026-08-07 17:27 UTC+07', 'df774ad', 'Привязка стрелок к границам фигур'],
-  ['2026-08-07 18:23 UTC+07', '0af0309', 'Первый BPMN token runner'],
-  ['2026-08-07 19:21 UTC+07', '6fe4932', 'Видимая версия и Jujutsu workflow'],
-  ['2026-08-07 20:56 UTC+07', '4843635', 'Параллельные BPMN AND split/join'],
-  ['2026-08-07 21:11 UTC+07', 'ada449b', 'Критический путь и оценка длительности'],
-  ['2026-08-07 21:47 UTC+07', '58587e3', 'Редактирование длительности BPMN-задач'],
-  ['2026-08-07 22:10 UTC+07', '7e2fd99', 'Условия и default flow XOR'],
-  ['2026-08-07 22:45 UTC+07', '884aa96', 'Seeded Monte Carlo BPMN'],
-  ['2026-08-07 23:20 UTC+07', '1c7a31e', 'Настройка seed и числа прогонов'],
-  ['2026-08-08 00:05 UTC+07', '1052658', 'Распределения длительности задач'],
-  ['2026-08-08 00:35 UTC+07', '01a4025', 'Стоимость BPMN-задач'],
-  ['2026-08-08 01:05 UTC+07', 'a49cd4d', 'Мощность ресурсов и utilisation'],
-  ['2026-08-08 02:00 UTC+07', '0d7a21b', 'Очереди ресурсов и учебные примеры'],
-] as const
+const RELEASE_VERSION = 'v0.10.0'
+const RELEASE_COMMIT = 'fbbd6e7'
+declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
+const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
   nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number }[]
   flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }[]
@@ -2053,13 +2032,14 @@ export default function App() {
 
             <h3 className="text-sm font-bold mb-3">Этапы</h3>
             <ol className="space-y-3">
-              {PROJECT_HISTORY.map(([timestamp, commit, title]) => (
+              {PROJECT_HISTORY.map(({ date, commit, title, release }) => (
                 <li key={commit} className={`relative pl-5 border-l-2 ${dk ? 'border-slate-600' : 'border-slate-200'}`}>
                   <span className={`absolute -left-[5px] top-1.5 size-2 rounded-full ${dk ? 'bg-violet-400' : 'bg-violet-500'}`} />
-                  <div className={`text-[11px] font-mono ${textSec}`}>{timestamp}</div>
+                  <div className={`text-[11px] font-mono ${textSec}`}>{date}</div>
                   <a href={`${GITHUB_REPOSITORY}/commit/${commit}`} target="_blank" rel="noreferrer" className="text-[13px] font-semibold hover:underline">
                     {title} <span className={`font-mono text-[11px] ${textSec}`}>{commit} ↗</span>
                   </a>
+                  {release && <a href={`${GITHUB_REPOSITORY}/releases/tag/${release}`} target="_blank" rel="noreferrer" className="ml-2 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 hover:bg-violet-200">{release}</a>}
                 </li>
               ))}
             </ol>

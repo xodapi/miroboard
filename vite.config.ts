@@ -18,11 +18,31 @@ const buildVersion = process.env.MIROBOARD_VERSION ?? (() => {
     return "local";
   }
 })();
+const buildHistory = process.env.MIROBOARD_HISTORY_JSON ?? (() => {
+  try {
+    const tags = new Map(
+      execFileSync("git", ["for-each-ref", "--format=%(objectname:short)\t%(refname:short)", "refs/tags"], {
+        cwd: __dirname, encoding: "utf8",
+      }).trim().split("\n").filter(Boolean).map(line => line.split("\t") as [string, string]),
+    );
+    return JSON.stringify(
+      execFileSync("git", ["log", "-24", "--date=short", "--pretty=format:%h\t%ad\t%s"], {
+        cwd: __dirname, encoding: "utf8",
+      }).trim().split("\n").filter(Boolean).map(line => {
+        const [commit, date, title] = line.split("\t");
+        return { commit, date, title, release: tags.get(commit)?.replace("refs/tags/", "") };
+      }),
+    );
+  } catch {
+    return "[]";
+  }
+})();
 
 // https://vite.dev/config/
 export default defineConfig({
   define: {
     __MIROBOARD_VERSION__: JSON.stringify(buildVersion),
+    __MIROBOARD_HISTORY__: buildHistory,
   },
   plugins: [react(), tailwindcss(), viteSingleFile()],
   build: {
