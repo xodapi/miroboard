@@ -8,6 +8,8 @@
 - `basic-fixed.json` — линейный процесс с фиксированными длительностями.
 - `parallel-queue.json` — AND-разветвление с одной ролью и capacity `1`.
   Проверяет ожидание в очереди и рост waiting time.
+- `batch-workload.json` — несколько instances процесса, приходящих к одному
+  ресурсу; проверяет накопление очереди при arrival interval `0`.
 
 У каждого файла есть `title`, `explanation`, `checks` и `model`. В `checks`
 указаны ожидаемые свойства, а не хрупкие точные числа: seeded Monte Carlo может

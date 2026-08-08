@@ -1,0 +1,20 @@
+{
+  "title": "Поток заявок: несколько instances",
+  "explanation": "Пять заявок приходят одновременно к одному оператору. В симуляции задайте Instances=5, Arrival=0 и Capacity=1, чтобы увидеть накопление очереди.",
+  "checks": [
+    "Batch содержит пять завершённых instances.",
+    "Среднее ожидание роли больше нуля.",
+    "Увеличение Capacity уменьшает waiting time."
+  ],
+  "model": {
+    "nodes": [
+      {"id":"start","type":"startEvent","name":"Старт","x":40,"y":120},
+      {"id":"task","type":"task","name":"Обработать заявку","durationMs":3000,"resourceRole":"Оператор","costPerHour":25,"resourceCapacity":1,"x":180,"y":120},
+      {"id":"end","type":"endEvent","name":"Финиш","x":440,"y":120}
+    ],
+    "flows": [
+      {"id":"f1","sourceId":"start","targetId":"task"},
+      {"id":"f2","sourceId":"task","targetId":"end"}
+    ]
+  }
+}

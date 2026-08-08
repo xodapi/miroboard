@@ -6,6 +6,7 @@ import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn,
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
 import slaCalendarExample from '../examples/sla-calendar.json'
+import batchWorkloadExample from '../examples/batch-workload.json'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
@@ -13,8 +14,8 @@ type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' |
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.12.0'
-const RELEASE_COMMIT = '99b0d2a'
+const RELEASE_VERSION = 'v0.13.0'
+const RELEASE_COMMIT = '939fe73'
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
@@ -25,6 +26,8 @@ type BpmnSimulationResult = {
   seed: number
   runs: number
   completedRuns: number
+  simulationInstances: number
+  arrivalIntervalMs: number
   minDurationMs: number
   meanDurationMs: number
   standardDeviationMs: number
@@ -43,7 +46,7 @@ type EducationalExample = {
   checks: string[]
   model: ImportedBpmnModel
 }
-const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample] as unknown as EducationalExample[]
+const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample, batchWorkloadExample] as unknown as EducationalExample[]
 
 interface BoardElement {
   id: string
@@ -214,6 +217,8 @@ export default function App() {
   const [simulationSeed, setSimulationSeed] = useState('42')
   const [simulationRuns, setSimulationRuns] = useState('500')
   const [simulationTarget, setSimulationTarget] = useState('')
+  const [simulationInstances, setSimulationInstances] = useState('1')
+  const [arrivalInterval, setArrivalInterval] = useState('0')
   const [calendarStart, setCalendarStart] = useState('')
   const [calendarEnd, setCalendarEnd] = useState('')
   const [showEmoji, setShowEmoji] = useState(false)
@@ -288,8 +293,10 @@ export default function App() {
       slaTargetMs: simulationTarget ? Number(simulationTarget) * 1000 : undefined,
       calendarWorkStartMs: calendarStart ? Number(calendarStart) * 3_600_000 : undefined,
       calendarWorkEndMs: calendarEnd ? Number(calendarEnd) * 3_600_000 : undefined,
+      simulationInstances: Number(simulationInstances) || 1,
+      arrivalIntervalMs: Math.max(0, Number(arrivalInterval) || 0) * 1000,
     }
-  }, [elements, simulationTarget, calendarStart, calendarEnd])
+  }, [elements, simulationTarget, calendarStart, calendarEnd, simulationInstances, arrivalInterval])
 
   const bpmnIssues = useMemo(() => {
     const model = createBpmnModel()
@@ -1995,6 +2002,12 @@ export default function App() {
               <label className={`text-[12px] font-semibold ${textSec}`}>до
                 <input type="number" min="0" max="24" step="0.5" value={calendarEnd} onChange={event => setCalendarEnd(event.target.value)} placeholder="24" className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
               </label>
+              <label className={`text-[12px] font-semibold ${textSec}`}>Instances
+                <input type="number" min="1" max="1000" value={simulationInstances} onChange={event => setSimulationInstances(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+              </label>
+              <label className={`text-[12px] font-semibold ${textSec}`}>Arrival, сек
+                <input type="number" min="0" step="0.1" value={arrivalInterval} onChange={event => setArrivalInterval(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+              </label>
             </div>
             <button onClick={simulateBpmn} className="w-full rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-4 py-2.5 text-sm font-bold text-white">
               Запустить симуляцию
@@ -2027,6 +2040,11 @@ export default function App() {
                 {bpmnSimulationResult.onTimeRate !== undefined && (
                   <div className="col-span-3 text-center text-sm font-bold">
                     В срок: {(bpmnSimulationResult.onTimeRate * 100).toFixed(1)}% при SLA {(bpmnSimulationResult.slaTargetMs! / 1000).toFixed(1)}с
+                  </div>
+                )}
+                {bpmnSimulationResult.simulationInstances > 1 && (
+                  <div className="col-span-3 text-center text-xs text-slate-600">
+                    Batch: {bpmnSimulationResult.simulationInstances} instances, interval {(bpmnSimulationResult.arrivalIntervalMs / 1000).toFixed(1)}с
                   </div>
                 )}
                 {bpmnSimulationResult.roleUtilization.map((role) => (

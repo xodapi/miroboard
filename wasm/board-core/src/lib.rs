@@ -37,7 +37,13 @@ struct BpmnModel {
     calendar_work_start_ms: Option<u64>,
     #[serde(default)]
     calendar_work_end_ms: Option<u64>,
+    #[serde(default = "default_simulation_instances")]
+    simulation_instances: u32,
+    #[serde(default)]
+    arrival_interval_ms: u64,
 }
+
+fn default_simulation_instances() -> u32 { 1 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -195,6 +201,13 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
         (None, None) => {}
     }
     let mut nodes_by_id = HashMap::new();
+    if model.simulation_instances == 0 || model.simulation_instances > 1_000 {
+        result.error(
+            "simulation-instances-invalid",
+            "Simulation instances must be between 1 and 1000.",
+            None,
+        );
+    }
     let mut node_ids = HashSet::new();
     let mut flow_ids = HashSet::new();
 
@@ -617,6 +630,8 @@ fn parse_and_validate_bpmn(model_json: &str) -> Result<BpmnModel, JsValue> {
 fn run_bpmn_model(
     model: &BpmnModel,
     random_state: &mut Option<u64>,
+    started_at_ms: u64,
+    resource_slots: &mut HashMap<String, Vec<u64>>,
 ) -> Result<BpmnRunResult, JsValue> {
     let nodes_by_id: HashMap<&str, &BpmnNode> = model
         .nodes
@@ -643,7 +658,7 @@ fn run_bpmn_model(
         .find(|node| node.node_type == BpmnNodeType::StartEvent)
         .ok_or_else(|| JsValue::from_str("Cannot run BPMN model without a start event."))?;
 
-    let mut active_tokens = VecDeque::from([(start.id.as_str(), 0u64)]);
+    let mut active_tokens = VecDeque::from([(start.id.as_str(), started_at_ms)]);
     let mut waiting_at_parallel_join: HashMap<&str, (usize, u64)> = HashMap::new();
     let mut token_path = Vec::new();
     let mut completed_tokens = 0usize;
@@ -652,7 +667,6 @@ fn run_bpmn_model(
     let mut role_workload_ms = HashMap::new();
     let mut role_capacity = HashMap::new();
     let mut role_waiting_ms = HashMap::new();
-    let mut resource_slots: HashMap<String, Vec<u64>> = HashMap::new();
     let step_limit = model.nodes.len().saturating_mul(model.flows.len().max(1)).saturating_mul(4);
 
     for _ in 0..=step_limit {
@@ -661,7 +675,7 @@ fn run_bpmn_model(
                 return Ok(BpmnRunResult {
                     completed: true,
                     token_path,
-                    estimated_duration_ms,
+                    estimated_duration_ms: estimated_duration_ms.saturating_sub(started_at_ms),
                     estimated_cost,
                     role_workload_ms,
                     role_capacity,
@@ -746,7 +760,7 @@ fn run_bpmn_model(
 #[wasm_bindgen]
 pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
     let model = parse_and_validate_bpmn(model_json)?;
-    serde_json::to_string(&run_bpmn_model(&model, &mut None)?)
+    serde_json::to_string(&run_bpmn_model(&model, &mut None, 0, &mut HashMap::new())?)
         .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN run: {error}")))
 }
 
@@ -756,6 +770,8 @@ struct BpmnSimulationResult {
     seed: u64,
     runs: u32,
     completed_runs: u32,
+    simulation_instances: u32,
+    arrival_interval_ms: u64,
     min_duration_ms: u64,
     mean_duration_ms: u64,
     standard_deviation_ms: u64,
@@ -802,39 +818,47 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     let mut role_capacities: HashMap<String, u32> = HashMap::new();
     let mut role_waiting: HashMap<String, u128> = HashMap::new();
     for _ in 0..runs {
-        let run = run_bpmn_model(&model, &mut random_state)?;
-        durations.push(run.estimated_duration_ms);
-        costs.push(run.estimated_cost);
-        for (role, workload) in run.role_workload_ms {
-            *role_workloads.entry(role).or_default() += workload as u128;
-        }
-        for (role, capacity) in run.role_capacity {
-            role_capacities
-                .entry(role)
-                .and_modify(|current| *current = (*current).min(capacity))
-                .or_insert(capacity);
-        }
-        for (role, waiting) in run.role_waiting_ms {
-            *role_waiting.entry(role).or_default() += waiting as u128;
+        let mut resource_slots = HashMap::new();
+        for instance in 0..model.simulation_instances {
+            let run = run_bpmn_model(
+                &model,
+                &mut random_state,
+                instance as u64 * model.arrival_interval_ms,
+                &mut resource_slots,
+            )?;
+            durations.push(run.estimated_duration_ms);
+            costs.push(run.estimated_cost);
+            for (role, workload) in run.role_workload_ms {
+                *role_workloads.entry(role).or_default() += workload as u128;
+            }
+            for (role, capacity) in run.role_capacity {
+                role_capacities
+                    .entry(role)
+                    .and_modify(|current| *current = (*current).min(capacity))
+                    .or_insert(capacity);
+            }
+            for (role, waiting) in run.role_waiting_ms {
+                *role_waiting.entry(role).or_default() += waiting as u128;
+            }
         }
     }
     durations.sort_unstable();
     let total_duration: u128 = durations.iter().map(|duration| *duration as u128).sum();
-    let mean_duration_ms = (total_duration / runs as u128) as u64;
+    let mean_duration_ms = (total_duration / durations.len() as u128) as u64;
     let variance = durations
         .iter()
         .map(|duration| (*duration as f64 - mean_duration_ms as f64).powi(2))
         .sum::<f64>()
-        / runs as f64;
+        / durations.len() as f64;
     let on_time_rate = model.sla_target_ms.map(|target| {
-        durations.iter().filter(|duration| **duration <= target).count() as f64 / runs as f64
+        durations.iter().filter(|duration| **duration <= target).count() as f64 / durations.len() as f64
     });
     let mut role_utilization: Vec<BpmnRoleUtilization> = role_workloads
         .into_iter()
         .map(|(role, workload)| {
             let capacity = role_capacities.get(&role).copied().unwrap_or(1).max(1);
-            let mean_workload_ms = (workload / runs as u128) as u64;
-            let mean_waiting_ms = (role_waiting.get(&role).copied().unwrap_or(0) / runs as u128) as u64;
+            let mean_workload_ms = (workload / durations.len() as u128) as u64;
+            let mean_waiting_ms = (role_waiting.get(&role).copied().unwrap_or(0) / durations.len() as u128) as u64;
             BpmnRoleUtilization {
                 utilization: if mean_duration_ms == 0 {
                     0.0
@@ -852,7 +876,9 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     let result = BpmnSimulationResult {
         seed,
         runs,
-        completed_runs: runs,
+        completed_runs: runs.saturating_mul(model.simulation_instances),
+        simulation_instances: model.simulation_instances,
+        arrival_interval_ms: model.arrival_interval_ms,
         min_duration_ms: durations[0],
         mean_duration_ms,
         standard_deviation_ms: variance.sqrt().round() as u64,
@@ -860,7 +886,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         p90_duration_ms: percentile(&durations, 0.90),
         p95_duration_ms: percentile(&durations, 0.95),
         max_duration_ms: *durations.last().expect("simulation has at least one run"),
-        mean_cost: costs.iter().sum::<f64>() / runs as f64,
+        mean_cost: costs.iter().sum::<f64>() / costs.len() as f64,
         role_utilization,
         sla_target_ms: model.sla_target_ms,
         on_time_rate,
@@ -1172,7 +1198,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
         ));
     }
 
-    serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms: None, calendar_work_start_ms: None, calendar_work_end_ms: None })
+    serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms: None, calendar_work_start_ms: None, calendar_work_end_ms: None, simulation_instances: 1, arrival_interval_ms: 0 })
         .map_err(|error| JsValue::from_str(&format!("Could not serialize imported BPMN: {error}")))
 }
 
@@ -1280,6 +1306,8 @@ mod tests {
             sla_target_ms: None,
             calendar_work_start_ms: None,
             calendar_work_end_ms: None,
+            simulation_instances: 1,
+            arrival_interval_ms: 0,
         };
 
         assert!(validate_bpmn_model(&model).valid);
@@ -1443,6 +1471,27 @@ mod tests {
 
         assert!(result.contains(r#""maxDurationMs":7000"#));
         assert!(result.contains(r#""meanWaitingMs":4000"#));
+    }
+
+    #[test]
+    fn queues_multiple_process_instances_on_shared_resource_slots() {
+        let model = r#"{
+          "simulationInstances":2,
+          "arrivalIntervalMs":0,
+          "nodes":[
+            {"id":"start","type":"startEvent"},
+            {"id":"task","type":"task","durationMs":1000,"resourceRole":"operator","resourceCapacity":1},
+            {"id":"end","type":"endEvent"}
+          ],
+          "flows":[
+            {"id":"f1","sourceId":"start","targetId":"task"},
+            {"id":"f2","sourceId":"task","targetId":"end"}
+          ]
+        }"#;
+        let result = simulate_bpmn(model, 42, 1).expect("batch model should simulate");
+
+        assert!(result.contains(r#""completedRuns":2"#));
+        assert!(result.contains(r#""meanWaitingMs":500"#));
     }
 
     #[test]
