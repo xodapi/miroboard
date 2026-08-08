@@ -5,14 +5,15 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
+import slaCalendarExample from '../examples/sla-calendar.json'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
-declare const __MIROBOARD_VERSION__: string
-const DISPLAY_VERSION = __MIROBOARD_VERSION__
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
+const RELEASE_VERSION = 'v0.6.0'
+const RELEASE_COMMIT = '394dec5'
 const PROJECT_HISTORY = [
   ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
   ['2026-08-07 15:30 UTC+07', '3771d26', 'Rust/WASM core для геометрии доски'],
@@ -62,7 +63,7 @@ type EducationalExample = {
   checks: string[]
   model: ImportedBpmnModel
 }
-const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample] as unknown as EducationalExample[]
+const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample] as unknown as EducationalExample[]
 
 interface BoardElement {
   id: string
@@ -1302,13 +1303,13 @@ export default function App() {
   }
 
   // ======================== JSX ========================
-  const dk = darkMode
-  const bgMain = dk ? '#0f172a' : '#F7F7F5'
-  const bgBar = dk ? 'bg-slate-800/95' : 'bg-white/95'
-  const borderC = dk ? 'border-slate-600' : 'border-black/10'
-  const textC = dk ? 'text-white' : 'text-black'
-  const textSec = dk ? 'text-slate-300' : 'text-black/70'
-  const hoverBg = dk ? 'hover:bg-slate-700' : 'hover:bg-black/5'
+  const dk = false
+  const bgMain = '#F7F8FC'
+  const bgBar = 'bg-white/95'
+  const borderC = 'border-slate-200'
+  const textC = 'text-slate-900'
+  const textSec = 'text-slate-500'
+  const hoverBg = 'hover:bg-slate-100'
 
   return (
     <div className={`fixed inset-0 overflow-hidden select-none ${dk ? 'bg-slate-900 text-white' : 'bg-[#F7F7F5] text-black'}`}>
@@ -1322,9 +1323,8 @@ export default function App() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
             </div>
             <span className={`text-[15px] font-bold tracking-tight ${textC}`}>MiroBoard</span>
-            <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-mono font-semibold ${dk ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
-              <a href={`${GITHUB_REPOSITORY}/commit/${DISPLAY_VERSION}`} target="_blank" rel="noreferrer" className="hover:underline" title="Открыть commit на GitHub">{DISPLAY_VERSION}</a>
-            </span>
+            <a href={`${GITHUB_REPOSITORY}/releases/tag/${RELEASE_VERSION}`} target="_blank" rel="noreferrer" className="rounded-md bg-violet-600 px-1.5 py-0.5 text-[10px] font-mono font-bold text-white hover:bg-violet-700" title="Опубликованный стабильный релиз">{RELEASE_VERSION}</a>
+            <a href={`${GITHUB_REPOSITORY}/commit/${RELEASE_COMMIT}`} target="_blank" rel="noreferrer" className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600 hover:bg-slate-200" title="Git commit: точный снимок исходного кода">{RELEASE_COMMIT}</a>
             <button
               onClick={() => setShowProjectHistory(true)}
               className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`}
@@ -1483,6 +1483,24 @@ export default function App() {
             ))}
           </g>
         </svg>
+
+        {elements.some(element => element.bpmnNodeType) && (
+          <aside className="absolute left-3 top-[68px] z-20 w-48 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl shadow-slate-900/10 backdrop-blur" data-ui>
+            <div className="px-2 pb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">BPMN workspace</div>
+            <button onClick={() => setShowSimulationPanel(true)} className="mb-1 flex w-full items-center gap-2 rounded-xl bg-violet-600 px-3 py-2.5 text-left text-xs font-bold text-white shadow-sm hover:bg-violet-700">
+              <span>◌</span> Симуляция
+            </button>
+            <button onClick={() => setShowTemplates(true)} className="mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-violet-50">
+              <span>◈</span> Учебные модули
+            </button>
+            <button onClick={runBpmn} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100">
+              <span>▶</span> Проверить поток
+            </button>
+            <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[10px] leading-4 text-slate-500">
+              Симуляция показывает время, SLA, стоимость, загрузку и ожидание ресурсов.
+            </div>
+          </aside>
+        )}
 
         {/* Empty state */}
         {elements.length === 0 && !showTemplates && (
@@ -1916,6 +1934,15 @@ export default function App() {
               </p>
               <p className={`mt-2 text-[12px] leading-5 ${textSec}`}>
                 Git не содержит точных usage-метрик LLM, поэтому число токенов не выводится как оценка. Достоверный учёт возможен только при подключении telemetry API провайдера модели.
+              </p>
+            </div>
+            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
+              <h3 className="text-sm font-bold">Как читать эту историю</h3>
+              <p className={`mt-1 text-[13px] leading-5 ${textSec}`}>
+                <b>Commit</b>, например <code>394dec5</code>, это неизменяемый точный снимок исходного кода. По ссылке можно увидеть, какие файлы и почему изменились. <b>Release</b>, например <code>v0.6.0</code>, это понятная пользователю стабильная версия, объединяющая проверенные commits и готовый HTML.
+              </p>
+              <p className={`mt-2 text-[13px] leading-5 ${textSec}`}>
+                Сейчас развивается BPMN-симулятор: после длительностей, стоимости и ресурсов добавлены очереди, SLA и рабочий календарь. Следующий этап, приоритеты очереди, несколько экземпляров процесса и bottleneck-анализ.
               </p>
             </div>
 

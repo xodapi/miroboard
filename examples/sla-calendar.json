@@ -1,0 +1,20 @@
+{
+  "title": "SLA и рабочий календарь",
+  "explanation": "Задача длится дольше рабочего окна. Задайте в симуляции рабочее время 0–5 секунд и SLA 10 секунд, чтобы увидеть перенос работы на следующий день и нарушение SLA.",
+  "checks": [
+    "Валидация проходит без ошибок.",
+    "Длительность выходит за пределы первого рабочего дня.",
+    "On-time rate показывает нарушение SLA."
+  ],
+  "model": {
+    "nodes": [
+      {"id":"start","type":"startEvent","name":"Старт","x":40,"y":120},
+      {"id":"work","type":"task","name":"Обработать заявку","durationMs":8000,"resourceRole":"Оператор","costPerHour":25,"resourceCapacity":1,"x":180,"y":120},
+      {"id":"end","type":"endEvent","name":"Финиш","x":430,"y":120}
+    ],
+    "flows": [
+      {"id":"f1","sourceId":"start","targetId":"work"},
+      {"id":"f2","sourceId":"work","targetId":"end"}
+    ]
+  }
+}
