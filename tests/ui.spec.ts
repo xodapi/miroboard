@@ -72,3 +72,9 @@ test('batch workload reports batch metadata after Monte Carlo execution', async 
   await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
   await expect(page.getByText('Средняя стоимость:')).toBeVisible()
 })
+
+test('loaded educational process reports valid BPMN status', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
+  await expect(page.locator('[title="BPMN-модель корректна"]')).toBeVisible()
+})
