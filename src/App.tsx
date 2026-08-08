@@ -13,8 +13,8 @@ type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' |
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.8.1'
-const RELEASE_COMMIT = 'ac1cb6e'
+const RELEASE_VERSION = 'v0.9.0'
+const RELEASE_COMMIT = 'ed09c8f'
 const PROJECT_HISTORY = [
   ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
   ['2026-08-07 15:30 UTC+07', '3771d26', 'Rust/WASM core для геометрии доски'],
@@ -1161,7 +1161,10 @@ export default function App() {
             <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={5} />
             <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 10} fill="none" stroke={el.color} strokeWidth={1.5} />
           </>}
-          {el.bpmnNodeType === 'task' && <rect width={width} height={height} rx={10} fill="white" stroke={el.color} strokeWidth={3} />}
+          {el.bpmnNodeType === 'task' && <>
+            <rect width={width} height={height} rx={10} fill="white" stroke={el.color} strokeWidth={2.5} />
+            <rect x={10} y={10} width={5} height={height - 20} rx={2.5} fill={el.color} opacity={0.8} />
+          </>}
           {isGateway && <polygon points={`${centerX},2 ${width - 2},${centerY} ${centerX},${height - 2} 2,${centerY}`} fill="white" stroke={el.color} strokeWidth={3} />}
           {isTokenActive && <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 + 8} fill="none" stroke="#8B5CF6" strokeWidth={3 * invS}>
             <animate attributeName="r" values={`${Math.min(width, height) / 2 + 4};${Math.min(width, height) / 2 + 12};${Math.min(width, height) / 2 + 4}`} dur="0.65s" repeatCount="indefinite" />
@@ -1170,6 +1173,11 @@ export default function App() {
           <text x={centerX} y={centerY + 4} textAnchor="middle" fontSize={isEvent ? 11 : isGateway ? 18 : 14} fontWeight={isGateway ? 700 : 600} fill="#1f2937" className="pointer-events-none">
             {isGateway ? (el.bpmnNodeType === 'andGateway' ? '+' : el.bpmnNodeType === 'xorGateway' ? '×' : '○') : el.text}
           </text>
+          {el.bpmnNodeType === 'task' && (el.bpmnResourceRole || el.bpmnDurationMs !== undefined) && (
+            <text x={centerX} y={height - 12} textAnchor="middle" fontSize="9" fill="#64748B" className="pointer-events-none">
+              {[el.bpmnResourceRole, el.bpmnDurationMs !== undefined ? `${(el.bpmnDurationMs / 1000).toFixed(1)}с` : ''].filter(Boolean).join(' · ')}
+            </text>
+          )}
           {isSelected && <rect x={-4} y={-4} width={width + 8} height={height + 8}
             fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={isEvent ? width / 2 : 6} />}
         </g>
@@ -1288,6 +1296,14 @@ export default function App() {
             <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} />
             <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
               fill={el.color} />
+            {el.bpmnFlow && (el.bpmnFlow.condition || el.bpmnFlow.probability !== undefined || el.bpmnFlow.isDefault) && (
+              <g transform={`translate(${x2 / 2},${y2 / 2})`}>
+                <rect x="-34" y="-12" width="68" height="20" rx="6" fill="white" stroke="#CBD5E1" />
+                <text textAnchor="middle" y="2" fontSize="10" fill="#475569">
+                  {el.bpmnFlow.isDefault ? 'default' : el.bpmnFlow.condition || (el.bpmnFlow.probability !== undefined ? `P ${(el.bpmnFlow.probability * 100).toFixed(0)}%` : '')}
+                </text>
+              </g>
+            )}
             {isSelected && <rect x={Math.min(0, x2) - 4} y={Math.min(0, y2) - 4}
               width={Math.abs(x2) + 8} height={Math.abs(y2) + 8}
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
@@ -1802,7 +1818,9 @@ export default function App() {
 
       {/* ===== STICKY COLORS ===== */}
       {selectedBpmnTask && !contextMenu && (
-        <div className={`absolute left-1/2 -translate-x-1/2 bottom-[154px] z-30 flex max-w-[calc(100vw-24px)] flex-wrap items-center justify-center gap-2 px-3 py-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
+        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC}`} data-ui>
+          <div className="text-xs font-bold text-slate-400">Свойства задачи</div>
+          <div className="grid grid-cols-2 gap-2">
           <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-duration">Длительность, с</label>
           <input
             id="bpmn-duration"
@@ -1857,10 +1875,13 @@ export default function App() {
           <label className={`text-[11px] font-semibold ${textSec}`}>Capacity
             <input type="number" min="1" max="1000" step="1" value={selectedBpmnTask.bpmnResourceCapacity ?? 1} onChange={(event) => { const capacity = Number(event.target.value); if (Number.isInteger(capacity) && capacity >= 1 && capacity <= 1000) updateElement(selectedBpmnTask.id, { bpmnResourceCapacity: capacity }) }} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
           </label>
-        </div>
+          </div>
+        </aside>
       )}
       {selectedBpmnFlow && !contextMenu && (
-        <div className={`absolute left-1/2 -translate-x-1/2 bottom-[204px] z-30 flex items-center gap-2 px-3 py-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
+        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC}`} data-ui>
+          <div className="text-xs font-bold text-slate-400">Свойства sequence flow</div>
+          <div className="flex flex-col gap-3">
           <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-condition">Условие</label>
           <input
             id="bpmn-flow-condition"
@@ -1904,7 +1925,8 @@ export default function App() {
               </label>
             </>
           )}
-        </div>
+          </div>
+        </aside>
       )}
       {selectedId && elements.find(e => e.id === selectedId && (e.type === 'sticky' || e.type === 'rect' || e.type === 'circle')) && !contextMenu && (
         <div className={`absolute left-1/2 -translate-x-1/2 bottom-[104px] z-30 flex items-center gap-1 p-1.5 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
