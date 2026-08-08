@@ -28,6 +28,13 @@ const PROJECT_HISTORY = [
   ['2026-08-07 20:56 UTC+07', '4843635', 'Параллельные BPMN AND split/join'],
   ['2026-08-07 21:11 UTC+07', 'ada449b', 'Критический путь и оценка длительности'],
   ['2026-08-07 21:47 UTC+07', '58587e3', 'Редактирование длительности BPMN-задач'],
+  ['2026-08-07 22:10 UTC+07', '7e2fd99', 'Условия и default flow XOR'],
+  ['2026-08-07 22:45 UTC+07', '884aa96', 'Seeded Monte Carlo BPMN'],
+  ['2026-08-07 23:20 UTC+07', '1c7a31e', 'Настройка seed и числа прогонов'],
+  ['2026-08-08 00:05 UTC+07', '1052658', 'Распределения длительности задач'],
+  ['2026-08-08 00:35 UTC+07', '01a4025', 'Стоимость BPMN-задач'],
+  ['2026-08-08 01:05 UTC+07', 'a49cd4d', 'Мощность ресурсов и utilisation'],
+  ['2026-08-08 02:00 UTC+07', '0d7a21b', 'Очереди ресурсов и учебные примеры'],
 ] as const
 type ImportedBpmnModel = {
   nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number }[]
@@ -1085,8 +1092,8 @@ export default function App() {
             <animate attributeName="r" values={`${Math.min(width, height) / 2 + 4};${Math.min(width, height) / 2 + 12};${Math.min(width, height) / 2 + 4}`} dur="0.65s" repeatCount="indefinite" />
             <animate attributeName="opacity" values="1;0.35;1" dur="0.65s" repeatCount="indefinite" />
           </circle>}
-          <text x={centerX} y={centerY + 5} textAnchor="middle" fontSize={isEvent ? 11 : isGateway ? 24 : 14} fontWeight={isGateway ? 700 : 600} fill="#1f2937" className="pointer-events-none">
-            {el.text}
+          <text x={centerX} y={centerY + 4} textAnchor="middle" fontSize={isEvent ? 11 : isGateway ? 18 : 14} fontWeight={isGateway ? 700 : 600} fill="#1f2937" className="pointer-events-none">
+            {isGateway ? (el.bpmnNodeType === 'andGateway' ? '+' : el.bpmnNodeType === 'xorGateway' ? '×' : '○') : el.text}
           </text>
           {isSelected && <rect x={-4} y={-4} width={width + 8} height={height + 8}
             fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={isEvent ? width / 2 : 6} />}
@@ -1314,13 +1321,9 @@ export default function App() {
             >
               История
             </button>
-            <div className="flex gap-1">
-              {EDUCATIONAL_EXAMPLES.map((example) => (
-                <button key={example.title} onClick={() => loadEducationalExample(example)} className={`h-7 px-2 rounded-lg text-[10px] font-semibold transition ${hoverBg} ${textSec}`} title={example.explanation}>
-                  Учебный: {example.title.split(':')[0]}
-                </button>
-              ))}
-            </div>
+            <button onClick={() => setShowTemplates(true)} className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`} title="Учебные BPMN-примеры">
+              Примеры
+            </button>
           </div>
           <div className={`h-4 w-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
           {/* Undo/Redo */}
@@ -1349,6 +1352,9 @@ export default function App() {
                 <span>{bpmnIssues.some(issue => issue.severity === 'error') ? '!' : '✓'}</span>
                 BPMN {bpmnIssues.length || 'OK'}
               </div>
+              <button onClick={() => setShowSimulationPanel(true)} className="h-7 rounded-lg bg-fuchsia-500 px-2.5 text-[11px] font-bold text-white shadow-sm hover:bg-fuchsia-600" title="Открыть Monte Carlo симуляцию">
+                Симуляция
+              </button>
               {bpmnRunSummary && (
                 <div className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-indigo-950 text-indigo-200' : 'bg-indigo-50 text-indigo-700'}`}>
                   {bpmnRunSummary}
@@ -1928,6 +1934,16 @@ export default function App() {
                   <div className={`text-[28px] mb-2`}>{t.name.split(' ')[0]}</div>
                   <div className="text-[14px] font-semibold mb-0.5">{t.name.split(' ').slice(1).join(' ')}</div>
                   <div className={`text-[12px] ${dk ? 'text-slate-400' : 'text-black/50'}`}>{t.desc}</div>
+                </button>
+              ))}
+            </div>
+            <h4 className="mt-6 mb-3 text-sm font-bold">Учебные BPMN-модули</h4>
+            <div className="space-y-2">
+              {EDUCATIONAL_EXAMPLES.map((example) => (
+                <button key={example.title} onClick={() => { setShowTemplates(false); loadEducationalExample(example) }}
+                  className={`w-full rounded-xl p-3 text-left ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-indigo-50 hover:bg-indigo-100'} transition`}>
+                  <div className="text-sm font-semibold">{example.title}</div>
+                  <div className={`mt-1 text-xs ${dk ? 'text-slate-300' : 'text-slate-600'}`}>{example.explanation}</div>
                 </button>
               ))}
             </div>
