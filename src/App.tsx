@@ -12,7 +12,7 @@ type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.7.0'
+const RELEASE_VERSION = 'v0.7.1'
 const RELEASE_COMMIT = 'e7f9925'
 const PROJECT_HISTORY = [
   ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
@@ -213,6 +213,8 @@ export default function App() {
   const [editValue, setEditValue] = useState('')
   const [darkMode, setDarkMode] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
+  const [showLearningModules, setShowLearningModules] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showProjectHistory, setShowProjectHistory] = useState(false)
   const [showSimulationPanel, setShowSimulationPanel] = useState(false)
   const [showMore, setShowMore] = useState(false)
@@ -890,6 +892,7 @@ export default function App() {
       }
       addElement(newEl)
       setSelectedId(id)
+      setTool('select')
       return
     }
 
@@ -1323,8 +1326,8 @@ export default function App() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
             </div>
             <span className={`text-[15px] font-bold tracking-tight ${textC}`}>MiroBoard</span>
-            <a href={`${GITHUB_REPOSITORY}/releases/tag/${RELEASE_VERSION}`} target="_blank" rel="noreferrer" className="rounded-md bg-violet-600 px-1.5 py-0.5 text-[10px] font-mono font-bold text-white hover:bg-violet-700" title="Опубликованный стабильный релиз">{RELEASE_VERSION}</a>
-            <a href={`${GITHUB_REPOSITORY}/commit/${RELEASE_COMMIT}`} target="_blank" rel="noreferrer" className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600 hover:bg-slate-200" title="Git commit: точный снимок исходного кода">{RELEASE_COMMIT}</a>
+            <a href={`${GITHUB_REPOSITORY}/releases/tag/${RELEASE_VERSION}`} target="_blank" rel="noreferrer" className="select-text rounded-md bg-violet-600 px-1.5 py-0.5 text-[10px] font-mono font-bold text-white hover:bg-violet-700" title="Release: можно выделить и скопировать">{RELEASE_VERSION}</a>
+            <a href={`${GITHUB_REPOSITORY}/commit/${RELEASE_COMMIT}`} target="_blank" rel="noreferrer" className="select-text rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600 hover:bg-slate-200" title="Git commit: можно выделить и скопировать">{RELEASE_COMMIT}</a>
             <button
               onClick={() => setShowProjectHistory(true)}
               className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`}
@@ -1332,7 +1335,7 @@ export default function App() {
             >
               История
             </button>
-            <button onClick={() => setShowTemplates(true)} className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`} title="Учебные BPMN-примеры">
+            <button onClick={() => setShowLearningModules(true)} className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`} title="Учебные BPMN-примеры">
               Примеры
             </button>
           </div>
@@ -1485,20 +1488,23 @@ export default function App() {
         </svg>
 
         {elements.some(element => element.bpmnNodeType) && (
-          <aside className="absolute left-3 top-[68px] z-20 w-48 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl shadow-slate-900/10 backdrop-blur" data-ui>
-            <div className="px-2 pb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">BPMN workspace</div>
-            <button onClick={() => setShowSimulationPanel(true)} className="mb-1 flex w-full items-center gap-2 rounded-xl bg-violet-600 px-3 py-2.5 text-left text-xs font-bold text-white shadow-sm hover:bg-violet-700">
-              <span>◌</span> Симуляция
-            </button>
-            <button onClick={() => setShowTemplates(true)} className="mb-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-violet-50">
-              <span>◈</span> Учебные модули
-            </button>
-            <button onClick={runBpmn} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100">
-              <span>▶</span> Проверить поток
-            </button>
-            <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[10px] leading-4 text-slate-500">
-              Симуляция показывает время, SLA, стоимость, загрузку и ожидание ресурсов.
+          <aside className={`absolute left-3 top-[68px] z-20 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl shadow-slate-900/10 backdrop-blur transition-all ${sidebarCollapsed ? 'w-12' : 'w-52'}`} data-ui>
+            <div className="mb-2 flex items-center justify-between px-1">
+              {!sidebarCollapsed && <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">BPMN workspace</div>}
+              <button onClick={() => setSidebarCollapsed(value => !value)} className="grid size-7 place-items-center rounded-lg text-slate-500 hover:bg-slate-100" title={sidebarCollapsed ? 'Развернуть BPMN-меню' : 'Свернуть BPMN-меню'}>{sidebarCollapsed ? '›' : '‹'}</button>
             </div>
+            <button onClick={() => setShowSimulationPanel(true)} className={`mb-1 flex w-full items-center gap-2 rounded-xl bg-violet-600 py-2.5 text-left text-xs font-bold text-white shadow-sm hover:bg-violet-700 ${sidebarCollapsed ? 'justify-center px-0' : 'px-3'}`} title="Симуляция">
+              <span>◌</span>{!sidebarCollapsed && ' Симуляция'}
+            </button>
+            <button onClick={() => setShowLearningModules(true)} className={`mb-1 flex w-full items-center gap-2 rounded-xl py-2 text-left text-xs font-semibold text-slate-700 hover:bg-violet-50 ${sidebarCollapsed ? 'justify-center px-0' : 'px-3'}`} title="Учебные модули">
+              <span>◈</span>{!sidebarCollapsed && ' Учебные модули'}
+            </button>
+            <button onClick={runBpmn} className={`flex w-full items-center gap-2 rounded-xl py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100 ${sidebarCollapsed ? 'justify-center px-0' : 'px-3'}`} title="Проверить поток">
+              <span>▶</span>{!sidebarCollapsed && ' Проверить поток'}
+            </button>
+            {!sidebarCollapsed && <div className="mt-2 rounded-xl bg-slate-50 px-3 py-2 text-[10px] leading-4 text-slate-500">
+              Симуляция показывает время, SLA, стоимость, загрузку и ожидание ресурсов.
+            </div>}
           </aside>
         )}
 
@@ -1942,7 +1948,7 @@ export default function App() {
                 <b>Commit</b>, например <code>394dec5</code>, это неизменяемый точный снимок исходного кода. По ссылке можно увидеть, какие файлы и почему изменились. <b>Release</b>, например <code>v0.6.0</code>, это понятная пользователю стабильная версия, объединяющая проверенные commits и готовый HTML.
               </p>
               <p className={`mt-2 text-[13px] leading-5 ${textSec}`}>
-                Сейчас развивается BPMN-симулятор: после длительностей, стоимости и ресурсов добавлены очереди, SLA и рабочий календарь. Следующий этап, приоритеты очереди, несколько экземпляров процесса и bottleneck-анализ.
+                jj автоматически хранит локальные операции и позволяет безопасно отменять шаги, но пока не генерирует этот UI-список commits. В текущем release список обновляется вручную и поэтому отражает только опубликованные этапы. Сейчас развивается BPMN-симулятор: после длительностей, стоимости и ресурсов добавлены очереди, SLA и рабочий календарь. Следующий этап, приоритеты очереди, несколько экземпляров процесса и bottleneck-анализ.
               </p>
             </div>
 
@@ -1958,6 +1964,28 @@ export default function App() {
                 </li>
               ))}
             </ol>
+          </section>
+        </div>
+      )}
+
+      {/* ===== LEARNING MODULES MODAL ===== */}
+      {showLearningModules && (
+        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-slate-900/35 backdrop-blur-sm" onClick={() => setShowLearningModules(false)} data-ui>
+          <section className="w-full max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div><h2 className="text-xl font-bold text-slate-900">Учебные BPMN-модули</h2><p className="mt-1 text-sm text-slate-500">Загрузите готовую схему, прочитайте цель и проверьте результат симуляции.</p></div>
+              <button onClick={() => setShowLearningModules(false)} className="grid size-9 place-items-center rounded-xl text-lg text-slate-500 hover:bg-slate-100">×</button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {EDUCATIONAL_EXAMPLES.map((example, index) => (
+                <button key={example.title} onClick={() => { setShowLearningModules(false); loadEducationalExample(example) }} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-violet-300 hover:bg-violet-50">
+                  <div className="mb-2 text-xs font-bold text-violet-600">Модуль {index + 1}</div>
+                  <div className="text-sm font-bold text-slate-900">{example.title}</div>
+                  <div className="mt-2 text-xs leading-5 text-slate-500">{example.explanation}</div>
+                  <div className="mt-3 text-xs font-semibold text-violet-700">Загрузить →</div>
+                </button>
+              ))}
+            </div>
           </section>
         </div>
       )}
