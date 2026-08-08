@@ -13,8 +13,8 @@ type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' |
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.10.1'
-const RELEASE_COMMIT = '6bb6976'
+const RELEASE_VERSION = 'v0.11.0'
+const RELEASE_COMMIT = 'f0bd7d6'
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
@@ -197,6 +197,9 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('board')
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null)
+  const [tourStep, setTourStep] = useState(() => {
+    try { return localStorage.getItem('miro-onboarding-seen') ? -1 : 0 } catch { return -1 }
+  })
   const [showProjectHistory, setShowProjectHistory] = useState(false)
   const [showSimulationPanel, setShowSimulationPanel] = useState(false)
   const [showMore, setShowMore] = useState(false)
@@ -245,6 +248,10 @@ export default function App() {
   const showToast = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, tone })
     window.setTimeout(() => setToast(null), 4200)
+  }, [])
+  const finishTour = useCallback(() => {
+    try { localStorage.setItem('miro-onboarding-seen', '1') } catch { /* onboarding is optional */ }
+    setTourStep(-1)
   }, [])
 
   const createBpmnModel = useCallback(() => {
@@ -1406,6 +1413,9 @@ export default function App() {
             >
               История
             </button>
+            <button onClick={() => setTourStep(0)} className={`grid size-7 place-items-center rounded-lg text-[12px] font-bold transition ${hoverBg} ${textSec}`} title="Краткий тур по интерфейсу">
+              ?
+            </button>
             <button onClick={() => setShowLearningModules(true)} className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`} title="Учебные BPMN-примеры">
               Примеры
             </button>
@@ -1484,6 +1494,32 @@ export default function App() {
       {toast && (
         <div className={`absolute right-4 top-16 z-[60] max-w-sm rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${toast.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-violet-200 bg-violet-50 text-violet-800'}`} data-ui>
           <div className="flex items-start gap-3"><span>{toast.tone === 'error' ? '!' : toast.tone === 'success' ? '✓' : 'i'}</span><span>{toast.message}</span><button onClick={() => setToast(null)} className="ml-auto text-base leading-none">×</button></div>
+        </div>
+      )}
+
+      {tourStep >= 0 && (
+        <div className="absolute inset-0 z-[70] grid place-items-center bg-slate-900/45 p-4 backdrop-blur-sm" data-ui>
+          {(() => {
+            const steps = [
+              ['Добро пожаловать', 'MiroBoard объединяет свободную доску, BPMN-моделирование и воспроизводимую симуляцию. Начните с режима «Доска» или загрузите учебный модуль.'],
+              ['Режимы работы', 'В шапке переключаются «Доска», «BPMN» и «Симуляция». В BPMN-режиме слева появляются команды моделирования, проверки и симуляции.'],
+              ['Потоки и свойства', 'Выберите «Поток», кликните источник и затем цель. Выбранная задача или стрелка открывает справа свойства: время, ресурсы, условия и вероятность.'],
+              ['Проверяемый результат', 'Симуляция показывает длительность, SLA, стоимость, загрузку и очереди. «История» содержит commits и releases, которые формируются при build из Git.'],
+            ] as const
+            const [title, text] = steps[tourStep] ?? steps[0]
+            return <section className="w-full max-w-md rounded-[28px] bg-white p-7 shadow-2xl">
+              <div className="mb-4 flex gap-1">{steps.map((_, index) => <span key={index} className={`h-1.5 flex-1 rounded-full ${index <= tourStep ? 'bg-violet-600' : 'bg-slate-200'}`} />)}</div>
+              <div className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-violet-600">Тур {tourStep + 1} из {steps.length}</div>
+              <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
+              <p className="mt-3 text-sm leading-6 text-slate-600">{text}</p>
+              <div className="mt-7 flex items-center justify-between">
+                <button onClick={finishTour} className="text-sm font-semibold text-slate-500 hover:text-slate-800">Пропустить</button>
+                <button onClick={() => tourStep === steps.length - 1 ? finishTour() : setTourStep(tourStep + 1)} className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-violet-700">
+                  {tourStep === steps.length - 1 ? 'Начать работу' : 'Далее'}
+                </button>
+              </div>
+            </section>
+          })()}
         </div>
       )}
 
