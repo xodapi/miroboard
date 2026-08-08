@@ -12,8 +12,8 @@ type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.6.0'
-const RELEASE_COMMIT = '394dec5'
+const RELEASE_VERSION = 'v0.7.0'
+const RELEASE_COMMIT = 'e7f9925'
 const PROJECT_HISTORY = [
   ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
   ['2026-08-07 15:30 UTC+07', '3771d26', 'Rust/WASM core для геометрии доски'],
