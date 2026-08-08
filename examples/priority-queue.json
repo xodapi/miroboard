@@ -1,0 +1,27 @@
+{
+  "title": "Приоритеты в очереди",
+  "explanation": "Две готовые задачи одной роли конкурируют за один slot. Приоритет 10 обслуживается раньше приоритета 1.",
+  "checks": [
+    "Задача с priority 10 запускается раньше priority 1.",
+    "Capacity роли равна 1.",
+    "Порядок можно проверить через Run и Simulation."
+  ],
+  "model": {
+    "nodes": [
+      {"id":"start","type":"startEvent","name":"Старт","x":40,"y":160},
+      {"id":"split","type":"andGateway","name":"AND split","x":150,"y":160},
+      {"id":"low","type":"task","name":"Обычная заявка","durationMs":3000,"priority":1,"resourceRole":"Оператор","resourceCapacity":1,"x":280,"y":80},
+      {"id":"high","type":"task","name":"Срочная заявка","durationMs":3000,"priority":10,"resourceRole":"Оператор","resourceCapacity":1,"x":280,"y":240},
+      {"id":"join","type":"andGateway","name":"AND join","x":470,"y":160},
+      {"id":"end","type":"endEvent","name":"Финиш","x":600,"y":160}
+    ],
+    "flows": [
+      {"id":"f1","sourceId":"start","targetId":"split"},
+      {"id":"f2","sourceId":"split","targetId":"low"},
+      {"id":"f3","sourceId":"split","targetId":"high"},
+      {"id":"f4","sourceId":"low","targetId":"join"},
+      {"id":"f5","sourceId":"high","targetId":"join"},
+      {"id":"f6","sourceId":"join","targetId":"end"}
+    ]
+  }
+}

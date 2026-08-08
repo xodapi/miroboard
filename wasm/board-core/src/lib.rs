@@ -1,5 +1,6 @@
 use quick_xml::{events::Event, Reader};
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet, VecDeque};
 use wasm_bindgen::prelude::*;
 
@@ -71,6 +72,8 @@ struct BpmnNode {
     cost_per_hour: Option<f64>,
     #[serde(default)]
     resource_capacity: Option<u32>,
+    #[serde(default)]
+    priority: Option<i32>,
     #[serde(default)]
     x: Option<f64>,
     #[serde(default)]
@@ -658,7 +661,7 @@ fn run_bpmn_model(
         .find(|node| node.node_type == BpmnNodeType::StartEvent)
         .ok_or_else(|| JsValue::from_str("Cannot run BPMN model without a start event."))?;
 
-    let mut active_tokens = VecDeque::from([(start.id.as_str(), started_at_ms)]);
+    let mut active_tokens = vec![(start.id.as_str(), started_at_ms)];
     let mut waiting_at_parallel_join: HashMap<&str, (usize, u64)> = HashMap::new();
     let mut token_path = Vec::new();
     let mut completed_tokens = 0usize;
@@ -670,7 +673,9 @@ fn run_bpmn_model(
     let step_limit = model.nodes.len().saturating_mul(model.flows.len().max(1)).saturating_mul(4);
 
     for _ in 0..=step_limit {
-        let Some((current_id, arrived_at_ms)) = active_tokens.pop_front() else {
+        let Some(next_index) = active_tokens.iter().enumerate().min_by_key(|(_, (id, arrived))| {
+            (*arrived, Reverse(nodes_by_id.get(id).and_then(|node| node.priority).unwrap_or(0)))
+        }).map(|(index, _)| index) else {
             if waiting_at_parallel_join.is_empty() && completed_tokens > 0 {
                 return Ok(BpmnRunResult {
                     completed: true,
@@ -686,6 +691,7 @@ fn run_bpmn_model(
                 "A parallel gateway is waiting for tokens from unfinished branches.",
             ));
         };
+        let (current_id, arrived_at_ms) = active_tokens.remove(next_index);
         token_path.push(current_id.to_owned());
         let current = nodes_by_id
             .get(current_id)
@@ -733,20 +739,20 @@ fn run_bpmn_model(
             waiting_at_parallel_join.remove(current_id);
             if current.node_type == BpmnNodeType::AndGateway && flows.len() > 1 {
                 for flow in flows {
-                    active_tokens.push_back((flow.target_id.as_str(), synchronized_at_ms));
+                    active_tokens.push((flow.target_id.as_str(), synchronized_at_ms));
                 }
             } else {
-                active_tokens.push_back((select_flow(current, flows, random_state).target_id.as_str(), synchronized_at_ms));
+                active_tokens.push((select_flow(current, flows, random_state).target_id.as_str(), synchronized_at_ms));
             }
             continue;
         }
 
         if current.node_type == BpmnNodeType::AndGateway && flows.len() > 1 {
             for flow in flows {
-                active_tokens.push_back((flow.target_id.as_str(), completed_at_ms));
+                active_tokens.push((flow.target_id.as_str(), completed_at_ms));
             }
         } else {
-            active_tokens.push_back((select_flow(current, flows, random_state).target_id.as_str(), completed_at_ms));
+            active_tokens.push((select_flow(current, flows, random_state).target_id.as_str(), completed_at_ms));
         }
     }
 
@@ -1146,6 +1152,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         resource_role: None,
                         cost_per_hour: None,
                         resource_capacity: None,
+                        priority: None,
                         x: None,
                         y: None,
                         width: None,
@@ -1241,6 +1248,7 @@ mod tests {
                     resource_role: None,
                     cost_per_hour: None,
                     resource_capacity: None,
+                    priority: None,
                     x: Some(10.0),
                     y: Some(20.0),
                     width: Some(36.0),
@@ -1259,6 +1267,7 @@ mod tests {
                     resource_role: None,
                     cost_per_hour: None,
                     resource_capacity: None,
+                    priority: None,
                     x: Some(100.0),
                     y: Some(20.0),
                     width: Some(160.0),
@@ -1277,6 +1286,7 @@ mod tests {
                     resource_role: None,
                     cost_per_hour: None,
                     resource_capacity: None,
+                    priority: None,
                     x: Some(300.0),
                     y: Some(20.0),
                     width: Some(36.0),
@@ -1492,6 +1502,30 @@ mod tests {
 
         assert!(result.contains(r#""completedRuns":2"#));
         assert!(result.contains(r#""meanWaitingMs":500"#));
+    }
+
+    #[test]
+    fn priority_selects_higher_priority_ready_task_first() {
+        let model = r#"{
+          "nodes":[
+            {"id":"start","type":"startEvent"},
+            {"id":"split","type":"andGateway"},
+            {"id":"low","type":"task","durationMs":1000,"priority":1},
+            {"id":"high","type":"task","durationMs":1000,"priority":10},
+            {"id":"join","type":"andGateway"},
+            {"id":"end","type":"endEvent"}
+          ],
+          "flows":[
+            {"id":"f1","sourceId":"start","targetId":"split"},
+            {"id":"f2","sourceId":"split","targetId":"low"},
+            {"id":"f3","sourceId":"split","targetId":"high"},
+            {"id":"f4","sourceId":"low","targetId":"join"},
+            {"id":"f5","sourceId":"high","targetId":"join"},
+            {"id":"f6","sourceId":"join","targetId":"end"}
+          ]
+        }"#;
+        let result = run_bpmn(model).expect("priority model should run");
+        assert!(result.find("high").unwrap() < result.find("low").unwrap());
     }
 
     #[test]

@@ -7,6 +7,7 @@ import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
 import slaCalendarExample from '../examples/sla-calendar.json'
 import batchWorkloadExample from '../examples/batch-workload.json'
+import priorityQueueExample from '../examples/priority-queue.json'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
@@ -14,12 +15,12 @@ type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' |
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.13.0'
-const RELEASE_COMMIT = '939fe73'
+const RELEASE_VERSION = 'v0.14.0'
+const RELEASE_COMMIT = 'd1bef2f'
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
-  nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number }[]
+  nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number; priority?: number }[]
   flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }[]
 }
 type BpmnSimulationResult = {
@@ -46,7 +47,7 @@ type EducationalExample = {
   checks: string[]
   model: ImportedBpmnModel
 }
-const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample, batchWorkloadExample] as unknown as EducationalExample[]
+const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample, batchWorkloadExample, priorityQueueExample] as unknown as EducationalExample[]
 
 interface BoardElement {
   id: string
@@ -73,6 +74,7 @@ interface BoardElement {
   bpmnResourceRole?: string
   bpmnCostPerHour?: number
   bpmnResourceCapacity?: number
+  bpmnPriority?: number
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
 }
 
@@ -276,6 +278,7 @@ export default function App() {
         resourceRole: element.bpmnResourceRole,
         costPerHour: element.bpmnCostPerHour,
         resourceCapacity: element.bpmnResourceCapacity,
+        priority: element.bpmnPriority,
         x: element.x,
         y: element.y,
         width: element.w,
@@ -745,6 +748,7 @@ export default function App() {
           text: node.name || (type === 'task' ? 'Задача' : ''), color, fill: color, createdBy: user.id, bpmnNodeType: type,
           bpmnDurationMs: node.durationMs, bpmnDurationDistribution: node.durationDistribution, bpmnDurationMinMs: node.durationMinMs, bpmnDurationModeMs: node.durationModeMs, bpmnDurationMaxMs: node.durationMaxMs,
           bpmnResourceRole: node.resourceRole, bpmnCostPerHour: node.costPerHour, bpmnResourceCapacity: node.resourceCapacity,
+          bpmnPriority: node.priority,
         }])
       }
       for (const flow of example.model.flows) yElements.current!.push([{
@@ -1912,6 +1916,9 @@ export default function App() {
           </label>
           <label className={`text-[11px] font-semibold ${textSec}`}>Capacity
             <input type="number" min="1" max="1000" step="1" value={selectedBpmnTask.bpmnResourceCapacity ?? 1} onChange={(event) => { const capacity = Number(event.target.value); if (Number.isInteger(capacity) && capacity >= 1 && capacity <= 1000) updateElement(selectedBpmnTask.id, { bpmnResourceCapacity: capacity }) }} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
+          </label>
+          <label className={`text-[11px] font-semibold ${textSec}`}>Priority
+            <input type="number" min="-100" max="100" step="1" value={selectedBpmnTask.bpmnPriority ?? 0} onChange={(event) => { const priority = Number(event.target.value); if (Number.isInteger(priority) && priority >= -100 && priority <= 100) updateElement(selectedBpmnTask.id, { bpmnPriority: priority }) }} className="ml-1 w-14 rounded-lg border border-slate-200 px-2 py-1 text-[12px] outline-none" />
           </label>
           </div>
         </aside>
