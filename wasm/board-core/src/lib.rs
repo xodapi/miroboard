@@ -31,6 +31,8 @@ pub fn clamp_scale(value: f64) -> f64 {
 struct BpmnModel {
     nodes: Vec<BpmnNode>,
     flows: Vec<BpmnFlow>,
+    #[serde(default)]
+    sla_target_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -701,6 +703,8 @@ struct BpmnSimulationResult {
     max_duration_ms: u64,
     mean_cost: f64,
     role_utilization: Vec<BpmnRoleUtilization>,
+    sla_target_ms: Option<u64>,
+    on_time_rate: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -760,6 +764,9 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         .map(|duration| (*duration as f64 - mean_duration_ms as f64).powi(2))
         .sum::<f64>()
         / runs as f64;
+    let on_time_rate = model.sla_target_ms.map(|target| {
+        durations.iter().filter(|duration| **duration <= target).count() as f64 / runs as f64
+    });
     let mut role_utilization: Vec<BpmnRoleUtilization> = role_workloads
         .into_iter()
         .map(|(role, workload)| {
@@ -793,6 +800,8 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         max_duration_ms: *durations.last().expect("simulation has at least one run"),
         mean_cost: costs.iter().sum::<f64>() / runs as f64,
         role_utilization,
+        sla_target_ms: model.sla_target_ms,
+        on_time_rate,
     };
     serde_json::to_string(&result)
         .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN simulation: {error}")))
@@ -1101,7 +1110,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
         ));
     }
 
-    serde_json::to_string(&BpmnModel { nodes, flows })
+    serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms: None })
         .map_err(|error| JsValue::from_str(&format!("Could not serialize imported BPMN: {error}")))
 }
 
@@ -1206,6 +1215,7 @@ mod tests {
                     is_default: false,
                 },
             ],
+            sla_target_ms: None,
         };
 
         assert!(validate_bpmn_model(&model).valid);
@@ -1369,6 +1379,27 @@ mod tests {
 
         assert!(result.contains(r#""maxDurationMs":7000"#));
         assert!(result.contains(r#""meanWaitingMs":4000"#));
+    }
+
+    #[test]
+    fn reports_sla_on_time_rate_for_a_fixed_process() {
+        let model = r#"{
+          "slaTargetMs":5000,
+          "nodes":[
+            {"id":"start","type":"startEvent"},
+            {"id":"task","type":"task","durationMs":4000},
+            {"id":"end","type":"endEvent"}
+          ],
+          "flows":[
+            {"id":"f1","sourceId":"start","targetId":"task"},
+            {"id":"f2","sourceId":"task","targetId":"end"}
+          ]
+        }"#;
+
+        let result = simulate_bpmn(model, 42, 10).expect("SLA model should simulate");
+
+        assert!(result.contains(r#""slaTargetMs":5000"#));
+        assert!(result.contains(r#""onTimeRate":1.0"#));
     }
 
     #[test]

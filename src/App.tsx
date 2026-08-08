@@ -52,6 +52,8 @@ type BpmnSimulationResult = {
   p95DurationMs: number
   maxDurationMs: number
   meanCost: number
+  slaTargetMs?: number
+  onTimeRate?: number
   roleUtilization: { role: string; capacity: number; meanWorkloadMs: number; meanWaitingMs: number; utilization: number }[]
 }
 type EducationalExample = {
@@ -221,6 +223,7 @@ export default function App() {
   const [bpmnSimulationResult, setBpmnSimulationResult] = useState<BpmnSimulationResult | null>(null)
   const [simulationSeed, setSimulationSeed] = useState('42')
   const [simulationRuns, setSimulationRuns] = useState('500')
+  const [simulationTarget, setSimulationTarget] = useState('')
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
   const [snapGrid, setSnapGrid] = useState(false)
@@ -279,8 +282,8 @@ export default function App() {
         id: element.id,
         ...element.bpmnFlow,
       }))
-    return { nodes, flows }
-  }, [elements])
+    return { nodes, flows, slaTargetMs: simulationTarget ? Number(simulationTarget) * 1000 : undefined }
+  }, [elements, simulationTarget])
 
   const bpmnIssues = useMemo(() => {
     const model = createBpmnModel()
@@ -1814,12 +1817,15 @@ export default function App() {
               </div>
               <button onClick={() => setShowSimulationPanel(false)} className={`size-9 rounded-xl text-lg ${hoverBg}`} aria-label="Закрыть симуляцию">×</button>
             </div>
-            <div className="grid grid-cols-2 gap-3 mb-5">
+            <div className="grid grid-cols-3 gap-3 mb-5">
               <label className={`text-[12px] font-semibold ${textSec}`}>Seed
                 <input value={simulationSeed} onChange={event => setSimulationSeed(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
               </label>
               <label className={`text-[12px] font-semibold ${textSec}`}>Прогоны
                 <input type="number" min="1" max="10000" value={simulationRuns} onChange={event => setSimulationRuns(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+              </label>
+              <label className={`text-[12px] font-semibold ${textSec}`}>SLA, сек
+                <input type="number" min="0" value={simulationTarget} onChange={event => setSimulationTarget(event.target.value)} placeholder="не задано" className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
               </label>
             </div>
             <button onClick={simulateBpmn} className="w-full rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-4 py-2.5 text-sm font-bold text-white">
@@ -1845,6 +1851,11 @@ export default function App() {
                   <span className={`text-[10px] font-semibold ${textSec}`}>Средняя стоимость: </span>
                   <span className="text-sm font-bold">€{bpmnSimulationResult.meanCost.toFixed(2)}</span>
                 </div>
+                {bpmnSimulationResult.onTimeRate !== undefined && (
+                  <div className="col-span-3 text-center text-sm font-bold">
+                    В срок: {(bpmnSimulationResult.onTimeRate * 100).toFixed(1)}% при SLA {(bpmnSimulationResult.slaTargetMs! / 1000).toFixed(1)}с
+                  </div>
+                )}
                 {bpmnSimulationResult.roleUtilization.map((role) => (
                   <div key={role.role} className="col-span-3 flex items-center justify-between border-t border-black/10 pt-2 text-[11px]">
                     <span className={textSec}>{role.role} · capacity {role.capacity} · work {(role.meanWorkloadMs / 1000).toFixed(1)}с · wait {(role.meanWaitingMs / 1000).toFixed(1)}с</span>
