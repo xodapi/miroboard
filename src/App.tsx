@@ -13,8 +13,8 @@ type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' |
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.11.0'
-const RELEASE_COMMIT = 'f0bd7d6'
+const RELEASE_VERSION = 'v0.12.0'
+const RELEASE_COMMIT = '99b0d2a'
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
@@ -210,6 +210,7 @@ export default function App() {
   const [bpmnRunSummary, setBpmnRunSummary] = useState<string | null>(null)
   const [bpmnSimulationSummary, setBpmnSimulationSummary] = useState<string | null>(null)
   const [bpmnSimulationResult, setBpmnSimulationResult] = useState<BpmnSimulationResult | null>(null)
+  const [bottleneckRole, setBottleneckRole] = useState<string | null>(null)
   const [simulationSeed, setSimulationSeed] = useState('42')
   const [simulationRuns, setSimulationRuns] = useState('500')
   const [simulationTarget, setSimulationTarget] = useState('')
@@ -655,9 +656,11 @@ export default function App() {
       const result = JSON.parse(simulate_bpmn(JSON.stringify(createBpmnModel()), seed, runs)) as BpmnSimulationResult
       const seconds = (value: number) => `${(value / 1000).toFixed(1)}с`
       setBpmnSimulationResult(result)
+      setBottleneckRole(result.roleUtilization[0]?.role ?? null)
       setBpmnSimulationSummary(`MC ${result.runs}: P50 ${seconds(result.p50DurationMs)} · P90 ${seconds(result.p90DurationMs)} · P95 ${seconds(result.p95DurationMs)}`)
     } catch (error) {
       setBpmnSimulationSummary(null)
+      setBottleneckRole(null)
       showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.', 'error')
     }
   }, [createBpmnModel, simulationRuns, simulationSeed])
@@ -1145,6 +1148,7 @@ export default function App() {
       const isTokenActive = activeBpmnTokenId === el.id
       const isGateway = el.bpmnNodeType === 'xorGateway' || el.bpmnNodeType === 'andGateway' || el.bpmnNodeType === 'orGateway'
       const isEvent = el.bpmnNodeType === 'startEvent' || el.bpmnNodeType === 'endEvent'
+      const isBottleneck = el.bpmnNodeType === 'task' && bottleneckRole !== null && el.bpmnResourceRole === bottleneckRole
       return (
         <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
           {el.bpmnNodeType === 'startEvent' && <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={3} />}
@@ -1153,7 +1157,7 @@ export default function App() {
             <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 10} fill="none" stroke={el.color} strokeWidth={1.5} />
           </>}
           {el.bpmnNodeType === 'task' && <>
-            <rect width={width} height={height} rx={10} fill="white" stroke={el.color} strokeWidth={2.5} />
+            <rect width={width} height={height} rx={10} fill={isBottleneck ? '#FFF7ED' : 'white'} stroke={isBottleneck ? '#F97316' : el.color} strokeWidth={isBottleneck ? 4 : 2.5} />
             <rect x={10} y={10} width={5} height={height - 20} rx={2.5} fill={el.color} opacity={0.8} />
           </>}
           {isGateway && <polygon points={`${centerX},2 ${width - 2},${centerY} ${centerX},${height - 2} 2,${centerY}`} fill="white" stroke={el.color} strokeWidth={3} />}
@@ -1169,6 +1173,7 @@ export default function App() {
               {[el.bpmnResourceRole, el.bpmnDurationMs !== undefined ? `${(el.bpmnDurationMs / 1000).toFixed(1)}с` : ''].filter(Boolean).join(' · ')}
             </text>
           )}
+          {isBottleneck && <text x={width - 10} y={15} textAnchor="end" fontSize="10" fontWeight="700" fill="#EA580C">⚠ bottleneck</text>}
           {isSelected && <rect x={-4} y={-4} width={width + 8} height={height + 8}
             fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={isEvent ? width / 2 : 6} />}
         </g>
@@ -2014,6 +2019,11 @@ export default function App() {
                   <span className={`text-[10px] font-semibold ${textSec}`}>Средняя стоимость: </span>
                   <span className="text-sm font-bold">€{bpmnSimulationResult.meanCost.toFixed(2)}</span>
                 </div>
+                {bottleneckRole && (
+                  <div className="col-span-3 rounded-xl bg-orange-50 px-3 py-2 text-center text-xs text-orange-800">
+                    <b>Bottleneck:</b> роль «{bottleneckRole}» имеет наибольшую utilisation. Её задачи подсвечены на схеме.
+                  </div>
+                )}
                 {bpmnSimulationResult.onTimeRate !== undefined && (
                   <div className="col-span-3 text-center text-sm font-bold">
                     В срок: {(bpmnSimulationResult.onTimeRate * 100).toFixed(1)}% при SLA {(bpmnSimulationResult.slaTargetMs! / 1000).toFixed(1)}с
