@@ -41,3 +41,18 @@ test('runs Monte Carlo on a loaded priority learning module', async ({ page }) =
   await expect(page.getByText('Средняя стоимость:')).toBeVisible()
   await expect(page.getByText('Оператор · capacity 1', { exact: false })).toBeVisible()
 })
+
+test('batch workload exposes instance and arrival controls', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Поток заявок: несколько instances', { exact: true }).click()
+  await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+  await expect(page.getByText('Instances', { exact: true })).toBeVisible()
+  await expect(page.getByText('Arrival, сек', { exact: true })).toBeVisible()
+})
+
+test('Simulation remains usable on a mobile viewport', async ({ page }) => {
+  await page.getByRole('button', { name: 'Симуляция' }).click()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('heading', { name: 'Monte Carlo симуляция' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Запустить симуляцию' })).toBeVisible()
+})
