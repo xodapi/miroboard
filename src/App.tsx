@@ -11,8 +11,9 @@ import slaCalendarExample from '../examples/sla-calendar.json'
 type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
+type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.7.2'
+const RELEASE_VERSION = 'v0.8.0'
 const RELEASE_COMMIT = 'e074c0a'
 const PROJECT_HISTORY = [
   ['2026-08-07 14:47 UTC+07', 'cc441ad', 'Исходный MiroBoard и автономная single-file сборка'],
@@ -215,6 +216,8 @@ export default function App() {
   const [showTemplates, setShowTemplates] = useState(false)
   const [showLearningModules, setShowLearningModules] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('board')
+  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null)
   const [showProjectHistory, setShowProjectHistory] = useState(false)
   const [showSimulationPanel, setShowSimulationPanel] = useState(false)
   const [showMore, setShowMore] = useState(false)
@@ -259,6 +262,10 @@ export default function App() {
   const yElements = useRef<Y.Array<BoardElement> | null>(null)
   const awarenessRef = useRef<any>(null)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
+  const showToast = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, tone })
+    window.setTimeout(() => setToast(null), 4200)
+  }, [])
 
   const createBpmnModel = useCallback(() => {
     const nodes = elements
@@ -623,7 +630,7 @@ export default function App() {
       link.click()
       URL.revokeObjectURL(url)
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'BPMN-модель нельзя экспортировать.')
+      showToast(error instanceof Error ? error.message : 'BPMN-модель нельзя экспортировать.', 'error')
     }
   }, [createBpmnModel, roomId])
 
@@ -649,7 +656,7 @@ export default function App() {
     } catch (error) {
       setActiveBpmnTokenId(null)
       setBpmnRunSummary(null)
-      window.alert(error instanceof Error ? error.message : 'Не удалось запустить BPMN-модель.')
+      showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-модель.', 'error')
     }
   }, [createBpmnModel])
 
@@ -664,7 +671,7 @@ export default function App() {
       setBpmnSimulationSummary(`MC ${result.runs}: P50 ${seconds(result.p50DurationMs)} · P90 ${seconds(result.p90DurationMs)} · P95 ${seconds(result.p95DurationMs)}`)
     } catch (error) {
       setBpmnSimulationSummary(null)
-      window.alert(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.')
+      showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.', 'error')
     }
   }, [createBpmnModel, simulationRuns, simulationSeed])
 
@@ -718,7 +725,7 @@ export default function App() {
       setSelectedId(null)
       setTransform({ x: 0, y: 0, scale: 1 })
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Не удалось импортировать BPMN-файл.')
+      showToast(error instanceof Error ? error.message : 'Не удалось импортировать BPMN-файл.', 'error')
     } finally {
       event.target.value = ''
     }
@@ -750,7 +757,7 @@ export default function App() {
     })
     setSelectedId(null)
     setTransform({ x: 0, y: 0, scale: 1 })
-    window.alert(`${example.title}\n\n${example.explanation}\n\nПроверка:\n• ${example.checks.join('\n• ')}`)
+    showToast(`Загружен модуль: ${example.title}. Откройте Симуляцию для проверки.`, 'success')
   }, [user.id, ydoc])
 
   // ======================== POINTER HANDLERS ========================
@@ -850,6 +857,7 @@ export default function App() {
       if (!bpmnFlowSourceId) {
         setBpmnFlowSourceId(targetNode.id)
         setSelectedId(targetNode.id)
+        showToast('Источник выбран. Теперь выберите целевой BPMN-узел.', 'info')
         return
       }
 
@@ -879,6 +887,8 @@ export default function App() {
       })
       setBpmnFlowSourceId(null)
       setSelectedId(flowId)
+      setTool('select')
+      showToast('Sequence flow создан.', 'success')
       return
     }
 
@@ -1344,6 +1354,17 @@ export default function App() {
             <span className={`text-[15px] font-bold tracking-tight ${textC}`}>MiroBoard</span>
             <a href={`${GITHUB_REPOSITORY}/releases/tag/${RELEASE_VERSION}`} target="_blank" rel="noreferrer" className="select-text rounded-md bg-violet-600 px-1.5 py-0.5 text-[10px] font-mono font-bold text-white hover:bg-violet-700" title="Release: можно выделить и скопировать">{RELEASE_VERSION}</a>
             <a href={`${GITHUB_REPOSITORY}/commit/${RELEASE_COMMIT}`} target="_blank" rel="noreferrer" className="select-text rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600 hover:bg-slate-200" title="Git commit: можно выделить и скопировать">{RELEASE_COMMIT}</a>
+            <div className="ml-1 hidden rounded-lg bg-slate-100 p-0.5 sm:flex">
+              {([
+                ['board', 'Доска'],
+                ['bpmn', 'BPMN'],
+                ['simulation', 'Симуляция'],
+              ] as [WorkspaceMode, string][]).map(([mode, label]) => (
+                <button key={mode} onClick={() => { setWorkspaceMode(mode); if (mode === 'simulation') setShowSimulationPanel(true) }} className={`rounded-md px-2 py-1 text-[10px] font-semibold transition ${workspaceMode === mode ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <button
               onClick={() => setShowProjectHistory(true)}
               className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`}
@@ -1382,7 +1403,7 @@ export default function App() {
                 <span>{bpmnIssues.some(issue => issue.severity === 'error') ? '!' : '✓'}</span>
                 BPMN {bpmnIssues.length || 'OK'}
               </div>
-              <button onClick={() => setShowSimulationPanel(true)} className="h-7 rounded-lg bg-fuchsia-500 px-2.5 text-[11px] font-bold text-white shadow-sm hover:bg-fuchsia-600" title="Открыть Monte Carlo симуляцию">
+              <button onClick={() => { setWorkspaceMode('simulation'); setShowSimulationPanel(true) }} className="h-7 rounded-lg bg-fuchsia-500 px-2.5 text-[11px] font-bold text-white shadow-sm hover:bg-fuchsia-600" title="Открыть Monte Carlo симуляцию">
                 Симуляция
               </button>
               {bpmnRunSummary && (
@@ -1425,6 +1446,12 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      {toast && (
+        <div className={`absolute right-4 top-16 z-[60] max-w-sm rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${toast.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-violet-200 bg-violet-50 text-violet-800'}`} data-ui>
+          <div className="flex items-start gap-3"><span>{toast.tone === 'error' ? '!' : toast.tone === 'success' ? '✓' : 'i'}</span><span>{toast.message}</span><button onClick={() => setToast(null)} className="ml-auto text-base leading-none">×</button></div>
+        </div>
+      )}
 
       {/* ===== CANVAS ===== */}
       <div ref={canvasRef} className="absolute inset-0 touch-none"
@@ -1503,13 +1530,13 @@ export default function App() {
           </g>
         </svg>
 
-        {elements.some(element => element.bpmnNodeType) && (
+        {workspaceMode === 'bpmn' && elements.some(element => element.bpmnNodeType) && (
           <aside className={`absolute left-3 top-[68px] z-20 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl shadow-slate-900/10 backdrop-blur transition-all ${sidebarCollapsed ? 'w-12' : 'w-52'}`} data-ui>
             <div className="mb-2 flex items-center justify-between px-1">
               {!sidebarCollapsed && <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">BPMN workspace</div>}
               <button onClick={() => setSidebarCollapsed(value => !value)} className="grid size-7 place-items-center rounded-lg text-slate-500 hover:bg-slate-100" title={sidebarCollapsed ? 'Развернуть BPMN-меню' : 'Свернуть BPMN-меню'}>{sidebarCollapsed ? '›' : '‹'}</button>
             </div>
-            <button onClick={() => setShowSimulationPanel(true)} className={`mb-1 flex w-full items-center gap-2 rounded-xl bg-violet-600 py-2.5 text-left text-xs font-bold text-white shadow-sm hover:bg-violet-700 ${sidebarCollapsed ? 'justify-center px-0' : 'px-3'}`} title="Симуляция">
+            <button onClick={() => { setWorkspaceMode('simulation'); setShowSimulationPanel(true) }} className={`mb-1 flex w-full items-center gap-2 rounded-xl bg-violet-600 py-2.5 text-left text-xs font-bold text-white shadow-sm hover:bg-violet-700 ${sidebarCollapsed ? 'justify-center px-0' : 'px-3'}`} title="Симуляция">
               <span>◌</span>{!sidebarCollapsed && ' Симуляция'}
             </button>
             <button onClick={() => setShowLearningModules(true)} className={`mb-1 flex w-full items-center gap-2 rounded-xl py-2 text-left text-xs font-semibold text-slate-700 hover:bg-violet-50 ${sidebarCollapsed ? 'justify-center px-0' : 'px-3'}`} title="Учебные модули">
@@ -1676,7 +1703,7 @@ export default function App() {
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'eraser' ? 'bg-black text-white' : hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 20H7L3 16a1.9 1.9 0 0 1 0-2.8L14.2 2h.8l6 6v.8L9.8 20" /></svg> Ластик
           </button>
-          <button onClick={() => { setShowBpmnPalette(!showBpmnPalette); setShowMore(false); setShowEmoji(false) }}
+          <button onClick={() => { setWorkspaceMode('bpmn'); setShowBpmnPalette(!showBpmnPalette); setShowMore(false); setShowEmoji(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${showBpmnPalette ? 'bg-violet-600 text-white' : hoverBg}`}>
             ◇ BPMN
           </button>
