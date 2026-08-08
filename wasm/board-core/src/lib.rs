@@ -33,6 +33,10 @@ struct BpmnModel {
     flows: Vec<BpmnFlow>,
     #[serde(default)]
     sla_target_ms: Option<u64>,
+    #[serde(default)]
+    calendar_work_start_ms: Option<u64>,
+    #[serde(default)]
+    calendar_work_end_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -462,6 +466,47 @@ fn fixed_duration_ms(node: &BpmnNode) -> u64 {
     })
 }
 
+fn calendar_enabled(model: &BpmnModel) -> bool {
+    model.calendar_work_start_ms.is_some() && model.calendar_work_end_ms.is_some()
+}
+
+fn calendar_start(model: &BpmnModel, timestamp_ms: u64) -> u64 {
+    let (Some(work_start), Some(work_end)) = (model.calendar_work_start_ms, model.calendar_work_end_ms) else {
+        return timestamp_ms;
+    };
+    if work_end <= work_start || work_end > 86_400_000 {
+        return timestamp_ms;
+    }
+    let day = timestamp_ms / 86_400_000;
+    let offset = timestamp_ms % 86_400_000;
+    if offset < work_start {
+        day * 86_400_000 + work_start
+    } else if offset >= work_end {
+        (day + 1) * 86_400_000 + work_start
+    } else {
+        timestamp_ms
+    }
+}
+
+fn calendar_add(model: &BpmnModel, start_ms: u64, duration_ms: u64) -> u64 {
+    if !calendar_enabled(model) {
+        return start_ms.saturating_add(duration_ms);
+    }
+    let (work_start, work_end) = (model.calendar_work_start_ms.unwrap(), model.calendar_work_end_ms.unwrap());
+    let mut cursor = calendar_start(model, start_ms);
+    let mut remaining = duration_ms;
+    while remaining > 0 {
+        let offset = cursor % 86_400_000;
+        let available = work_end.saturating_sub(offset);
+        if remaining <= available {
+            return cursor.saturating_add(remaining);
+        }
+        remaining = remaining.saturating_sub(available);
+        cursor = (cursor / 86_400_000 + 1) * 86_400_000 + work_start;
+    }
+    cursor
+}
+
 fn next_random_unit(state: &mut u64) -> f64 {
     *state = state
         .wrapping_mul(6_364_136_223_846_793_005)
@@ -615,16 +660,16 @@ fn run_bpmn_model(
             .get(current_id)
             .ok_or_else(|| JsValue::from_str("Token reached a missing BPMN node."))?;
         let sampled_duration_ms = sampled_duration_ms(current, random_state);
-        let mut task_start_ms = arrived_at_ms;
+        let mut task_start_ms = calendar_start(model, arrived_at_ms);
         if let Some(role) = current.resource_role.as_deref().filter(|role| !role.trim().is_empty()) {
             let capacity = current.resource_capacity.unwrap_or(1).max(1) as usize;
             let slots = resource_slots.entry(role.to_owned()).or_insert_with(|| vec![0; capacity]);
             let slot_index = slots.iter().enumerate().min_by_key(|(_, finish)| *finish).map(|(index, _)| index).unwrap_or(0);
-            task_start_ms = task_start_ms.max(slots[slot_index]);
+            task_start_ms = calendar_start(model, task_start_ms.max(slots[slot_index]));
             *role_waiting_ms.entry(role.to_owned()).or_default() += task_start_ms.saturating_sub(arrived_at_ms);
-            slots[slot_index] = task_start_ms.saturating_add(sampled_duration_ms);
+            slots[slot_index] = calendar_add(model, task_start_ms, sampled_duration_ms);
         }
-        let completed_at_ms = task_start_ms.saturating_add(sampled_duration_ms);
+        let completed_at_ms = calendar_add(model, task_start_ms, sampled_duration_ms);
         estimated_cost += sampled_duration_ms as f64 / 3_600_000.0 * current.cost_per_hour.unwrap_or(0.0);
         if let Some(role) = current.resource_role.as_deref().filter(|role| !role.trim().is_empty()) {
             *role_workload_ms.entry(role.to_owned()).or_default() += sampled_duration_ms;
@@ -1110,7 +1155,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
         ));
     }
 
-    serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms: None })
+    serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms: None, calendar_work_start_ms: None, calendar_work_end_ms: None })
         .map_err(|error| JsValue::from_str(&format!("Could not serialize imported BPMN: {error}")))
 }
 
@@ -1216,6 +1261,8 @@ mod tests {
                 },
             ],
             sla_target_ms: None,
+            calendar_work_start_ms: None,
+            calendar_work_end_ms: None,
         };
 
         assert!(validate_bpmn_model(&model).valid);
@@ -1400,6 +1447,27 @@ mod tests {
 
         assert!(result.contains(r#""slaTargetMs":5000"#));
         assert!(result.contains(r#""onTimeRate":1.0"#));
+    }
+
+    #[test]
+    fn calendar_moves_work_past_end_of_day_to_next_workday() {
+        let model = r#"{
+          "calendarWorkStartMs":0,
+          "calendarWorkEndMs":5000,
+          "nodes":[
+            {"id":"start","type":"startEvent"},
+            {"id":"task","type":"task","durationMs":8000},
+            {"id":"end","type":"endEvent"}
+          ],
+          "flows":[
+            {"id":"f1","sourceId":"start","targetId":"task"},
+            {"id":"f2","sourceId":"task","targetId":"end"}
+          ]
+        }"#;
+
+        let result = simulate_bpmn(model, 42, 1).expect("calendar model should simulate");
+
+        assert!(result.contains(r#""maxDurationMs":86403000"#));
     }
 
     #[test]

@@ -224,6 +224,8 @@ export default function App() {
   const [simulationSeed, setSimulationSeed] = useState('42')
   const [simulationRuns, setSimulationRuns] = useState('500')
   const [simulationTarget, setSimulationTarget] = useState('')
+  const [calendarStart, setCalendarStart] = useState('')
+  const [calendarEnd, setCalendarEnd] = useState('')
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
   const [snapGrid, setSnapGrid] = useState(false)
@@ -282,8 +284,14 @@ export default function App() {
         id: element.id,
         ...element.bpmnFlow,
       }))
-    return { nodes, flows, slaTargetMs: simulationTarget ? Number(simulationTarget) * 1000 : undefined }
-  }, [elements, simulationTarget])
+    return {
+      nodes,
+      flows,
+      slaTargetMs: simulationTarget ? Number(simulationTarget) * 1000 : undefined,
+      calendarWorkStartMs: calendarStart ? Number(calendarStart) * 3_600_000 : undefined,
+      calendarWorkEndMs: calendarEnd ? Number(calendarEnd) * 3_600_000 : undefined,
+    }
+  }, [elements, simulationTarget, calendarStart, calendarEnd])
 
   const bpmnIssues = useMemo(() => {
     const model = createBpmnModel()
@@ -1817,7 +1825,7 @@ export default function App() {
               </div>
               <button onClick={() => setShowSimulationPanel(false)} className={`size-9 rounded-xl text-lg ${hoverBg}`} aria-label="Закрыть симуляцию">×</button>
             </div>
-            <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="grid grid-cols-4 gap-3 mb-5">
               <label className={`text-[12px] font-semibold ${textSec}`}>Seed
                 <input value={simulationSeed} onChange={event => setSimulationSeed(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
               </label>
@@ -1826,6 +1834,12 @@ export default function App() {
               </label>
               <label className={`text-[12px] font-semibold ${textSec}`}>SLA, сек
                 <input type="number" min="0" value={simulationTarget} onChange={event => setSimulationTarget(event.target.value)} placeholder="не задано" className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+              </label>
+              <label className={`text-[12px] font-semibold ${textSec}`}>Работа с
+                <input type="number" min="0" max="23.99" step="0.5" value={calendarStart} onChange={event => setCalendarStart(event.target.value)} placeholder="0" className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+              </label>
+              <label className={`text-[12px] font-semibold ${textSec}`}>до
+                <input type="number" min="0" max="24" step="0.5" value={calendarEnd} onChange={event => setCalendarEnd(event.target.value)} placeholder="24" className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
               </label>
             </div>
             <button onClick={simulateBpmn} className="w-full rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-4 py-2.5 text-sm font-bold text-white">
