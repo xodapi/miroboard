@@ -100,3 +100,12 @@ test('runs the BPMN token runner on a loaded educational process', async ({ page
   await page.getByTitle('Проверить поток').click()
   await expect(page.getByText('Оценка:', { exact: false })).toBeVisible()
 })
+
+test('parallel queue simulation reports resource waiting metrics', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Параллельные задачи и очередь ресурса', { exact: true }).click()
+  await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+  await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
+  await expect(page.getByText('Средняя стоимость:')).toBeVisible()
+  await expect(page.getByText('wait', { exact: false })).toBeVisible()
+})
