@@ -78,3 +78,17 @@ test('loaded educational process reports valid BPMN status', async ({ page }) =>
   await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
   await expect(page.locator('[title="BPMN-модель корректна"]')).toBeVisible()
 })
+
+test('selecting a sequence flow opens its Property Panel', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Приоритеты в очереди', { exact: true }).click()
+  await page.getByTestId('bpmn-flow-f2').click({ force: true })
+  await expect(page.getByText('Свойства sequence flow', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Условие')).toBeVisible()
+})
+
+test('onboarding can be reopened after clearing local state', async ({ page }) => {
+  await page.evaluate(() => localStorage.removeItem('miro-onboarding-seen'))
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Пропустить' })).toBeVisible()
+})

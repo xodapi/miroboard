@@ -1308,7 +1308,7 @@ export default function App() {
         const angle = Math.atan2(y2, x2)
         const hs = 12
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${startX},${startY})`} className="touch-none cursor-move">
+          <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className="touch-none cursor-move">
             <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} />
             <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
               fill={el.color} />
