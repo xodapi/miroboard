@@ -8,6 +8,7 @@ import parallelQueueExample from '../examples/parallel-queue.json'
 import slaCalendarExample from '../examples/sla-calendar.json'
 import batchWorkloadExample from '../examples/batch-workload.json'
 import priorityQueueExample from '../examples/priority-queue.json'
+import fifoPriorityExample from '../examples/fifo-vs-priority.json'
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
@@ -22,7 +23,12 @@ const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
   nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number; priority?: number }[]
   flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }[]
+  arrivalClasses?: { count: number; intervalMs: number; priority: number }[]
+  resourceRoles?: { name: string; capacity: number; queuePolicy?: QueuePolicy }[]
 }
+type QueuePolicy = 'fifo' | 'priority'
+type ArrivalClassDraft = { count: string; intervalSec: string; priority: string }
+type RolePolicyDraft = { capacity: string; queuePolicy: QueuePolicy }
 type BpmnSimulationResult = {
   seed: number
   runs: number
@@ -40,6 +46,7 @@ type BpmnSimulationResult = {
   slaTargetMs?: number
   onTimeRate?: number
   roleUtilization: { role: string; capacity: number; meanWorkloadMs: number; meanWaitingMs: number; utilization: number }[]
+  priorityClasses: { priority: number; instances: number; meanWaitingMs: number; meanDurationMs: number }[]
 }
 type EducationalExample = {
   title: string
@@ -47,7 +54,7 @@ type EducationalExample = {
   checks: string[]
   model: ImportedBpmnModel
 }
-const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample, batchWorkloadExample, priorityQueueExample] as unknown as EducationalExample[]
+const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample, batchWorkloadExample, priorityQueueExample, fifoPriorityExample] as unknown as EducationalExample[]
 
 interface BoardElement {
   id: string
@@ -221,6 +228,8 @@ export default function App() {
   const [simulationTarget, setSimulationTarget] = useState('')
   const [simulationInstances, setSimulationInstances] = useState('1')
   const [arrivalInterval, setArrivalInterval] = useState('0')
+  const [arrivalClasses, setArrivalClasses] = useState<ArrivalClassDraft[]>([])
+  const [rolePolicies, setRolePolicies] = useState<Record<string, RolePolicyDraft>>({})
   const [calendarStart, setCalendarStart] = useState('')
   const [calendarEnd, setCalendarEnd] = useState('')
   const [showEmoji, setShowEmoji] = useState(false)
@@ -290,6 +299,16 @@ export default function App() {
         id: element.id,
         ...element.bpmnFlow,
       }))
+    // Only emit roles the user actually configured. An empty list keeps the
+    // engine on the per-node `resourceCapacity` fallback, so untouched boards
+    // simulate exactly as before.
+    const resourceRoles = Object.entries(rolePolicies)
+      .filter(([name]) => nodes.some((node) => node.resourceRole === name))
+      .map(([name, policy]) => ({
+        name,
+        capacity: Math.max(1, Number(policy.capacity) || 1),
+        queuePolicy: policy.queuePolicy,
+      }))
     return {
       nodes,
       flows,
@@ -298,8 +317,14 @@ export default function App() {
       calendarWorkEndMs: calendarEnd ? Number(calendarEnd) * 3_600_000 : undefined,
       simulationInstances: Number(simulationInstances) || 1,
       arrivalIntervalMs: Math.max(0, Number(arrivalInterval) || 0) * 1000,
+      arrivalClasses: arrivalClasses.map((arrivalClass) => ({
+        count: Math.max(1, Number(arrivalClass.count) || 1),
+        intervalMs: Math.max(0, Number(arrivalClass.intervalSec) || 0) * 1000,
+        priority: Number(arrivalClass.priority) || 0,
+      })),
+      resourceRoles,
     }
-  }, [elements, simulationTarget, calendarStart, calendarEnd, simulationInstances, arrivalInterval])
+  }, [elements, simulationTarget, calendarStart, calendarEnd, simulationInstances, arrivalInterval, arrivalClasses, rolePolicies])
 
   const bpmnIssues = useMemo(() => {
     const model = createBpmnModel()
@@ -315,6 +340,18 @@ export default function App() {
       return [{ severity: 'error' as const, message: 'Не удалось проверить BPMN-модель.' }]
     }
   }, [createBpmnModel])
+
+  // Roles that actually appear on the canvas, with the inline capacity that the
+  // engine would use if no explicit role policy is configured.
+  const detectedRoles = useMemo(() => {
+    const roles = new Map<string, number>()
+    for (const element of elements) {
+      const role = element.bpmnResourceRole?.trim()
+      if (!role) continue
+      roles.set(role, Math.max(roles.get(role) ?? 1, element.bpmnResourceCapacity ?? 1))
+    }
+    return [...roles.entries()].sort(([left], [right]) => left.localeCompare(right))
+  }, [elements])
 
   const selectedBpmnTask = useMemo(
     () => elements.find((element) => element.id === selectedId && element.bpmnNodeType === 'task') ?? null,
@@ -764,6 +801,31 @@ export default function App() {
         bpmnFlow: { sourceId: flow.sourceId, targetId: flow.targetId, flowType: flow.flowType || 'sequence', condition: flow.condition, probability: flow.probability, isDefault: flow.isDefault },
       }])
     })
+    // Load arrival classes if provided
+    if (example.model.arrivalClasses) {
+      setArrivalClasses(
+        example.model.arrivalClasses.map((ac) => ({
+          count: String(ac.count),
+          intervalSec: String(ac.intervalMs / 1000),
+          priority: String(ac.priority),
+        }))
+      )
+    } else {
+      setArrivalClasses([])
+    }
+    // Load role policies if provided
+    if (example.model.resourceRoles) {
+      const policies: Record<string, RolePolicyDraft> = {}
+      for (const role of example.model.resourceRoles) {
+        policies[role.name] = {
+          capacity: String(role.capacity),
+          queuePolicy: role.queuePolicy ?? 'fifo',
+        }
+      }
+      setRolePolicies(policies)
+    } else {
+      setRolePolicies({})
+    }
     setSelectedId(null)
     setTransform({ x: 0, y: 0, scale: 1 })
     showToast(`Загружен модуль: ${example.title}. Откройте Симуляцию для проверки.`, 'success')
@@ -2031,7 +2093,52 @@ export default function App() {
                 <input type="number" min="0" step="0.1" value={arrivalInterval} onChange={event => setArrivalInterval(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
               </label>
             </div>
-            <button onClick={simulateBpmn} className="w-full rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-4 py-2.5 text-sm font-bold text-white">
+
+            {/* Arrival Classes */}
+            <details className={`mt-4 rounded-xl border ${dk ? 'border-slate-600' : 'border-slate-200'}`}>
+              <summary className={`cursor-pointer px-3 py-2 text-sm font-semibold ${textSec} hover:bg-slate-50 rounded-xl`}>
+                Классы прибытия ({arrivalClasses.length})
+              </summary>
+              <div className="p-3 space-y-2">
+                {arrivalClasses.map((ac, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <input type="number" min="1" placeholder="Кол-во" value={ac.count} onChange={event => setArrivalClasses(prev => prev.map((item, i) => i === index ? { ...item, count: event.target.value } : item))} className={`w-20 rounded-lg border px-2 py-1 text-xs outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+                    <input type="number" min="0" step="0.1" placeholder="Интервал, с" value={ac.intervalSec} onChange={event => setArrivalClasses(prev => prev.map((item, i) => i === index ? { ...item, intervalSec: event.target.value } : item))} className={`flex-1 rounded-lg border px-2 py-1 text-xs outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+                    <input type="number" placeholder="Priority" value={ac.priority} onChange={event => setArrivalClasses(prev => prev.map((item, i) => i === index ? { ...item, priority: event.target.value } : item))} className={`w-20 rounded-lg border px-2 py-1 text-xs outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+                    <button onClick={() => setArrivalClasses(prev => prev.filter((_, i) => i !== index))} className="size-7 rounded-lg bg-red-100 text-red-700 text-xs hover:bg-red-200">−</button>
+                  </div>
+                ))}
+                <button onClick={() => setArrivalClasses(prev => [...prev, { count: '1', intervalSec: '0', priority: '0' }])} className={`w-full rounded-lg border-2 border-dashed px-3 py-2 text-xs font-semibold ${dk ? 'border-slate-600 text-slate-400 hover:bg-slate-700' : 'border-slate-300 text-slate-500 hover:bg-slate-50'}`}>
+                  + Добавить класс
+                </button>
+              </div>
+            </details>
+
+            {/* Role Policies */}
+            {detectedRoles.length > 0 && (
+              <details className={`mt-3 rounded-xl border ${dk ? 'border-slate-600' : 'border-slate-200'}`}>
+                <summary className={`cursor-pointer px-3 py-2 text-sm font-semibold ${textSec} hover:bg-slate-50 rounded-xl`}>
+                  Политики ресурсов ({detectedRoles.length} ролей)
+                </summary>
+                <div className="p-3 space-y-2">
+                  {detectedRoles.map(([role, inlineCapacity]) => {
+                    const policy = rolePolicies[role] || { capacity: String(inlineCapacity), queuePolicy: 'fifo' as QueuePolicy }
+                    return (
+                      <div key={role} className="flex items-center gap-2">
+                        <span className="flex-1 text-xs font-semibold truncate">{role}</span>
+                        <input type="number" min="1" value={policy.capacity} onChange={event => setRolePolicies(prev => ({ ...prev, [role]: { ...policy, capacity: event.target.value } }))} className={`w-16 rounded-lg border px-2 py-1 text-xs outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
+                        <select value={policy.queuePolicy} onChange={event => setRolePolicies(prev => ({ ...prev, [role]: { ...policy, queuePolicy: event.target.value as QueuePolicy } }))} className={`rounded-lg border px-2 py-1 text-xs outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`}>
+                          <option value="fifo">FIFO</option>
+                          <option value="priority">Priority</option>
+                        </select>
+                      </div>
+                    )
+                  })}
+                </div>
+              </details>
+            )}
+
+            <button onClick={simulateBpmn} className="w-full mt-4 rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-4 py-2.5 text-sm font-bold text-white">
               Запустить симуляцию
             </button>
             {bpmnSimulationResult && (
@@ -2075,6 +2182,17 @@ export default function App() {
                     <span className="font-bold">{(role.utilization * 100).toFixed(0)}%</span>
                   </div>
                 ))}
+                {bpmnSimulationResult.priorityClasses.length > 0 && (
+                  <div className="col-span-3 border-t border-black/10 pt-2">
+                    <div className={`text-[10px] font-semibold ${textSec} mb-2`}>По приоритетам:</div>
+                    {bpmnSimulationResult.priorityClasses.map((pc) => (
+                      <div key={pc.priority} className="flex items-center justify-between text-[11px] py-1">
+                        <span className={textSec}>Priority {pc.priority} · {pc.instances} inst · wait {(pc.meanWaitingMs / 1000).toFixed(1)}с</span>
+                        <span className="font-bold">{(pc.meanDurationMs / 1000).toFixed(1)}с</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </section>

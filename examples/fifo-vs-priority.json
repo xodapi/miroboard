@@ -1,0 +1,27 @@
+{
+  "title": "FIFO vs Priority: классы прибытия",
+  "explanation": "Два класса прибытия (стандартные заявки priority=1 и срочные priority=10) конкурируют за один ресурс. При FIFO policy обслуживаются в порядке прибытия. При Priority policy срочные обслуживаются первыми.",
+  "checks": [
+    "Добавьте два arrival класса: count=2, interval=500ms, priority=1 и count=1, interval=0ms, priority=10.",
+    "Установите для роли «Оператор» capacity=1 и queuePolicy=fifo, затем priority.",
+    "Сравните meanWaitingMs для каждого приоритета в результатах симуляции."
+  ],
+  "model": {
+    "nodes": [
+      {"id":"start","type":"startEvent","name":"Старт","x":80,"y":180},
+      {"id":"task","type":"task","name":"Обработка заявки","durationMs":1000,"resourceRole":"Оператор","resourceCapacity":1,"x":250,"y":160},
+      {"id":"end","type":"endEvent","name":"Финиш","x":480,"y":180}
+    ],
+    "flows": [
+      {"id":"f1","sourceId":"start","targetId":"task"},
+      {"id":"f2","sourceId":"task","targetId":"end"}
+    ],
+    "arrivalClasses": [
+      {"count":2,"intervalMs":500,"priority":1},
+      {"count":1,"intervalMs":0,"priority":10}
+    ],
+    "resourceRoles": [
+      {"name":"Оператор","capacity":1,"queuePolicy":"priority"}
+    ]
+  }
+}

@@ -108,7 +108,7 @@ test('parallel queue simulation reports resource waiting metrics', async ({ page
   await page.getByTitle('Открыть Monte Carlo симуляцию').click()
   await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
   await expect(page.getByText('Средняя стоимость:')).toBeVisible()
-  await expect(page.getByText('wait', { exact: false })).toBeVisible()
+  await expect(page.getByText('capacity', { exact: false })).toBeVisible()
 })
 
 test('SLA calendar simulation reports on-time rate', async ({ page }) => {

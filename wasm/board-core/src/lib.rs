@@ -48,6 +48,18 @@ struct BpmnModel {
     simulation_instances: u32,
     #[serde(default)]
     arrival_interval_ms: u64,
+    #[serde(default)]
+    arrival_classes: Vec<ArrivalClass>,
+    #[serde(default)]
+    resource_roles: Vec<ResourceRole>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct ArrivalClass {
+    count: u32,
+    interval_ms: u64,
+    priority: i32,
 }
 
 fn default_simulation_instances() -> u32 { 1 }
@@ -105,6 +117,23 @@ struct BpmnFlow {
     probability: Option<f64>,
     #[serde(default)]
     is_default: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+enum QueuePolicy {
+    #[default]
+    Fifo,
+    Priority,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ResourceRole {
+    name: String,
+    capacity: u32,
+    #[serde(default)]
+    queue_policy: QueuePolicy,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -204,6 +233,10 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
     }
     if model.arrival_interval_ms > MAX_ARRIVAL_INTERVAL_MS {
         result.error("arrival-interval-invalid", "Arrival interval is too large.", None);
+    }
+    let class_instances = model.arrival_classes.iter().map(|class| class.count as u64).sum::<u64>();
+    if class_instances > 1_000 || model.arrival_classes.iter().any(|class| class.count == 0 || class.interval_ms > MAX_ARRIVAL_INTERVAL_MS) {
+        result.error("arrival-classes-invalid", "Arrival classes must have 1..1000 total instances and bounded intervals.", None);
     }
     match (model.calendar_work_start_ms, model.calendar_work_end_ms) {
         (Some(start), Some(end)) if start < end && end <= 86_400_000 => {}
@@ -654,14 +687,49 @@ fn parse_and_validate_bpmn(model_json: &str) -> Result<BpmnModel, JsValue> {
     Ok(model)
 }
 
-/// Executes a BPMN process. Supplying a random state enables seeded
-/// probability selection for XOR gateways.
-fn run_bpmn_model(
+#[derive(Debug, Clone)]
+struct ActiveToken<'a> {
+    node_id: &'a str,
+    arrived_at: u64,
+    priority: i32,
+    instance_index: u32,
+    sequence: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InstanceSpec {
+    index: u32,
+    arrival_at_ms: u64,
+    priority: i32,
+}
+
+#[derive(Debug, Clone)]
+struct InstanceOutcome {
+    priority: i32,
+    duration_ms: u64,
+    cost: f64,
+    waiting_ms: u64,
+}
+
+struct BpmnBatchResult {
+    completed: bool,
+    token_path: Vec<String>,
+    instances: Vec<InstanceOutcome>,
+    role_workload_ms: BTreeMap<String, u64>,
+    role_capacity: BTreeMap<String, u32>,
+    role_waiting_ms: BTreeMap<String, u64>,
+}
+
+/// Executes one or more BPMN process instances inside a single scheduling
+/// context. All instances share the resource slots, so tokens from different
+/// instances compete in the same queue and a role's queue policy can reorder
+/// them. Supplying a random state enables seeded probability selection for XOR
+/// gateways.
+fn run_bpmn_batch(
     model: &BpmnModel,
     random_state: &mut Option<u64>,
-    started_at_ms: u64,
-    resource_slots: &mut HashMap<String, Vec<u64>>,
-) -> Result<BpmnRunResult, JsValue> {
+    specs: &[InstanceSpec],
+) -> Result<BpmnBatchResult, JsValue> {
     let nodes_by_id: HashMap<&str, &BpmnNode> = model
         .nodes
         .iter()
@@ -686,28 +754,65 @@ fn run_bpmn_model(
         .iter()
         .find(|node| node.node_type == BpmnNodeType::StartEvent)
         .ok_or_else(|| JsValue::from_str("Cannot run BPMN model without a start event."))?;
+    let role_registry: HashMap<&str, &ResourceRole> = model
+        .resource_roles
+        .iter()
+        .map(|role| (role.name.as_str(), role))
+        .collect();
 
-    let mut active_tokens = vec![(start.id.as_str(), started_at_ms)];
-    let mut waiting_at_parallel_join: HashMap<&str, (usize, u64)> = HashMap::new();
+    let mut sequence = 0u64;
+    let mut active_tokens: Vec<ActiveToken> = specs
+        .iter()
+        .map(|spec| {
+            let token = ActiveToken {
+                node_id: start.id.as_str(),
+                arrived_at: spec.arrival_at_ms,
+                priority: spec.priority,
+                instance_index: spec.index,
+                sequence,
+            };
+            sequence += 1;
+            token
+        })
+        .collect();
+
+    let mut resource_slots: HashMap<String, Vec<u64>> = HashMap::new();
+    let mut waiting_at_parallel_join: HashMap<(u32, &str), (usize, u64)> = HashMap::new();
     let mut token_path = Vec::new();
     let mut completed_tokens = 0usize;
-    let mut estimated_duration_ms = 0u64;
-    let mut estimated_cost = 0.0;
-    let mut role_workload_ms = BTreeMap::new();
-    let mut role_capacity = BTreeMap::new();
-    let mut role_waiting_ms = BTreeMap::new();
-    let step_limit = model.nodes.len().saturating_mul(model.flows.len().max(1)).saturating_mul(4);
+    let mut role_workload_ms: BTreeMap<String, u64> = BTreeMap::new();
+    let mut role_capacity: BTreeMap<String, u32> = BTreeMap::new();
+    let mut role_waiting_ms: BTreeMap<String, u64> = BTreeMap::new();
+    let mut instance_end_ms: HashMap<u32, u64> = HashMap::new();
+    let mut instance_cost: HashMap<u32, f64> = HashMap::new();
+    let mut instance_waiting_ms: HashMap<u32, u64> = HashMap::new();
+    let step_limit = model
+        .nodes
+        .len()
+        .saturating_mul(model.flows.len().max(1))
+        .saturating_mul(4)
+        .saturating_mul(specs.len().max(1));
 
     for _ in 0..=step_limit {
-        let Some(next_index) = active_tokens.iter().enumerate().min_by_key(|(_, (id, arrived))| {
-            (*arrived, Reverse(nodes_by_id.get(id).and_then(|node| node.priority).unwrap_or(0)))
-        }).map(|(index, _)| index) else {
+        if active_tokens.is_empty() {
             if waiting_at_parallel_join.is_empty() && completed_tokens > 0 {
-                return Ok(BpmnRunResult {
+                let instances = specs
+                    .iter()
+                    .map(|spec| InstanceOutcome {
+                        priority: spec.priority,
+                        duration_ms: instance_end_ms
+                            .get(&spec.index)
+                            .copied()
+                            .unwrap_or(spec.arrival_at_ms)
+                            .saturating_sub(spec.arrival_at_ms),
+                        cost: instance_cost.get(&spec.index).copied().unwrap_or(0.0),
+                        waiting_ms: instance_waiting_ms.get(&spec.index).copied().unwrap_or(0),
+                    })
+                    .collect();
+                return Ok(BpmnBatchResult {
                     completed: true,
                     token_path,
-                    estimated_duration_ms: estimated_duration_ms.saturating_sub(started_at_ms),
-                    estimated_cost,
+                    instances,
                     role_workload_ms,
                     role_capacity,
                     role_waiting_ms,
@@ -716,69 +821,171 @@ fn run_bpmn_model(
             return Err(JsValue::from_str(
                 "A parallel gateway is waiting for tokens from unfinished branches.",
             ));
-        };
-        let (current_id, arrived_at_ms) = active_tokens.remove(next_index);
+        }
+
+        // Tokens on nodes without a resource role never contend for capacity, so they
+        // advance first. That drains every instance up to the resource queues before a
+        // single capacity decision is made, which is what lets a queue policy compare
+        // tokens that belong to different instances.
+        let mut next_index = 0usize;
+        let mut best_key: Option<(u8, u64, Reverse<i32>, u64, u32, u64)> = None;
+        for (index, token) in active_tokens.iter().enumerate() {
+            let node = nodes_by_id.get(token.node_id);
+            let resource_role = node
+                .and_then(|node| node.resource_role.as_deref())
+                .filter(|role| !role.trim().is_empty());
+            let (phase, earliest_exec_ms, priority_key) = match resource_role {
+                Some(role_name) => {
+                    let earliest_slot = resource_slots
+                        .get(role_name)
+                        .and_then(|slots| slots.iter().min().copied())
+                        .unwrap_or(0);
+                    let policy = role_registry
+                        .get(role_name)
+                        .map(|role| &role.queue_policy)
+                        .unwrap_or(&QueuePolicy::Fifo);
+                    let priority_key = match policy {
+                        QueuePolicy::Priority => Reverse(token.priority),
+                        QueuePolicy::Fifo => Reverse(0),
+                    };
+                    (1u8, token.arrived_at.max(earliest_slot), priority_key)
+                }
+                None => (0u8, token.arrived_at, Reverse(0)),
+            };
+            let key = (
+                phase,
+                earliest_exec_ms,
+                priority_key,
+                token.arrived_at,
+                token.instance_index,
+                token.sequence,
+            );
+            if best_key.map_or(true, |best| key < best) {
+                best_key = Some(key);
+                next_index = index;
+            }
+        }
+
+        let token = active_tokens.remove(next_index);
+        let current_id = token.node_id;
+        let arrived_at_ms = token.arrived_at;
         token_path.push(current_id.to_owned());
         let current = nodes_by_id
             .get(current_id)
             .ok_or_else(|| JsValue::from_str("Token reached a missing BPMN node."))?;
         let sampled_duration_ms = sampled_duration_ms(current, random_state);
         let mut task_start_ms = calendar_start(model, arrived_at_ms);
-        if let Some(role) = current.resource_role.as_deref().filter(|role| !role.trim().is_empty()) {
-            let capacity = current.resource_capacity.unwrap_or(1).max(1) as usize;
-            let slots = resource_slots.entry(role.to_owned()).or_insert_with(|| vec![0; capacity]);
-            let slot_index = slots.iter().enumerate().min_by_key(|(_, finish)| *finish).map(|(index, _)| index).unwrap_or(0);
+        if let Some(role_name) = current
+            .resource_role
+            .as_deref()
+            .filter(|role| !role.trim().is_empty())
+        {
+            let capacity = role_registry
+                .get(role_name)
+                .map(|role| role.capacity.max(1) as usize)
+                .or_else(|| current.resource_capacity.map(|cap| cap.max(1) as usize))
+                .unwrap_or(1);
+            let slots = resource_slots
+                .entry(role_name.to_owned())
+                .or_insert_with(|| vec![0; capacity]);
+            let slot_index = slots
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, finish)| *finish)
+                .map(|(index, _)| index)
+                .unwrap_or(0);
             task_start_ms = calendar_start(model, task_start_ms.max(slots[slot_index]));
-            *role_waiting_ms.entry(role.to_owned()).or_default() += task_start_ms.saturating_sub(arrived_at_ms);
+            let waited_ms = task_start_ms.saturating_sub(arrived_at_ms);
+            *role_waiting_ms.entry(role_name.to_owned()).or_default() += waited_ms;
+            *instance_waiting_ms.entry(token.instance_index).or_default() += waited_ms;
             slots[slot_index] = calendar_add(model, task_start_ms, sampled_duration_ms);
         }
         let completed_at_ms = calendar_add(model, task_start_ms, sampled_duration_ms);
-        estimated_cost += sampled_duration_ms as f64 / 3_600_000.0 * current.cost_per_hour.unwrap_or(0.0);
-        if let Some(role) = current.resource_role.as_deref().filter(|role| !role.trim().is_empty()) {
-            *role_workload_ms.entry(role.to_owned()).or_default() += sampled_duration_ms;
+        *instance_cost.entry(token.instance_index).or_insert(0.0) +=
+            sampled_duration_ms as f64 / 3_600_000.0 * current.cost_per_hour.unwrap_or(0.0);
+        if let Some(role_name) = current
+            .resource_role
+            .as_deref()
+            .filter(|role| !role.trim().is_empty())
+        {
+            *role_workload_ms.entry(role_name.to_owned()).or_default() += sampled_duration_ms;
+            let tracked_capacity = role_registry
+                .get(role_name)
+                .map(|role| role.capacity.max(1))
+                .or_else(|| current.resource_capacity.map(|cap| cap.max(1)))
+                .unwrap_or(1);
             role_capacity
-                .entry(role.to_owned())
-                .and_modify(|capacity| *capacity = (*capacity).min(current.resource_capacity.unwrap_or(1).max(1)))
-                .or_insert(current.resource_capacity.unwrap_or(1).max(1));
+                .entry(role_name.to_owned())
+                .and_modify(|capacity| *capacity = (*capacity).min(tracked_capacity))
+                .or_insert(tracked_capacity);
         }
         if current.node_type == BpmnNodeType::EndEvent {
             completed_tokens += 1;
-            estimated_duration_ms = estimated_duration_ms.max(completed_at_ms);
+            let instance_end = instance_end_ms.entry(token.instance_index).or_insert(0);
+            *instance_end = (*instance_end).max(completed_at_ms);
             continue;
         }
-        let flows = outgoing
-            .get(current_id)
-            .ok_or_else(|| {
-                JsValue::from_str("The token reached a node without an outgoing sequence flow.")
-            })?;
+        let flows = outgoing.get(current_id).ok_or_else(|| {
+            JsValue::from_str("The token reached a node without an outgoing sequence flow.")
+        })?;
         if current.node_type == BpmnNodeType::AndGateway
             && incoming.get(current_id).map_or(0, Vec::len) > 1
         {
             let required = incoming.get(current_id).map_or(0, Vec::len);
-            let waiting = waiting_at_parallel_join.entry(current_id).or_default();
+            let waiting = waiting_at_parallel_join
+                .entry((token.instance_index, current_id))
+                .or_default();
             waiting.0 += 1;
             waiting.1 = waiting.1.max(completed_at_ms);
             if waiting.0 < required {
                 continue;
             }
             let synchronized_at_ms = waiting.1;
-            waiting_at_parallel_join.remove(current_id);
-            if current.node_type == BpmnNodeType::AndGateway && flows.len() > 1 {
+            waiting_at_parallel_join.remove(&(token.instance_index, current_id));
+            if flows.len() > 1 {
                 for flow in flows {
-                    active_tokens.push((flow.target_id.as_str(), synchronized_at_ms));
+                    active_tokens.push(ActiveToken {
+                        node_id: flow.target_id.as_str(),
+                        arrived_at: synchronized_at_ms,
+                        priority: token.priority,
+                        instance_index: token.instance_index,
+                        sequence,
+                    });
+                    sequence += 1;
                 }
             } else {
-                active_tokens.push((select_flow(current, flows, random_state).target_id.as_str(), synchronized_at_ms));
+                active_tokens.push(ActiveToken {
+                    node_id: select_flow(current, flows, random_state).target_id.as_str(),
+                    arrived_at: synchronized_at_ms,
+                    priority: token.priority,
+                    instance_index: token.instance_index,
+                    sequence,
+                });
+                sequence += 1;
             }
             continue;
         }
 
         if current.node_type == BpmnNodeType::AndGateway && flows.len() > 1 {
             for flow in flows {
-                active_tokens.push((flow.target_id.as_str(), completed_at_ms));
+                active_tokens.push(ActiveToken {
+                    node_id: flow.target_id.as_str(),
+                    arrived_at: completed_at_ms,
+                    priority: token.priority,
+                    instance_index: token.instance_index,
+                    sequence,
+                });
+                sequence += 1;
             }
         } else {
-            active_tokens.push((select_flow(current, flows, random_state).target_id.as_str(), completed_at_ms));
+            active_tokens.push(ActiveToken {
+                node_id: select_flow(current, flows, random_state).target_id.as_str(),
+                arrived_at: completed_at_ms,
+                priority: token.priority,
+                instance_index: token.instance_index,
+                sequence,
+            });
+            sequence += 1;
         }
     }
 
@@ -792,7 +999,26 @@ fn run_bpmn_model(
 #[wasm_bindgen]
 pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
     let model = parse_and_validate_bpmn(model_json)?;
-    serde_json::to_string(&run_bpmn_model(&model, &mut None, 0, &mut HashMap::new())?)
+    let batch = run_bpmn_batch(
+        &model,
+        &mut None,
+        &[InstanceSpec {
+            index: 0,
+            arrival_at_ms: 0,
+            priority: 0,
+        }],
+    )?;
+    let instance = batch.instances.first();
+    let result = BpmnRunResult {
+        completed: batch.completed,
+        token_path: batch.token_path,
+        estimated_duration_ms: instance.map_or(0, |instance| instance.duration_ms),
+        estimated_cost: instance.map_or(0.0, |instance| instance.cost),
+        role_workload_ms: batch.role_workload_ms,
+        role_capacity: batch.role_capacity,
+        role_waiting_ms: batch.role_waiting_ms,
+    };
+    serde_json::to_string(&result)
         .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN run: {error}")))
 }
 
@@ -813,8 +1039,21 @@ struct BpmnSimulationResult {
     max_duration_ms: u64,
     mean_cost: f64,
     role_utilization: Vec<BpmnRoleUtilization>,
+    priority_classes: Vec<BpmnPriorityClassStats>,
     sla_target_ms: Option<u64>,
     on_time_rate: Option<f64>,
+}
+
+/// Per-priority-class aggregates. Aggregate means hide the effect of a priority
+/// queue because the total amount of waiting is conserved; splitting the same
+/// waiting by class is what makes FIFO and priority visibly different.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BpmnPriorityClassStats {
+    priority: i32,
+    instances: u32,
+    mean_waiting_ms: u64,
+    mean_duration_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -849,31 +1088,71 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     let mut role_workloads: BTreeMap<String, u128> = BTreeMap::new();
     let mut role_capacities: BTreeMap<String, u32> = BTreeMap::new();
     let mut role_waiting: BTreeMap<String, u128> = BTreeMap::new();
-    for _ in 0..runs {
-        let mut resource_slots = HashMap::new();
-        for instance in 0..model.simulation_instances {
-            let run = run_bpmn_model(
-                &model,
-                &mut random_state,
-                instance as u64 * model.arrival_interval_ms,
-                &mut resource_slots,
-            )?;
-            durations.push(run.estimated_duration_ms);
-            costs.push(run.estimated_cost);
-            for (role, workload) in run.role_workload_ms {
-                *role_workloads.entry(role).or_default() += workload as u128;
-            }
-            for (role, capacity) in run.role_capacity {
-                role_capacities
-                    .entry(role)
-                    .and_modify(|current| *current = (*current).min(capacity))
-                    .or_insert(capacity);
-            }
-            for (role, waiting) in run.role_waiting_ms {
-                *role_waiting.entry(role).or_default() += waiting as u128;
+    
+    // Build the instance schedule from arrival classes, or fall back to the legacy
+    // single-class mode driven by `simulationInstances` / `arrivalIntervalMs`.
+    let specs: Vec<InstanceSpec> = if model.arrival_classes.is_empty() {
+        (0..model.simulation_instances)
+            .map(|index| InstanceSpec {
+                index,
+                arrival_at_ms: index as u64 * model.arrival_interval_ms,
+                priority: 0,
+            })
+            .collect()
+    } else {
+        let mut schedule = Vec::new();
+        let mut index = 0u32;
+        let mut cumulative_time_ms = 0u64;
+        for class in &model.arrival_classes {
+            for _ in 0..class.count {
+                schedule.push(InstanceSpec {
+                    index,
+                    arrival_at_ms: cumulative_time_ms,
+                    priority: class.priority,
+                });
+                index += 1;
+                cumulative_time_ms = cumulative_time_ms.saturating_add(class.interval_ms);
             }
         }
+        schedule
+    };
+
+    // (waiting_ms, duration_ms, instances) keyed by priority.
+    let mut priority_stats: BTreeMap<i32, (u128, u128, u32)> = BTreeMap::new();
+
+    for _ in 0..runs {
+        let batch = run_bpmn_batch(&model, &mut random_state, &specs)?;
+        for instance in &batch.instances {
+            durations.push(instance.duration_ms);
+            costs.push(instance.cost);
+            let entry = priority_stats.entry(instance.priority).or_default();
+            entry.0 += instance.waiting_ms as u128;
+            entry.1 += instance.duration_ms as u128;
+            entry.2 += 1;
+        }
+        for (role, workload) in batch.role_workload_ms {
+            *role_workloads.entry(role).or_default() += workload as u128;
+        }
+        for (role, capacity) in batch.role_capacity {
+            role_capacities
+                .entry(role)
+                .and_modify(|current| *current = (*current).min(capacity))
+                .or_insert(capacity);
+        }
+        for (role, waiting) in batch.role_waiting_ms {
+            *role_waiting.entry(role).or_default() += waiting as u128;
+        }
     }
+    let mut priority_classes: Vec<BpmnPriorityClassStats> = priority_stats
+        .into_iter()
+        .map(|(priority, (waiting, duration, instances))| BpmnPriorityClassStats {
+            priority,
+            instances,
+            mean_waiting_ms: (waiting / instances.max(1) as u128) as u64,
+            mean_duration_ms: (duration / instances.max(1) as u128) as u64,
+        })
+        .collect();
+    priority_classes.sort_by(|left, right| right.priority.cmp(&left.priority));
     durations.sort_unstable();
     let total_duration: u128 = durations.iter().map(|duration| *duration as u128).sum();
     let mean_duration_ms = (total_duration / durations.len() as u128) as u64;
@@ -908,8 +1187,8 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     let result = BpmnSimulationResult {
         seed,
         runs,
-        completed_runs: runs.saturating_mul(model.simulation_instances),
-        simulation_instances: model.simulation_instances,
+        completed_runs: runs.saturating_mul(specs.len() as u32),
+        simulation_instances: specs.len() as u32,
         arrival_interval_ms: model.arrival_interval_ms,
         min_duration_ms: durations[0],
         mean_duration_ms,
@@ -920,6 +1199,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         max_duration_ms: *durations.last().expect("simulation has at least one run"),
         mean_cost: costs.iter().sum::<f64>() / costs.len() as f64,
         role_utilization,
+        priority_classes,
         sla_target_ms: model.sla_target_ms,
         on_time_rate,
     };
@@ -1231,7 +1511,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
         ));
     }
 
-    serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms: None, calendar_work_start_ms: None, calendar_work_end_ms: None, simulation_instances: 1, arrival_interval_ms: 0 })
+    serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms: None, calendar_work_start_ms: None, calendar_work_end_ms: None, simulation_instances: 1, arrival_interval_ms: 0, arrival_classes: vec![], resource_roles: vec![] })
         .map_err(|error| JsValue::from_str(&format!("Could not serialize imported BPMN: {error}")))
 }
 
@@ -1344,6 +1624,8 @@ mod tests {
             calendar_work_end_ms: None,
             simulation_instances: 1,
             arrival_interval_ms: 0,
+            arrival_classes: vec![],
+            resource_roles: vec![],
         };
 
         assert!(validate_bpmn_model(&model).valid);
@@ -1540,30 +1822,6 @@ mod tests {
     }
 
     #[test]
-    fn priority_selects_higher_priority_ready_task_first() {
-        let model = r#"{
-          "nodes":[
-            {"id":"start","type":"startEvent"},
-            {"id":"split","type":"andGateway"},
-            {"id":"low","type":"task","durationMs":1000,"priority":1},
-            {"id":"high","type":"task","durationMs":1000,"priority":10},
-            {"id":"join","type":"andGateway"},
-            {"id":"end","type":"endEvent"}
-          ],
-          "flows":[
-            {"id":"f1","sourceId":"start","targetId":"split"},
-            {"id":"f2","sourceId":"split","targetId":"low"},
-            {"id":"f3","sourceId":"split","targetId":"high"},
-            {"id":"f4","sourceId":"low","targetId":"join"},
-            {"id":"f5","sourceId":"high","targetId":"join"},
-            {"id":"f6","sourceId":"join","targetId":"end"}
-          ]
-        }"#;
-        let result = run_bpmn(model).expect("priority model should run");
-        assert!(result.find("high").unwrap() < result.find("low").unwrap());
-    }
-
-    #[test]
     fn reports_sla_on_time_rate_for_a_fixed_process() {
         let model = r#"{
           "slaTargetMs":5000,
@@ -1715,5 +1973,82 @@ mod tests {
         assert_eq!(model.nodes[1].name.as_deref(), Some("Review"));
         assert_eq!(model.nodes[1].x, Some(240.0));
         assert_eq!(model.nodes[1].height, Some(80.0));
+    }
+
+    /// Four instances arrive together on a single-slot role. The two urgent ones
+    /// are declared last, so a policy that ignores priority must serve them last.
+    fn queue_policy_model(policy: &str) -> String {
+        format!(
+            r#"{{
+          "arrivalClasses":[
+            {{"count":2,"intervalMs":0,"priority":1}},
+            {{"count":2,"intervalMs":0,"priority":10}}
+          ],
+          "resourceRoles":[
+            {{"name":"operator","capacity":1,"queuePolicy":"{policy}"}}
+          ],
+          "nodes":[
+            {{"id":"start","type":"startEvent"}},
+            {{"id":"task","type":"task","durationMs":1000,"resourceRole":"operator"}},
+            {{"id":"end","type":"endEvent"}}
+          ],
+          "flows":[
+            {{"id":"f1","sourceId":"start","targetId":"task"}},
+            {{"id":"f2","sourceId":"task","targetId":"end"}}
+          ]
+        }}"#
+        )
+    }
+
+    fn priority_class(result: &str, priority: i64) -> (u64, u64) {
+        let parsed: serde_json::Value = serde_json::from_str(result).expect("valid JSON");
+        let class = parsed["priorityClasses"]
+            .as_array()
+            .expect("priorityClasses is an array")
+            .iter()
+            .find(|class| class["priority"].as_i64() == Some(priority))
+            .expect("priority class is reported");
+        (
+            class["meanWaitingMs"].as_u64().expect("mean waiting"),
+            class["meanDurationMs"].as_u64().expect("mean duration"),
+        )
+    }
+
+    #[test]
+    fn fifo_policy_ignores_arrival_class_priority() {
+        let result = simulate_bpmn(&queue_policy_model("fifo"), 42, 1)
+            .expect("FIFO model should simulate");
+
+        // Served in arrival order: waits 0, 1000, 2000, 3000.
+        assert_eq!(priority_class(&result, 1), (500, 1500));
+        assert_eq!(priority_class(&result, 10), (2500, 3500));
+    }
+
+    #[test]
+    fn priority_policy_serves_high_priority_arrivals_first() {
+        let result = simulate_bpmn(&queue_policy_model("priority"), 42, 1)
+            .expect("priority model should simulate");
+
+        // The urgent class jumps the queue, so the two waiting profiles swap.
+        assert_eq!(priority_class(&result, 10), (500, 1500));
+        assert_eq!(priority_class(&result, 1), (2500, 3500));
+    }
+
+    #[test]
+    fn queue_policy_does_not_change_aggregate_throughput() {
+        let fifo = simulate_bpmn(&queue_policy_model("fifo"), 42, 1).expect("FIFO simulates");
+        let priority =
+            simulate_bpmn(&queue_policy_model("priority"), 42, 1).expect("priority simulates");
+        let fifo: serde_json::Value = serde_json::from_str(&fifo).expect("valid JSON");
+        let priority: serde_json::Value = serde_json::from_str(&priority).expect("valid JSON");
+
+        // Reordering a queue redistributes waiting time between classes; it never
+        // creates or destroys capacity, so the totals must match.
+        assert_eq!(fifo["maxDurationMs"], priority["maxDurationMs"]);
+        assert_eq!(fifo["meanDurationMs"], priority["meanDurationMs"]);
+        assert_eq!(
+            fifo["roleUtilization"][0]["meanWaitingMs"],
+            priority["roleUtilization"][0]["meanWaitingMs"]
+        );
     }
 }
