@@ -1331,6 +1331,30 @@ fn miro_node_attributes(node: &BpmnNode) -> String {
     attributes
 }
 
+fn miro_process_attributes(model: &BpmnModel) -> Result<String, JsValue> {
+    let arrival_classes = serde_json::to_string(&model.arrival_classes)
+        .map_err(|error| JsValue::from_str(&format!("Could not serialize arrival classes: {error}")))?;
+    let resource_roles = serde_json::to_string(&model.resource_roles)
+        .map_err(|error| JsValue::from_str(&format!("Could not serialize resource roles: {error}")))?;
+    let mut attributes = format!(
+        r#" miro:simulationInstances="{}" miro:arrivalIntervalMs="{}" miro:arrivalClasses="{}" miro:resourceRoles="{}""#,
+        model.simulation_instances,
+        model.arrival_interval_ms,
+        escape_xml(&arrival_classes),
+        escape_xml(&resource_roles),
+    );
+    if let Some(value) = model.sla_target_ms {
+        attributes.push_str(&format!(r#" miro:slaTargetMs="{value}""#));
+    }
+    if let Some(value) = model.calendar_work_start_ms {
+        attributes.push_str(&format!(r#" miro:calendarWorkStartMs="{value}""#));
+    }
+    if let Some(value) = model.calendar_work_end_ms {
+        attributes.push_str(&format!(r#" miro:calendarWorkEndMs="{value}""#));
+    }
+    Ok(attributes)
+}
+
 /// Exports a validated BPMN graph as portable BPMN 2.0 XML with BPMN-DI
 /// coordinates when the model supplies them.
 #[wasm_bindgen]
@@ -1354,7 +1378,8 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
         )));
     }
 
-    let mut xml = String::from(
+    let process_attributes = miro_process_attributes(&model)?;
+    let mut xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                   xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
@@ -1364,7 +1389,7 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
                   xmlns:miro="https://miroboard.app/bpmn/extensions"
                   id="MiroBoard_Definitions"
                   targetNamespace="https://miroboard.app/bpmn">
-  <bpmn:process id="MiroBoard_Process" isExecutable="false">
+  <bpmn:process id="MiroBoard_Process" isExecutable="false"{process_attributes}>
 "#,
     );
     let default_flow_by_source: HashMap<&str, &str> = model
@@ -1527,6 +1552,13 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
     let mut node_index_by_id: HashMap<String, usize> = HashMap::new();
     let mut flow_index_by_id: HashMap<String, usize> = HashMap::new();
     let mut default_flow_by_source: HashMap<String, String> = HashMap::new();
+    let mut sla_target_ms = None;
+    let mut calendar_work_start_ms = None;
+    let mut calendar_work_end_ms = None;
+    let mut simulation_instances = 1;
+    let mut arrival_interval_ms = 0;
+    let mut arrival_classes = Vec::new();
+    let mut resource_roles = Vec::new();
     let mut buffer = Vec::new();
     let mut active_shape_element: Option<String> = None;
     let mut active_condition_flow: Option<String> = None;
@@ -1557,6 +1589,8 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                 let mut cost_per_hour = None;
                 let mut resource_capacity = None;
                 let mut priority = None;
+                let mut imported_arrival_classes = None;
+                let mut imported_resource_roles = None;
                 for attribute in element.attributes().with_checks(false).flatten() {
                     let key = local_xml_name(attribute.key.as_ref())?;
                     let value = attribute
@@ -1592,11 +1626,25 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         "costPerHour" => cost_per_hour = value.parse::<f64>().ok(),
                         "resourceCapacity" => resource_capacity = value.parse::<u32>().ok(),
                         "priority" => priority = value.parse::<i32>().ok(),
+                        "slaTargetMs" => sla_target_ms = value.parse::<u64>().ok(),
+                        "calendarWorkStartMs" => calendar_work_start_ms = value.parse::<u64>().ok(),
+                        "calendarWorkEndMs" => calendar_work_end_ms = value.parse::<u64>().ok(),
+                        "simulationInstances" => simulation_instances = value.parse::<u32>().unwrap_or(1),
+                        "arrivalIntervalMs" => arrival_interval_ms = value.parse::<u64>().unwrap_or(0),
+                        "arrivalClasses" => imported_arrival_classes = serde_json::from_str::<Vec<ArrivalClass>>(&value).ok(),
+                        "resourceRoles" => imported_resource_roles = serde_json::from_str::<Vec<ResourceRole>>(&value).ok(),
                         _ => {}
                     }
                 }
 
-                if tag == "BPMNShape" {
+                if tag == "process" {
+                    if let Some(classes) = imported_arrival_classes {
+                        arrival_classes = classes;
+                    }
+                    if let Some(roles) = imported_resource_roles {
+                        resource_roles = roles;
+                    }
+                } else if tag == "BPMNShape" {
                     active_shape_element = bpmn_element;
                 } else if tag == "Bounds" {
                     if let (Some(element_id), Some(x), Some(y), Some(width), Some(height)) =
@@ -1715,7 +1763,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
             .is_some_and(|default_flow_id| default_flow_id == &flow.id);
     }
 
-    serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms: None, calendar_work_start_ms: None, calendar_work_end_ms: None, simulation_instances: 1, arrival_interval_ms: 0, arrival_classes: vec![], resource_roles: vec![] })
+    serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms, calendar_work_start_ms, calendar_work_end_ms, simulation_instances, arrival_interval_ms, arrival_classes, resource_roles })
         .map_err(|error| JsValue::from_str(&format!("Could not serialize imported BPMN: {error}")))
 }
 
@@ -2189,6 +2237,13 @@ mod tests {
     fn exports_valid_bpmn_xml_with_escaped_names() {
         let xml = export_bpmn_xml(
             r#"{
+              "slaTargetMs":5000,
+              "calendarWorkStartMs":32400000,
+              "calendarWorkEndMs":61200000,
+              "simulationInstances":2,
+              "arrivalIntervalMs":500,
+              "arrivalClasses":[{"count":2,"intervalMs":500,"priority":7}],
+              "resourceRoles":[{"name":"reviewer","capacity":2,"queuePolicy":"priority"}],
               "nodes":[
                 {"id":"start","type":"startEvent","name":"Start","x":10,"y":20,"width":36,"height":36},
                 {"id":"task","type":"task","name":"Review & approve","durationDistribution":"triangular","durationMinMs":1000,"durationModeMs":2000,"durationMaxMs":3000,"resourceRole":"reviewer","resourceCapacity":2,"costPerHour":125.5,"priority":7,"x":100,"y":20,"width":160,"height":80},
@@ -2221,6 +2276,13 @@ mod tests {
         assert_eq!(model.nodes[1].resource_capacity, Some(2));
         assert_eq!(model.nodes[1].cost_per_hour, Some(125.5));
         assert_eq!(model.nodes[1].priority, Some(7));
+        assert_eq!(model.sla_target_ms, Some(5000));
+        assert_eq!(model.calendar_work_start_ms, Some(32400000));
+        assert_eq!(model.calendar_work_end_ms, Some(61200000));
+        assert_eq!(model.simulation_instances, 2);
+        assert_eq!(model.arrival_interval_ms, 500);
+        assert_eq!(model.arrival_classes.len(), 1);
+        assert_eq!(model.resource_roles[0].queue_policy, QueuePolicy::Priority);
     }
 
     #[test]
