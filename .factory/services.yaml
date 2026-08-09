@@ -1,0 +1,23 @@
+commands:
+  install: npm ci
+  build: node node_modules\vite\bin\vite.js build
+  typecheck: node node_modules\typescript\bin\tsc --noEmit
+  lint: node node_modules\eslint\bin\eslint.js .
+  test:e2e: node node_modules\playwright\cli.js test
+  test:rust: cargo test --manifest-path wasm/board-core/Cargo.toml
+  wasm:build: cd wasm/board-core && wasm-pack build --target web --out-dir ../../src/wasm/board-core --out-name board_core
+
+services:
+  dev:
+    start: node node_modules\vite\bin\vite.js --port 4173 --host 127.0.0.1
+    stop: taskkill /F /FI "WINDOWTITLE eq *vite*" /IM node.exe 2>nul || echo "No vite process found"
+    healthcheck: curl -sf http://127.0.0.1:4173
+    port: 4173
+    depends_on: []
+
+  playwright:
+    start: node node_modules\vite\bin\vite.js preview --port 4173 --host 127.0.0.1 --strictPort
+    stop: taskkill /F /FI "WINDOWTITLE eq *vite*" /IM node.exe 2>nul || echo "No vite process found"
+    healthcheck: curl -sf http://127.0.0.1:4173
+    port: 4173
+    depends_on: []
