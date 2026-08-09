@@ -437,6 +437,26 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
             _ => {}
         }
 
+        if node.node_type == BpmnNodeType::OrGateway {
+            result.error(
+                "or-gateway-unsupported",
+                "Inclusive gateways are not supported by the deterministic runner. Use an XOR or AND gateway.",
+                Some(&node.id),
+            );
+        }
+
+        if !matches!(
+            node.node_type,
+            BpmnNodeType::XorGateway | BpmnNodeType::AndGateway | BpmnNodeType::OrGateway | BpmnNodeType::EndEvent
+        ) && outbound > 1
+        {
+            result.error(
+                "implicit-split-unsupported",
+                "Only XOR and AND gateways may have multiple outgoing sequence flows.",
+                Some(&node.id),
+            );
+        }
+
         if node.node_type == BpmnNodeType::XorGateway {
             let sequence_flows: Vec<&BpmnFlow> = outgoing
                 .get(node.id.as_str())
@@ -1802,6 +1822,50 @@ mod tests {
         );
 
         assert!(result.contains("xor-multiple-default-flows"));
+    }
+
+    #[test]
+    fn rejects_inclusive_gateways_until_their_execution_semantics_are_supported() {
+        let result = validate_bpmn(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"gateway","type":"orGateway"},
+                {"id":"left","type":"endEvent"},
+                {"id":"right","type":"endEvent"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"gateway"},
+                {"id":"f2","sourceId":"gateway","targetId":"left"},
+                {"id":"f3","sourceId":"gateway","targetId":"right"}
+              ]
+            }"#,
+        );
+
+        assert!(result.contains("or-gateway-unsupported"));
+        assert!(result.contains(r#""valid":false"#));
+    }
+
+    #[test]
+    fn rejects_implicit_task_splits_that_would_drop_a_branch() {
+        let result = validate_bpmn(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"task","type":"task"},
+                {"id":"left","type":"endEvent"},
+                {"id":"right","type":"endEvent"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"task"},
+                {"id":"f2","sourceId":"task","targetId":"left"},
+                {"id":"f3","sourceId":"task","targetId":"right"}
+              ]
+            }"#,
+        );
+
+        assert!(result.contains("implicit-split-unsupported"));
+        assert!(result.contains(r#""valid":false"#));
     }
 
     #[test]

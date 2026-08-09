@@ -5,6 +5,8 @@
 - BPMN-редактор, XML import/export и BPMN-DI;
 - deterministic token runner, XOR/AND, Monte Carlo и распределения длительности;
 - стоимость, роли, capacity, utilisation и очередь ресурсов;
+- защита BPMN-семантики: неподдерживаемые inclusive gateways и неявные
+  развилки отклоняются валидацией, а не дают тихо неверный расчёт;
 - автономная single-file сборка и учебные BPMN-примеры.
 
 ## Ближайшие этапы
