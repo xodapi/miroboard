@@ -1324,11 +1324,19 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
                   xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
                   xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
                   xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:miro="https://miroboard.app/bpmn/extensions"
                   id="MiroBoard_Definitions"
                   targetNamespace="https://miroboard.app/bpmn">
   <bpmn:process id="MiroBoard_Process" isExecutable="false">
 "#,
     );
+    let default_flow_by_source: HashMap<&str, &str> = model
+        .flows
+        .iter()
+        .filter(|flow| flow.is_default)
+        .map(|flow| (flow.source_id.as_str(), flow.id.as_str()))
+        .collect();
     for node in &model.nodes {
         let name = node
             .name
@@ -1336,12 +1344,17 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
             .filter(|name| !name.trim().is_empty())
             .map(|name| format!(r#" name="{}""#, escape_xml(name)))
             .unwrap_or_default();
+        let default_flow = default_flow_by_source
+            .get(node.id.as_str())
+            .map(|flow_id| format!(r#" default="{}""#, escape_xml(flow_id)))
+            .unwrap_or_default();
         xml.push_str(&format!(
-            r#"    <{} id="{}"{} />
+            r#"    <{} id="{}"{}{} />
 "#,
             bpmn_tag(&node.node_type),
             escape_xml(&node.id),
             name,
+            default_flow,
         ));
     }
     for flow in &model.flows {
@@ -1349,14 +1362,33 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
             BpmnFlowType::Sequence => "bpmn:sequenceFlow",
             BpmnFlowType::Message => "bpmn:messageFlow",
         };
-        xml.push_str(&format!(
-            r#"    <{} id="{}" sourceRef="{}" targetRef="{}" />
+        let probability = flow
+            .probability
+            .map(|value| format!(r#" miro:probability="{}""#, value))
+            .unwrap_or_default();
+        if let Some(condition) = flow.condition.as_deref().filter(|condition| !condition.trim().is_empty()) {
+            xml.push_str(&format!(
+                r#"    <{} id="{}" sourceRef="{}" targetRef="{}"{}><bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">{}</bpmn:conditionExpression></{}>
 "#,
-            tag,
-            escape_xml(&flow.id),
-            escape_xml(&flow.source_id),
-            escape_xml(&flow.target_id),
-        ));
+                tag,
+                escape_xml(&flow.id),
+                escape_xml(&flow.source_id),
+                escape_xml(&flow.target_id),
+                probability,
+                escape_xml(condition),
+                tag,
+            ));
+        } else {
+            xml.push_str(&format!(
+                r#"    <{} id="{}" sourceRef="{}" targetRef="{}"{} />
+"#,
+                tag,
+                escape_xml(&flow.id),
+                escape_xml(&flow.source_id),
+                escape_xml(&flow.target_id),
+                probability,
+            ));
+        }
     }
     xml.push_str("  </bpmn:process>\n");
     let positioned_nodes: Vec<&BpmnNode> = model
@@ -1454,8 +1486,13 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
     reader.config_mut().trim_text(true);
     let mut nodes: Vec<BpmnNode> = Vec::new();
     let mut flows: Vec<BpmnFlow> = Vec::new();
+    let mut node_index_by_id: HashMap<String, usize> = HashMap::new();
+    let mut flow_index_by_id: HashMap<String, usize> = HashMap::new();
+    let mut default_flow_by_source: HashMap<String, String> = HashMap::new();
     let mut buffer = Vec::new();
     let mut active_shape_element: Option<String> = None;
+    let mut active_condition_flow: Option<String> = None;
+    let mut condition_text = String::new();
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -1467,6 +1504,8 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                 let mut source_id = None;
                 let mut target_id = None;
                 let mut bpmn_element = None;
+                let mut default_flow = None;
+                let mut probability = None;
                 let mut x = None;
                 let mut y = None;
                 let mut width = None;
@@ -1485,6 +1524,8 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         "sourceRef" => source_id = Some(value),
                         "targetRef" => target_id = Some(value),
                         "bpmnElement" => bpmn_element = Some(value),
+                        "default" => default_flow = Some(value),
+                        "probability" => probability = value.parse::<f64>().ok(),
                         "x" => x = value.parse::<f64>().ok(),
                         "y" => y = value.parse::<f64>().ok(),
                         "width" => width = value.parse::<f64>().ok(),
@@ -1499,7 +1540,8 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                     if let (Some(element_id), Some(x), Some(y), Some(width), Some(height)) =
                         (active_shape_element.as_deref(), x, y, width, height)
                     {
-                        if let Some(node) = nodes.iter_mut().find(|node| node.id == element_id) {
+                        if let Some(&node_index) = node_index_by_id.get(element_id) {
+                            let node = &mut nodes[node_index];
                             node.x = Some(x);
                             node.y = Some(y);
                             node.width = Some(width);
@@ -1510,6 +1552,11 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                     let id = id.ok_or_else(|| {
                         JsValue::from_str(&format!("BPMN {tag} is missing required id attribute."))
                     })?;
+                    let node_index = nodes.len();
+                    node_index_by_id.insert(id.clone(), node_index);
+                    if let Some(default_flow) = default_flow {
+                        default_flow_by_source.insert(id.clone(), default_flow);
+                    }
                     nodes.push(BpmnNode {
                         id,
                         node_type,
@@ -1539,6 +1586,8 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                     let target_id = target_id.ok_or_else(|| {
                         JsValue::from_str(&format!("BPMN flow '{id}' is missing targetRef."))
                     })?;
+                    let flow_index = flows.len();
+                    flow_index_by_id.insert(id.clone(), flow_index);
                     flows.push(BpmnFlow {
                         id,
                         source_id,
@@ -1549,14 +1598,36 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                             BpmnFlowType::Sequence
                         },
                         condition: None,
-                        probability: None,
+                        probability,
                         is_default: false,
                     });
+                } else if tag == "conditionExpression" {
+                    active_condition_flow = bpmn_element.or_else(|| {
+                        flows.last().map(|flow| flow.id.clone())
+                    });
+                    condition_text.clear();
                 }
             }
+            Ok(Event::Text(text)) if active_condition_flow.is_some() => {
+                let decoded = text
+                    .unescape()
+                    .map_err(|error| JsValue::from_str(&format!("Invalid BPMN condition text: {error}")))?;
+                condition_text.push_str(&decoded);
+            }
             Ok(Event::End(element)) => {
-                if local_xml_name(element.name().as_ref())? == "BPMNShape" {
+                let element_name = element.name();
+                let tag = local_xml_name(element_name.as_ref())?;
+                if tag == "BPMNShape" {
                     active_shape_element = None;
+                } else if tag == "conditionExpression" {
+                    if let Some(flow_id) = active_condition_flow.take() {
+                        if let Some(&flow_index) = flow_index_by_id.get(&flow_id) {
+                            let condition = condition_text.trim();
+                            if !condition.is_empty() {
+                                flows[flow_index].condition = Some(condition.to_owned());
+                            }
+                        }
+                    }
                 }
             }
             Ok(Event::Eof) => break,
@@ -1574,6 +1645,12 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
         return Err(JsValue::from_str(
             "No supported BPMN nodes were found in the XML file.",
         ));
+    }
+
+    for flow in &mut flows {
+        flow.is_default = default_flow_by_source
+            .get(&flow.source_id)
+            .is_some_and(|default_flow_id| default_flow_id == &flow.id);
     }
 
     serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms: None, calendar_work_start_ms: None, calendar_work_end_ms: None, simulation_instances: 1, arrival_interval_ms: 0, arrival_classes: vec![], resource_roles: vec![] })
@@ -2073,6 +2150,47 @@ mod tests {
             serde_json::from_str(&round_trip).expect("round-trip result is JSON");
         assert_eq!(model.nodes[1].x, Some(100.0));
         assert_eq!(model.nodes[1].width, Some(160.0));
+    }
+
+    #[test]
+    fn preserves_xor_flow_metadata_across_bpmn_round_trip() {
+        let xml = export_bpmn_xml(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"gateway","type":"xorGateway"},
+                {"id":"approved","type":"endEvent"},
+                {"id":"fallback","type":"endEvent"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"gateway"},
+                {"id":"approved-flow","sourceId":"gateway","targetId":"approved","condition":"amount > 100","probability":0.75},
+                {"id":"fallback-flow","sourceId":"gateway","targetId":"fallback","isDefault":true}
+              ]
+            }"#,
+        )
+        .expect("valid XOR process should export");
+
+        assert!(xml.contains(r#"default="fallback-flow""#));
+        assert!(xml.contains(r#"miro:probability="0.75""#));
+        assert!(xml.contains("amount &gt; 100"));
+
+        let round_trip = import_bpmn_xml(&xml).expect("exported BPMN should import");
+        let model: BpmnModel =
+            serde_json::from_str(&round_trip).expect("round-trip result is JSON");
+        let approved = model
+            .flows
+            .iter()
+            .find(|flow| flow.id == "approved-flow")
+            .expect("approved flow should be imported");
+        let fallback = model
+            .flows
+            .iter()
+            .find(|flow| flow.id == "fallback-flow")
+            .expect("fallback flow should be imported");
+        assert_eq!(approved.condition.as_deref(), Some("amount > 100"));
+        assert_eq!(approved.probability, Some(0.75));
+        assert!(fallback.is_default);
     }
 
     #[test]
