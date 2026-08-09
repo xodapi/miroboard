@@ -2,7 +2,7 @@
   "name": "board-core",
   "type": "module",
   "description": "Deterministic whiteboard geometry for MiroBoard",
-  "version": "0.1.0",
+  "version": "0.15.0",
   "files": [
     "board_core_bg.wasm",
     "board_core.js",

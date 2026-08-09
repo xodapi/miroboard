@@ -23,8 +23,7 @@ type AwarenessState = {
   cursor?: { x: number; y: number; tool: Tool; isLaser?: boolean }
 }
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
-const RELEASE_VERSION = 'v0.14.0'
-const RELEASE_COMMIT = 'd1bef2f'
+declare const __MIROBOARD_VERSION__: string
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
@@ -125,7 +124,19 @@ const RUSSIAN_NAMES = ['Аня', 'Макс', 'Саша', 'Лера', 'Дима',
 
 const EMOJIS = ['👍', '❤️', '⭐', '🔥', '💡', '✅', '❌', '🎯', '📌', '❓', '💪', '🎉', '🚀', '💯', '⚡', '🏆', '👀', '🤔', '💬', '🧠']
 
-function genId() { return Math.random().toString(36).slice(2, 9) }
+function genId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  // Fallback for environments without crypto.randomUUID
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)
+  }
+  // Final fallback (should never reach in modern browsers)
+  return Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9)
+}
 
 // ======================== UTILITY FUNCTIONS ========================
 function pointToLineDistance(p: Point, a: Point, b: Point): number {
@@ -426,12 +437,14 @@ export default function App() {
     let provider: WebrtcProvider | null = null
     try {
       provider = new WebrtcProvider(roomId, ydoc, {
-        signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com']
+        signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com'],
+        password: roomId.slice(0, 8)
       })
       providerRef.current = provider
       awarenessRef.current = provider.awareness
     } catch (e) {
       console.warn('WebRTC setup failed, working offline', e)
+      showToast('Работа в оффлайн-режиме (WebRTC недоступен)', 'info')
     }
 
     // UndoManager
@@ -1512,8 +1525,7 @@ export default function App() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
             </div>
             <span className={`text-[15px] font-bold tracking-tight ${textC}`}>MiroBoard</span>
-            <a href={`${GITHUB_REPOSITORY}/releases/tag/${RELEASE_VERSION}`} target="_blank" rel="noreferrer" className="select-text rounded-md bg-violet-600 px-1.5 py-0.5 text-[10px] font-mono font-bold text-white hover:bg-violet-700" title="Release: можно выделить и скопировать">{RELEASE_VERSION}</a>
-            <a href={`${GITHUB_REPOSITORY}/commit/${RELEASE_COMMIT}`} target="_blank" rel="noreferrer" className="select-text rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600 hover:bg-slate-200" title="Git commit: можно выделить и скопировать">{RELEASE_COMMIT}</a>
+            <span className="select-text rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600" title="Build version: можно выделить и скопировать">{__MIROBOARD_VERSION__}</span>
             <div className="ml-1 hidden rounded-lg bg-slate-100 p-0.5 sm:flex">
               {([
                 ['board', 'Доска'],
@@ -2370,14 +2382,16 @@ export default function App() {
               </div>
             </div>
 
-            {/* QR Code */}
+            {/* QR Code removed for security - was leaking URLs to external API */}
             <div className="mt-4 flex justify-center">
-              <div className={`p-3 rounded-2xl ${dk ? 'bg-white' : 'bg-white'} shadow-inner`}>
-                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(shareUrl)}&bgcolor=ffffff&color=000000`}
-                  alt="QR Code" width={120} height={120} className="rounded-lg" />
+              <div className={`p-4 rounded-2xl ${dk ? 'bg-slate-700/50' : 'bg-slate-100'} border ${borderC} text-center`}>
+                <div className={`text-[13px] ${dk ? 'text-slate-400' : 'text-slate-600'}`}>
+                  QR-код временно отключён
+                  <br />
+                  <span className="text-[11px] opacity-70">используйте кнопку «Копировать»</span>
+                </div>
               </div>
             </div>
-            <p className={`text-[12px] text-center mt-2 ${dk ? 'text-slate-400' : 'text-black/40'}`}>Отсканируйте QR-код телефоном</p>
 
             {/* Share buttons */}
             <div className="mt-4 grid grid-cols-3 gap-2">

@@ -1067,8 +1067,23 @@ struct BpmnRoleUtilization {
 }
 
 fn percentile(values: &[u64], percentile: f64) -> u64 {
-    let index = ((values.len() - 1) as f64 * percentile).ceil() as usize;
-    values[index]
+    if values.is_empty() {
+        return 0;
+    }
+    if values.len() == 1 {
+        return values[0];
+    }
+    // Linear interpolation between the two nearest ranks
+    let rank = percentile * (values.len() - 1) as f64;
+    let lower_index = rank.floor() as usize;
+    let upper_index = rank.ceil() as usize;
+    if lower_index == upper_index {
+        return values[lower_index];
+    }
+    let lower_value = values[lower_index] as f64;
+    let upper_value = values[upper_index] as f64;
+    let fraction = rank - lower_index as f64;
+    (lower_value + fraction * (upper_value - lower_value)).round() as u64
 }
 
 /// Runs a seeded, reproducible Monte Carlo simulation. Only XOR flows with
@@ -1156,11 +1171,16 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     durations.sort_unstable();
     let total_duration: u128 = durations.iter().map(|duration| *duration as u128).sum();
     let mean_duration_ms = (total_duration / durations.len() as u128) as u64;
-    let variance = durations
-        .iter()
-        .map(|duration| (*duration as f64 - mean_duration_ms as f64).powi(2))
-        .sum::<f64>()
-        / durations.len() as f64;
+    // Sample variance: divide by n-1, not n
+    let variance = if durations.len() > 1 {
+        durations
+            .iter()
+            .map(|duration| (*duration as f64 - mean_duration_ms as f64).powi(2))
+            .sum::<f64>()
+            / (durations.len() - 1) as f64
+    } else {
+        0.0
+    };
     let on_time_rate = model.sla_target_ms.map(|target| {
         durations.iter().filter(|duration| **duration <= target).count() as f64 / durations.len() as f64
     });
