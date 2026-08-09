@@ -392,7 +392,8 @@ export default function App() {
     undoManager.on('stack-item-updated', updateUndoState)
 
     // IndexedDB persistence
-    try { new IndexeddbPersistence(roomId, ydoc) } catch (e) { console.warn('IndexedDB failed', e) }
+    let persistence: IndexeddbPersistence | null = null
+    try { persistence = new IndexeddbPersistence(roomId, ydoc) } catch (e) { console.warn('IndexedDB failed', e) }
 
     // Awareness
     if (awarenessRef.current) {
@@ -424,14 +425,18 @@ export default function App() {
     yarray.observe(updateElements)
     updateElements()
 
-    // Fallback load
-    const saved = localStorage.getItem(`board-${roomId}`)
-    if (saved && yarray.length === 0) {
-      try {
-        const parsed = JSON.parse(saved)
-        ydoc.transact(() => parsed.forEach((el: BoardElement) => yarray.push([el])))
-      } catch { /* ignore */ }
+    // Fallback load only after IndexedDB has finished restoring, otherwise it duplicates data.
+    const restoreFallback = () => {
+      const saved = localStorage.getItem(`board-${roomId}`)
+      if (saved && yarray.length === 0) {
+        try {
+          const parsed: unknown = JSON.parse(saved)
+          if (Array.isArray(parsed)) ydoc.transact(() => parsed.forEach((el: BoardElement) => yarray.push([el])))
+        } catch { /* ignore */ }
+      }
     }
+    if (persistence) persistence.once('synced', restoreFallback)
+    else restoreFallback()
 
     // Auto-save
     const si = setInterval(() => {
@@ -449,6 +454,7 @@ export default function App() {
       undoManager.off('stack-item-popped', updateUndoState)
       undoManager.off('stack-item-updated', updateUndoState)
       provider?.destroy()
+      persistence?.destroy()
       ydoc.destroy()
     }
   }, [roomId, ydoc, user])
@@ -681,6 +687,7 @@ export default function App() {
 
     try {
       const imported = JSON.parse(import_bpmn_xml(await file.text())) as ImportedBpmnModel
+      if (!Array.isArray(imported.nodes) || !Array.isArray(imported.flows)) throw new Error('BPMN import returned an invalid model.')
       const normalizeType = (type: string): BpmnNodeType => {
         if (type === 'startEvent' || type === 'endEvent' || type === 'xorGateway' || type === 'andGateway' || type === 'orGateway') return type
         return 'task'
@@ -703,12 +710,10 @@ export default function App() {
         }]
       }))
 
-      ydoc.transact(() => {
-        while (yElements.current!.length > 0) yElements.current!.delete(0, 1)
-        for (const node of nodeById.values()) yElements.current!.push([node])
-        for (const flow of imported.flows) {
+      const replacement: BoardElement[] = [...nodeById.values()]
+      for (const flow of imported.flows) {
           if (!nodeById.has(flow.sourceId) || !nodeById.has(flow.targetId)) continue
-          yElements.current!.push([{
+          replacement.push({
             id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2,
             fill: 'transparent', createdBy: user.id,
             bpmnFlow: {
@@ -719,8 +724,11 @@ export default function App() {
               probability: flow.probability,
               isDefault: flow.isDefault,
             },
-          }])
-        }
+          })
+      }
+      ydoc.transact(() => {
+        if (yElements.current!.length) yElements.current!.delete(0, yElements.current!.length)
+        yElements.current!.push(replacement)
       })
       setSelectedId(null)
       setTransform({ x: 0, y: 0, scale: 1 })
@@ -1113,8 +1121,6 @@ export default function App() {
   useEffect(() => {
     if (tool !== 'bpmnSequence') setBpmnFlowSourceId(null)
   }, [tool])
-      const target = document.activeElement
-      if (editingText || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable)) return
   useEffect(() => () => {
     bpmnRunTimersRef.current.forEach(window.clearTimeout)
   }, [])

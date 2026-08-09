@@ -1,7 +1,13 @@
 use quick_xml::{events::Event, Reader};
 use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+
+const MAX_BPMN_NODES: usize = 10_000;
+const MAX_BPMN_FLOWS: usize = 20_000;
+const MAX_DURATION_MS: u64 = 86_400_000 * 30;
+const MAX_RESOURCE_CAPACITY: u32 = 1_000;
+const MAX_ARRIVAL_INTERVAL_MS: u64 = 86_400_000 * 30;
 use wasm_bindgen::prelude::*;
 
 const MIN_SCALE: f64 = 0.15;
@@ -83,6 +89,7 @@ struct BpmnNode {
     #[serde(default)]
     height: Option<f64>,
 }
+
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -189,6 +196,15 @@ impl BpmnValidationResult {
 
 fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
     let mut result = BpmnValidationResult::new();
+    if model.nodes.len() > MAX_BPMN_NODES {
+        result.error("model-too-large", "BPMN model contains too many nodes.", None);
+    }
+    if model.flows.len() > MAX_BPMN_FLOWS {
+        result.error("model-too-large", "BPMN model contains too many flows.", None);
+    }
+    if model.arrival_interval_ms > MAX_ARRIVAL_INTERVAL_MS {
+        result.error("arrival-interval-invalid", "Arrival interval is too large.", None);
+    }
     match (model.calendar_work_start_ms, model.calendar_work_end_ms) {
         (Some(start), Some(end)) if start < end && end <= 86_400_000 => {}
         (Some(_), Some(_)) => result.error(
@@ -223,6 +239,16 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
                 format!("Node '{}' appears more than once.", node.id),
                 Some(&node.id),
             );
+        }
+        if node.resource_capacity.is_some_and(|capacity| capacity == 0 || capacity > MAX_RESOURCE_CAPACITY) {
+            result.error("resource-capacity-invalid", "Resource capacity must be between 1 and 1000.", Some(&node.id));
+        }
+        if node.duration_ms.is_some_and(|duration| duration > MAX_DURATION_MS)
+            || node.duration_min_ms.is_some_and(|duration| duration > MAX_DURATION_MS)
+            || node.duration_mode_ms.is_some_and(|duration| duration > MAX_DURATION_MS)
+            || node.duration_max_ms.is_some_and(|duration| duration > MAX_DURATION_MS)
+        {
+            result.error("duration-too-large", "Task duration must not exceed 30 days.", Some(&node.id));
         }
         if node.duration_distribution != BpmnDurationDistribution::Fixed {
             let min = node.duration_min_ms;
@@ -484,9 +510,9 @@ struct BpmnRunResult {
     token_path: Vec<String>,
     estimated_duration_ms: u64,
     estimated_cost: f64,
-    role_workload_ms: HashMap<String, u64>,
-    role_capacity: HashMap<String, u32>,
-    role_waiting_ms: HashMap<String, u64>,
+    role_workload_ms: BTreeMap<String, u64>,
+    role_capacity: BTreeMap<String, u32>,
+    role_waiting_ms: BTreeMap<String, u64>,
 }
 
 fn fixed_duration_ms(node: &BpmnNode) -> u64 {
@@ -667,9 +693,9 @@ fn run_bpmn_model(
     let mut completed_tokens = 0usize;
     let mut estimated_duration_ms = 0u64;
     let mut estimated_cost = 0.0;
-    let mut role_workload_ms = HashMap::new();
-    let mut role_capacity = HashMap::new();
-    let mut role_waiting_ms = HashMap::new();
+    let mut role_workload_ms = BTreeMap::new();
+    let mut role_capacity = BTreeMap::new();
+    let mut role_waiting_ms = BTreeMap::new();
     let step_limit = model.nodes.len().saturating_mul(model.flows.len().max(1)).saturating_mul(4);
 
     for _ in 0..=step_limit {
@@ -820,9 +846,9 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     let mut random_state = Some(seed);
     let mut durations = Vec::with_capacity(runs as usize);
     let mut costs = Vec::with_capacity(runs as usize);
-    let mut role_workloads: HashMap<String, u128> = HashMap::new();
-    let mut role_capacities: HashMap<String, u32> = HashMap::new();
-    let mut role_waiting: HashMap<String, u128> = HashMap::new();
+    let mut role_workloads: BTreeMap<String, u128> = BTreeMap::new();
+    let mut role_capacities: BTreeMap<String, u32> = BTreeMap::new();
+    let mut role_waiting: BTreeMap<String, u128> = BTreeMap::new();
     for _ in 0..runs {
         let mut resource_slots = HashMap::new();
         for instance in 0..model.simulation_instances {
@@ -1453,8 +1479,17 @@ mod tests {
 
         assert_eq!(first, second);
         assert!(first.contains(r#""runs":100"#));
+
         assert!(first.contains(r#""minDurationMs":1000"#));
         assert!(first.contains(r#""maxDurationMs":5000"#));
+    }
+
+    #[test]
+    fn multi_role_simulation_json_is_byte_deterministic() {
+        let model = r#"{"nodes":[{"id":"start","type":"startEvent"},{"id":"a","type":"task","durationMs":1000,"resourceRole":"z-role","resourceCapacity":1},{"id":"b","type":"task","durationMs":1000,"resourceRole":"a-role","resourceCapacity":1},{"id":"end","type":"endEvent"}],"flows":[{"id":"f1","sourceId":"start","targetId":"a"},{"id":"f2","sourceId":"a","targetId":"b"},{"id":"f3","sourceId":"b","targetId":"end"}]}"#;
+        let first = simulate_bpmn(model, 123, 10).expect("first simulation should run");
+        let second = simulate_bpmn(model, 123, 10).expect("second simulation should run");
+        assert_eq!(first, second);
     }
 
     #[test]

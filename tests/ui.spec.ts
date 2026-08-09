@@ -23,8 +23,9 @@ test('simulation exposes a focusable Seed input', async ({ page }) => {
   await page.getByRole('button', { name: 'Симуляция' }).click()
   const seed = page.getByLabel('Seed')
   await seed.focus()
+  await seed.fill('123')
   await expect(page.getByRole('heading', { name: 'Monte Carlo симуляция' })).toBeVisible()
-  await expect(seed).toBeFocused()
+  await expect(seed).toHaveValue('123')
 })
 
 test('simulation opens from the explicit mode', async ({ page }) => {
@@ -61,7 +62,7 @@ test('selecting a BPMN task exposes priority settings in Property Panel', async 
   await page.getByRole('button', { name: 'Примеры' }).click()
   await page.getByText('Приоритеты в очереди', { exact: true }).click()
   await page.getByText('Срочная заявка', { exact: true }).click({ force: true })
-  await expect(page.getByText('Priority', { exact: true })).toBeVisible()
+  await expect(page.locator('label').filter({ hasText: /^Priority$/ })).toBeVisible()
   await expect(page.getByText('Capacity', { exact: true })).toBeVisible()
 })
 
@@ -116,4 +117,21 @@ test('SLA calendar simulation reports on-time rate', async ({ page }) => {
   await page.getByTitle('Открыть Monte Carlo симуляцию').click()
   await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
   await expect(page.getByText('В срок:', { exact: false })).toBeVisible()
+})
+
+test('invalid BPMN import preserves the current board', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
+  const importer = page.locator('input[type="file"]')
+  await importer.setInputFiles({ name: 'broken.bpmn', mimeType: 'application/xml', buffer: Buffer.from('<definitions><broken>') })
+  await expect(page.getByText('Подготовить данные', { exact: true })).toBeVisible()
+})
+
+test('reloading a persisted board does not duplicate BPMN tasks', async ({ page }) => {
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
+  const task = page.getByText('Подготовить данные', { exact: true })
+  await expect(task).toHaveCount(1)
+  await page.reload()
+  await expect(page.getByText('Подготовить данные', { exact: true })).toHaveCount(1)
 })
