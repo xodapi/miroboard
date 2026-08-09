@@ -860,7 +860,7 @@ fn run_bpmn_batch(
                 token.instance_index,
                 token.sequence,
             );
-            if best_key.map_or(true, |best| key < best) {
+            if best_key.is_none_or(|best| key < best) {
                 best_key = Some(key);
                 next_index = index;
             }
@@ -1083,7 +1083,30 @@ fn percentile(values: &[u64], percentile: f64) -> u64 {
     let lower_value = values[lower_index] as f64;
     let upper_value = values[upper_index] as f64;
     let fraction = rank - lower_index as f64;
-    (lower_value + fraction * (upper_value - lower_value)).round() as u64
+    // A tiny epsilon makes whole-millisecond rounding stable around binary
+    // floating-point representations such as 0.95 * 3.
+    (lower_value + fraction * (upper_value - lower_value) + 1e-9).round() as u64
+}
+
+fn sample_variance(values: &[u64]) -> f64 {
+    if values.len() < 2 {
+        return 0.0;
+    }
+    let mean = values.iter().map(|value| *value as f64).sum::<f64>() / values.len() as f64;
+    values
+        .iter()
+        .map(|value| (*value as f64 - mean).powi(2))
+        .sum::<f64>()
+        / (values.len() - 1) as f64
+}
+
+fn simulation_run_seed(seed: u64, run_index: u64) -> u64 {
+    // SplitMix64 keeps each deterministic Monte Carlo run independent from the
+    // amount of randomness consumed by earlier runs.
+    let mut value = seed.wrapping_add(run_index.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
 }
 
 /// Runs a seeded, reproducible Monte Carlo simulation. Only XOR flows with
@@ -1097,7 +1120,6 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         ));
     }
     let model = parse_and_validate_bpmn(model_json)?;
-    let mut random_state = Some(seed);
     let mut durations = Vec::with_capacity(runs as usize);
     let mut costs = Vec::with_capacity(runs as usize);
     let mut role_workloads: BTreeMap<String, u128> = BTreeMap::new();
@@ -1135,11 +1157,23 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     // (waiting_ms, duration_ms, instances) keyed by priority.
     let mut priority_stats: BTreeMap<i32, (u128, u128, u32)> = BTreeMap::new();
 
-    for _ in 0..runs {
+    for run_index in 0..runs {
+        let mut random_state = Some(simulation_run_seed(seed, run_index as u64));
         let batch = run_bpmn_batch(&model, &mut random_state, &specs)?;
+        let batch_instance_count = batch.instances.len().max(1) as u128;
+        let batch_duration_ms = batch
+            .instances
+            .iter()
+            .map(|instance| instance.duration_ms as u128)
+            .sum::<u128>()
+            / batch_instance_count;
+        let batch_cost = batch.instances.iter().map(|instance| instance.cost).sum::<f64>()
+            / batch_instance_count as f64;
+        // One sample per Monte Carlo run. Instances in the same batch share
+        // resource slots and therefore are not independent observations.
+        durations.push(batch_duration_ms as u64);
+        costs.push(batch_cost);
         for instance in &batch.instances {
-            durations.push(instance.duration_ms);
-            costs.push(instance.cost);
             let entry = priority_stats.entry(instance.priority).or_default();
             entry.0 += instance.waiting_ms as u128;
             entry.1 += instance.duration_ms as u128;
@@ -1167,20 +1201,11 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
             mean_duration_ms: (duration / instances.max(1) as u128) as u64,
         })
         .collect();
-    priority_classes.sort_by(|left, right| right.priority.cmp(&left.priority));
+    priority_classes.sort_by_key(|entry| std::cmp::Reverse(entry.priority));
     durations.sort_unstable();
     let total_duration: u128 = durations.iter().map(|duration| *duration as u128).sum();
     let mean_duration_ms = (total_duration / durations.len() as u128) as u64;
-    // Sample variance: divide by n-1, not n
-    let variance = if durations.len() > 1 {
-        durations
-            .iter()
-            .map(|duration| (*duration as f64 - mean_duration_ms as f64).powi(2))
-            .sum::<f64>()
-            / (durations.len() - 1) as f64
-    } else {
-        0.0
-    };
+    let variance = sample_variance(&durations);
     let on_time_rate = model.sla_target_ms.map(|target| {
         durations.iter().filter(|duration| **duration <= target).count() as f64 / durations.len() as f64
     });
@@ -1188,8 +1213,8 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         .into_iter()
         .map(|(role, workload)| {
             let capacity = role_capacities.get(&role).copied().unwrap_or(1).max(1);
-            let mean_workload_ms = (workload / durations.len() as u128) as u64;
-            let mean_waiting_ms = (role_waiting.get(&role).copied().unwrap_or(0) / durations.len() as u128) as u64;
+            let mean_workload_ms = (workload / runs as u128) as u64;
+            let mean_waiting_ms = (role_waiting.get(&role).copied().unwrap_or(0) / runs as u128) as u64;
             BpmnRoleUtilization {
                 utilization: if mean_duration_ms == 0 {
                     0.0
@@ -1207,7 +1232,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
     let result = BpmnSimulationResult {
         seed,
         runs,
-        completed_runs: runs.saturating_mul(specs.len() as u32),
+        completed_runs: runs,
         simulation_instances: specs.len() as u32,
         arrival_interval_ms: model.arrival_interval_ms,
         min_duration_ms: durations[0],
@@ -1540,6 +1565,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn interpolates_percentiles_and_handles_small_samples() {
+        assert_eq!(percentile(&[], 0.95), 0);
+        assert_eq!(percentile(&[42], 0.50), 42);
+        assert_eq!(percentile(&[0, 10, 20, 30], 0.50), 15);
+        assert_eq!(percentile(&[0, 10, 20, 30], 0.90), 27);
+        assert_eq!(percentile(&[0, 10, 20, 30], 0.95), 29);
+    }
+
+    #[test]
+    fn calculates_sample_variance_using_the_floating_point_mean() {
+        assert!((sample_variance(&[1, 2, 3]) - 1.0).abs() < f64::EPSILON);
+        assert!((sample_variance(&[100, 200]) - 5_000.0).abs() < f64::EPSILON);
+        assert_eq!(sample_variance(&[42]), 0.0);
+    }
+
+    #[test]
+    fn derives_independent_deterministic_run_seeds() {
+        assert_eq!(simulation_run_seed(42, 0), simulation_run_seed(42, 0));
+        assert_ne!(simulation_run_seed(42, 0), simulation_run_seed(42, 1));
+    }
+
+    #[test]
     fn snaps_coordinates_to_the_nearest_grid_line() {
         assert_eq!(snap_to_grid(13.0, 10.0), 10.0);
         assert_eq!(snap_to_grid(16.0, 10.0), 20.0);
@@ -1837,7 +1884,8 @@ mod tests {
         }"#;
         let result = simulate_bpmn(model, 42, 1).expect("batch model should simulate");
 
-        assert!(result.contains(r#""completedRuns":2"#));
+        assert!(result.contains(r#""completedRuns":1"#));
+        assert!(result.contains(r#""meanDurationMs":1500"#));
         assert!(result.contains(r#""meanWaitingMs":500"#));
     }
 

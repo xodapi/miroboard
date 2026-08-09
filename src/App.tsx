@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
+import QRCode from 'qrcode'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
@@ -9,6 +10,12 @@ import slaCalendarExample from '../examples/sla-calendar.json'
 import batchWorkloadExample from '../examples/batch-workload.json'
 import priorityQueueExample from '../examples/priority-queue.json'
 import fifoPriorityExample from '../examples/fifo-vs-priority.json'
+
+declare global {
+  interface Window {
+    __MIROBOARD_DISABLE_COLLABORATION__?: boolean
+  }
+}
 
 // ======================== TYPES ========================
 type Point = { x: number; y: number }
@@ -123,6 +130,14 @@ const USER_COLORS = [
 const RUSSIAN_NAMES = ['Аня', 'Макс', 'Саша', 'Лера', 'Дима', 'Катя', 'Илья', 'Соня', 'Ваня', 'Даша']
 
 const EMOJIS = ['👍', '❤️', '⭐', '🔥', '💡', '✅', '❌', '🎯', '📌', '❓', '💪', '🎉', '🚀', '💯', '⚡', '🏆', '👀', '🤔', '💬', '🧠']
+type ContextMenuAction = 'edit' | 'duplicate' | 'front' | 'back' | 'delete'
+const CONTEXT_MENU_ITEMS: { label: string; action: ContextMenuAction; danger?: boolean }[] = [
+  { label: '✏️ Редактировать', action: 'edit' },
+  { label: '📋 Дублировать', action: 'duplicate' },
+  { label: '⬆️ На передний план', action: 'front' },
+  { label: '⬇️ На задний план', action: 'back' },
+  { label: '🗑️ Удалить', action: 'delete', danger: true },
+]
 
 function genId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -215,6 +230,7 @@ export default function App() {
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [showShare, setShowShare] = useState(false)
+  const [shareQrCodeUrl, setShareQrCodeUrl] = useState<string | null>(null)
   const [cursors, setCursors] = useState<Cursor[]>([])
   const [participants, setParticipants] = useState(1)
   const [isPanning, setIsPanning] = useState(false)
@@ -259,6 +275,14 @@ export default function App() {
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false })
   const [showMiniMap, setShowMiniMap] = useState(true)
   const [laserPos, setLaserPos] = useState<Point | null>(null)
+
+  const chooseTool = useCallback((nextTool: Tool) => {
+    setTool(nextTool)
+    if (nextTool !== 'bpmnSequence') {
+      setBpmnFlowSourceId(null)
+      setFlowPreviewPoint(null)
+    }
+  }, [])
 
   // Drag state
   const [dragInfo, setDragInfo] = useState<{
@@ -416,18 +440,40 @@ export default function App() {
     return u
   }, [])
 
-  const roomId = useMemo(() => {
+  const collaborationCredentials = useMemo(() => {
     const url = new URL(window.location.href)
-    let id = url.searchParams.get('board')
-    if (!id) {
-      id = genId() + genId()
-      url.searchParams.set('board', id)
+    let roomId = url.searchParams.get('board')
+    let collaborationSecret = url.searchParams.get('key')
+    if (!roomId) {
+      roomId = genId() + genId()
+      collaborationSecret = genId() + genId()
+      url.searchParams.set('board', roomId)
+      url.searchParams.set('key', collaborationSecret)
       window.history.replaceState({}, '', url.toString())
     }
-    return id
+    // Existing invite links without a key remain interoperable, while every
+    // new board has an independent capability secret.
+    return { roomId, collaborationSecret: collaborationSecret ?? roomId }
   }, [])
+  const { roomId, collaborationSecret } = collaborationCredentials
 
   const shareUrl = typeof window !== 'undefined' ? window.location.href : ''
+
+  useEffect(() => {
+    if (!showShare) return
+    let cancelled = false
+    QRCode.toDataURL(shareUrl, {
+      width: 240,
+      margin: 1,
+      color: { dark: '#000000', light: '#ffffff' },
+    }).then((dataUrl) => {
+      if (!cancelled) setShareQrCodeUrl(dataUrl)
+    }).catch((error: unknown) => {
+      console.warn('Could not generate local QR code', error)
+      if (!cancelled) setShareQrCodeUrl(null)
+    })
+    return () => { cancelled = true }
+  }, [showShare, shareUrl])
 
   // ======================== YJS SETUP ========================
   useEffect(() => {
@@ -435,16 +481,22 @@ export default function App() {
     yElements.current = yarray
 
     let provider: WebrtcProvider | null = null
-    try {
-      provider = new WebrtcProvider(roomId, ydoc, {
-        signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com'],
-        password: roomId.slice(0, 8)
-      })
-      providerRef.current = provider
-      awarenessRef.current = provider.awareness
-    } catch (e) {
-      console.warn('WebRTC setup failed, working offline', e)
-      showToast('Работа в оффлайн-режиме (WebRTC недоступен)', 'info')
+    let offlineToastTimer: number | null = null
+    if (!window.__MIROBOARD_DISABLE_COLLABORATION__) {
+      try {
+        provider = new WebrtcProvider(roomId, ydoc, {
+          signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com'],
+          password: collaborationSecret
+        })
+        providerRef.current = provider
+        awarenessRef.current = provider.awareness
+      } catch (e) {
+        console.warn('WebRTC setup failed, working offline', e)
+        offlineToastTimer = window.setTimeout(
+          () => showToast('Работа в оффлайн-режиме (WebRTC недоступен)', 'info'),
+          0,
+        )
+      }
     }
 
     // UndoManager
@@ -518,6 +570,7 @@ export default function App() {
 
     return () => {
       clearInterval(si)
+      if (offlineToastTimer !== null) window.clearTimeout(offlineToastTimer)
       yarray.unobserve(updateElements)
       undoManager.off('stack-item-added', updateUndoState)
       undoManager.off('stack-item-popped', updateUndoState)
@@ -526,7 +579,7 @@ export default function App() {
       persistence?.destroy()
       ydoc.destroy()
     }
-  }, [roomId, ydoc, user])
+  }, [roomId, collaborationSecret, ydoc, user, showToast])
 
   // ======================== HELPERS ========================
   const updateCursor = useCallback((x: number, y: number, isLaser = false) => {
@@ -594,14 +647,24 @@ export default function App() {
     }
   }, [elements, addElement])
 
-  // Memoize context menu items outside of render to satisfy react-hooks/rules-of-hooks
-  const contextMenuItems = useMemo(() => [
-    { label: '✏️ Редактировать', action: (id: string) => { const el = elements.find(e => e.id === id); if (el) { setEditingText(el.id); setEditValue(el.text || ''); } } },
-    { label: '📋 Дублировать', action: (id: string) => duplicateElement(id) },
-    { label: '⬆️ На передний план', action: (id: string) => bringToFront(id) },
-    { label: '⬇️ На задний план', action: (id: string) => sendToBack(id) },
-    { label: '🗑️ Удалить', action: (id: string) => deleteElement(id), danger: true },
-  ], [elements, duplicateElement, bringToFront, sendToBack, deleteElement, setEditingText, setEditValue])
+  const handleContextMenuAction = useCallback((action: ContextMenuAction, id: string) => {
+    if (action === 'edit') {
+      const element = elements.find(candidate => candidate.id === id)
+      if (element) {
+        setEditingText(element.id)
+        setEditValue(element.text || '')
+      }
+    } else if (action === 'duplicate') {
+      duplicateElement(id)
+    } else if (action === 'front') {
+      bringToFront(id)
+    } else if (action === 'back') {
+      sendToBack(id)
+    } else {
+      deleteElement(id)
+    }
+    setContextMenu(null)
+  }, [elements, duplicateElement, bringToFront, sendToBack, deleteElement])
 
   const { canUndo, canRedo } = undoState
 
@@ -999,7 +1062,7 @@ export default function App() {
       setBpmnFlowSourceId(null)
       setFlowPreviewPoint(null)
       setSelectedId(flowId)
-      setTool('select')
+      chooseTool('select')
       showToast('Sequence flow создан.', 'success')
       return
     }
@@ -1030,7 +1093,7 @@ export default function App() {
       }
       addElement(newEl)
       setSelectedId(id)
-      setTool('select')
+      chooseTool('select')
       return
     }
 
@@ -1048,7 +1111,7 @@ export default function App() {
       setSelectedId(id)
       setEditingText(id)
       setEditValue(newEl.text || '')
-      setTool('select')
+      chooseTool('select')
       return
     }
 
@@ -1067,7 +1130,7 @@ export default function App() {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, updateCursor, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast])
+  }, [tool, screenToWorld, updateCursor, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
@@ -1218,10 +1281,6 @@ export default function App() {
     })
   }, [elements, workspaceMode])
 
-  // Reset bpmnFlowSourceId when switching away from bpmnSequence tool
-  useEffect(() => {
-    if (tool !== 'bpmnSequence') setBpmnFlowSourceId(null)
-  }, [tool, bpmnFlowSourceId, setBpmnFlowSourceId])
   useEffect(() => () => {
     bpmnRunTimersRef.current.forEach(window.clearTimeout)
   }, [])
@@ -1251,16 +1310,16 @@ export default function App() {
         s: 'bpmnStart', e: 'bpmnEnd', x: 'bpmnGateway', f: 'bpmnSequence',
       }
       if (!e.metaKey && !e.ctrlKey && workspaceMode === 'bpmn' && bpmnMap[e.key.toLowerCase()]) {
-        setTool(bpmnMap[e.key.toLowerCase()])
+        chooseTool(bpmnMap[e.key.toLowerCase()])
         return
       }
-      if (!e.metaKey && !e.ctrlKey && map[e.key]) setTool(map[e.key])
+      if (!e.metaKey && !e.ctrlKey && map[e.key]) chooseTool(map[e.key])
       if (!e.metaKey && !e.ctrlKey && e.key.toLowerCase() === '0') fitToContent()
       if (e.key === 'Escape') { setSelectedId(null); setContextMenu(null) }
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
-  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel])
+  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool])
 
   // ======================== RENDER ELEMENT ========================
   const renderElement = (el: BoardElement) => {
@@ -1798,7 +1857,7 @@ export default function App() {
             <div className={`mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
               <div className="flex flex-wrap gap-1 max-w-[280px]">
                 {EMOJIS.map(em => (
-                  <button key={em} onClick={() => { setSelectedEmoji(em); setTool('emoji'); setShowEmoji(false) }}
+                  <button key={em} onClick={() => { setSelectedEmoji(em); chooseTool('emoji'); setShowEmoji(false) }}
                     className={`size-10 rounded-xl grid place-items-center text-[22px] transition active:scale-90 ${selectedEmoji === em ? (dk ? 'bg-violet-600' : 'bg-violet-100') : hoverBg}`}>
                     {em}
                   </button>
@@ -1818,7 +1877,7 @@ export default function App() {
                   { id: 'bpmnEnd', label: 'Конец', icon: '◉' },
                   { id: 'bpmnSequence', label: 'Поток', icon: '→' },
                 ] as { id: Tool; label: string; icon: string }[]).map(item => (
-                  <button key={item.id} onClick={() => { setTool(item.id); setShowBpmnPalette(false); setShowMore(false) }}
+                  <button key={item.id} onClick={() => { chooseTool(item.id); setShowBpmnPalette(false); setShowMore(false) }}
                     className={`min-w-14 h-12 px-2 rounded-xl grid place-items-center text-center transition active:scale-90 ${tool === item.id ? 'bg-violet-600 text-white' : hoverBg}`}
                     title={item.label}>
                     <span className="text-xl leading-none">{item.icon}</span>
@@ -1855,7 +1914,7 @@ export default function App() {
               { id: 'pen', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><path d="M11 11l4 4" /></svg>, label: 'Перо' },
               { id: 'marker', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.34 4.93l-3.59 3.59-1.41-1.42-1.42 1.42 1.42 1.41-3.6 3.59c-.39.39-.39 1.02 0 1.41L10.34 19c.39.39 1.02.39 1.41 0l3.6-3.59 1.41 1.42 1.42-1.42-1.42-1.41 3.59-3.59c.39-.39.39-1.02 0-1.41L15.75 4.93c-.39-.39-1.02-.39-1.41 0z" /></svg>, label: 'Маркер' },
             ] as { id: Tool; icon: React.ReactNode; label: string }[]).map(t => (
-              <button key={t.id} onClick={() => { setTool(t.id); setShowEmoji(false) }}
+              <button key={t.id} onClick={() => { chooseTool(t.id); setShowEmoji(false) }}
                 className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
                 title={t.label}>{t.icon}</button>
             ))}
@@ -1871,8 +1930,8 @@ export default function App() {
               { id: 'arrow', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M13 5l7 7-7 7" /></svg> },
             ] as { id: Tool; icon: React.ReactNode }[]).map(t => (
               <button key={t.id} onClick={() => {
-                if (t.id === 'emoji') { setShowEmoji(!showEmoji); setTool('emoji') }
-                else { setTool(t.id); setShowEmoji(false) }
+                if (t.id === 'emoji') { setShowEmoji(!showEmoji); chooseTool('emoji') }
+                else { chooseTool(t.id); setShowEmoji(false) }
               }}
                 className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
               >{t.icon}</button>
@@ -1898,15 +1957,15 @@ export default function App() {
       {/* ===== MORE MENU ===== */}
       {showMore && (
         <div className={`absolute bottom-[104px] left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 p-1.5 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
-          <button onClick={() => { setTool('line'); setShowMore(false) }}
+          <button onClick={() => { chooseTool('line'); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'line' ? 'bg-black text-white' : hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 19L19 5" /></svg> Линия
           </button>
-          <button onClick={() => { setTool('laser'); setShowMore(false) }}
+          <button onClick={() => { chooseTool('laser'); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'laser' ? 'bg-black text-white' : hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="8" strokeDasharray="4 3" /></svg> Лазер
           </button>
-          <button onClick={() => { setTool('eraser'); setShowMore(false) }}
+          <button onClick={() => { chooseTool('eraser'); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'eraser' ? 'bg-black text-white' : hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 20H7L3 16a1.9 1.9 0 0 1 0-2.8L14.2 2h.8l6 6v.8L9.8 20" /></svg> Ластик
           </button>
@@ -1957,8 +2016,8 @@ export default function App() {
           top: contextMenu.y * transform.scale + transform.y
         }} data-ui>
           <div className={`rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC} overflow-hidden py-1 min-w-[180px]`}>
-            {contextMenuItems.map((item, i) => (
-              <button key={i} onClick={() => { item.action(contextMenu.id); setContextMenu(null) }}
+            {CONTEXT_MENU_ITEMS.map((item) => (
+              <button key={item.action} onClick={() => handleContextMenuAction(item.action, contextMenu.id)}
                 className={`w-full h-10 px-4 text-left text-[14px] flex items-center gap-2 transition ${item.danger ? 'text-red-500 hover:bg-red-50' : `${textSec} ${hoverBg}`}`}>
                 {item.label}
               </button>
@@ -2382,16 +2441,16 @@ export default function App() {
               </div>
             </div>
 
-            {/* QR Code removed for security - was leaking URLs to external API */}
             <div className="mt-4 flex justify-center">
-              <div className={`p-4 rounded-2xl ${dk ? 'bg-slate-700/50' : 'bg-slate-100'} border ${borderC} text-center`}>
-                <div className={`text-[13px] ${dk ? 'text-slate-400' : 'text-slate-600'}`}>
-                  QR-код временно отключён
-                  <br />
-                  <span className="text-[11px] opacity-70">используйте кнопку «Копировать»</span>
-                </div>
+              <div className="rounded-2xl bg-white p-3 shadow-inner">
+                {shareQrCodeUrl ? (
+                  <img src={shareQrCodeUrl} alt="QR-код ссылки-приглашения" width={120} height={120} className="rounded-lg" />
+                ) : (
+                  <div className="grid size-[120px] place-items-center text-center text-[11px] text-slate-500">Генерация QR-кода…</div>
+                )}
               </div>
             </div>
+            <p className={`mt-2 text-center text-[12px] ${dk ? 'text-slate-400' : 'text-black/40'}`}>QR-код создаётся локально в браузере</p>
 
             {/* Share buttons */}
             <div className="mt-4 grid grid-cols-3 gap-2">
