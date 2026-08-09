@@ -1295,6 +1295,42 @@ fn bpmn_tag(node_type: &BpmnNodeType) -> &'static str {
     }
 }
 
+fn miro_node_attributes(node: &BpmnNode) -> String {
+    let mut attributes = format!(
+        r#" miro:durationDistribution="{}""#,
+        match node.duration_distribution {
+            BpmnDurationDistribution::Fixed => "fixed",
+            BpmnDurationDistribution::Uniform => "uniform",
+            BpmnDurationDistribution::Triangular => "triangular",
+        }
+    );
+    if let Some(value) = node.duration_ms {
+        attributes.push_str(&format!(r#" miro:durationMs="{value}""#));
+    }
+    if let Some(value) = node.duration_min_ms {
+        attributes.push_str(&format!(r#" miro:durationMinMs="{value}""#));
+    }
+    if let Some(value) = node.duration_mode_ms {
+        attributes.push_str(&format!(r#" miro:durationModeMs="{value}""#));
+    }
+    if let Some(value) = node.duration_max_ms {
+        attributes.push_str(&format!(r#" miro:durationMaxMs="{value}""#));
+    }
+    if let Some(value) = node.resource_role.as_deref() {
+        attributes.push_str(&format!(r#" miro:resourceRole="{}""#, escape_xml(value)));
+    }
+    if let Some(value) = node.cost_per_hour {
+        attributes.push_str(&format!(r#" miro:costPerHour="{value}""#));
+    }
+    if let Some(value) = node.resource_capacity {
+        attributes.push_str(&format!(r#" miro:resourceCapacity="{value}""#));
+    }
+    if let Some(value) = node.priority {
+        attributes.push_str(&format!(r#" miro:priority="{value}""#));
+    }
+    attributes
+}
+
 /// Exports a validated BPMN graph as portable BPMN 2.0 XML with BPMN-DI
 /// coordinates when the model supplies them.
 #[wasm_bindgen]
@@ -1344,16 +1380,18 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
             .filter(|name| !name.trim().is_empty())
             .map(|name| format!(r#" name="{}""#, escape_xml(name)))
             .unwrap_or_default();
+        let miro_attributes = miro_node_attributes(node);
         let default_flow = default_flow_by_source
             .get(node.id.as_str())
             .map(|flow_id| format!(r#" default="{}""#, escape_xml(flow_id)))
             .unwrap_or_default();
         xml.push_str(&format!(
-            r#"    <{} id="{}"{}{} />
+            r#"    <{} id="{}"{}{}{} />
 "#,
             bpmn_tag(&node.node_type),
             escape_xml(&node.id),
             name,
+            miro_attributes,
             default_flow,
         ));
     }
@@ -1510,6 +1548,15 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                 let mut y = None;
                 let mut width = None;
                 let mut height = None;
+                let mut duration_ms = None;
+                let mut duration_distribution = BpmnDurationDistribution::Fixed;
+                let mut duration_min_ms = None;
+                let mut duration_mode_ms = None;
+                let mut duration_max_ms = None;
+                let mut resource_role = None;
+                let mut cost_per_hour = None;
+                let mut resource_capacity = None;
+                let mut priority = None;
                 for attribute in element.attributes().with_checks(false).flatten() {
                     let key = local_xml_name(attribute.key.as_ref())?;
                     let value = attribute
@@ -1530,6 +1577,21 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         "y" => y = value.parse::<f64>().ok(),
                         "width" => width = value.parse::<f64>().ok(),
                         "height" => height = value.parse::<f64>().ok(),
+                        "durationMs" => duration_ms = value.parse::<u64>().ok(),
+                        "durationDistribution" => {
+                            duration_distribution = match value.as_str() {
+                                "uniform" => BpmnDurationDistribution::Uniform,
+                                "triangular" => BpmnDurationDistribution::Triangular,
+                                _ => BpmnDurationDistribution::Fixed,
+                            };
+                        }
+                        "durationMinMs" => duration_min_ms = value.parse::<u64>().ok(),
+                        "durationModeMs" => duration_mode_ms = value.parse::<u64>().ok(),
+                        "durationMaxMs" => duration_max_ms = value.parse::<u64>().ok(),
+                        "resourceRole" => resource_role = Some(value),
+                        "costPerHour" => cost_per_hour = value.parse::<f64>().ok(),
+                        "resourceCapacity" => resource_capacity = value.parse::<u32>().ok(),
+                        "priority" => priority = value.parse::<i32>().ok(),
                         _ => {}
                     }
                 }
@@ -1562,15 +1624,15 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                         node_type,
                         pool_id: None,
                         name,
-                        duration_ms: None,
-                        duration_distribution: BpmnDurationDistribution::Fixed,
-                        duration_min_ms: None,
-                        duration_mode_ms: None,
-                        duration_max_ms: None,
-                        resource_role: None,
-                        cost_per_hour: None,
-                        resource_capacity: None,
-                        priority: None,
+                        duration_ms,
+                        duration_distribution,
+                        duration_min_ms,
+                        duration_mode_ms,
+                        duration_max_ms,
+                        resource_role,
+                        cost_per_hour,
+                        resource_capacity,
+                        priority,
                         x: None,
                         y: None,
                         width: None,
@@ -2129,7 +2191,7 @@ mod tests {
             r#"{
               "nodes":[
                 {"id":"start","type":"startEvent","name":"Start","x":10,"y":20,"width":36,"height":36},
-                {"id":"task","type":"task","name":"Review & approve","x":100,"y":20,"width":160,"height":80},
+                {"id":"task","type":"task","name":"Review & approve","durationDistribution":"triangular","durationMinMs":1000,"durationModeMs":2000,"durationMaxMs":3000,"resourceRole":"reviewer","resourceCapacity":2,"costPerHour":125.5,"priority":7,"x":100,"y":20,"width":160,"height":80},
                 {"id":"end","type":"endEvent","name":"End","x":300,"y":20,"width":36,"height":36}
               ],
               "flows":[
@@ -2140,7 +2202,8 @@ mod tests {
         )
         .expect("valid process should export");
 
-        assert!(xml.contains(r#"<bpmn:task id="task" name="Review &amp; approve" />"#));
+        assert!(xml.contains(r#"<bpmn:task id="task" name="Review &amp; approve" miro:durationDistribution="triangular""#));
+        assert!(xml.contains(r#"miro:resourceRole="reviewer" miro:costPerHour="125.5" miro:resourceCapacity="2" miro:priority="7""#));
         assert!(xml.contains(r#"<bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="task" />"#));
         assert!(xml.contains(r#"<bpmndi:BPMNShape id="task_di" bpmnElement="task">"#));
         assert!(xml.contains(r#"<dc:Bounds x="100" y="20" width="160" height="80" />"#));
@@ -2150,6 +2213,14 @@ mod tests {
             serde_json::from_str(&round_trip).expect("round-trip result is JSON");
         assert_eq!(model.nodes[1].x, Some(100.0));
         assert_eq!(model.nodes[1].width, Some(160.0));
+        assert_eq!(model.nodes[1].duration_distribution, BpmnDurationDistribution::Triangular);
+        assert_eq!(model.nodes[1].duration_min_ms, Some(1000));
+        assert_eq!(model.nodes[1].duration_mode_ms, Some(2000));
+        assert_eq!(model.nodes[1].duration_max_ms, Some(3000));
+        assert_eq!(model.nodes[1].resource_role.as_deref(), Some("reviewer"));
+        assert_eq!(model.nodes[1].resource_capacity, Some(2));
+        assert_eq!(model.nodes[1].cost_per_hour, Some(125.5));
+        assert_eq!(model.nodes[1].priority, Some(7));
     }
 
     #[test]
