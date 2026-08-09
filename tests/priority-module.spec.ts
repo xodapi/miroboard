@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 test('FIFO vs Priority learning module displays priority class metrics', async ({ page }) => {
-  await page.goto('http://localhost:5173/', { waitUntil: 'domcontentloaded', timeout: 15_000 })
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 15_000 })
   
   // Skip onboarding if present
   const skipTour = page.getByRole('button', { name: 'Пропустить' })

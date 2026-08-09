@@ -3,12 +3,19 @@
   "private": false,
   "version": "1.0.0",
   "description": "Single-file collaborative whiteboard",
+  "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test:e2e": "playwright test",
+    "test:rust": "cargo test --manifest-path wasm/board-core/Cargo.toml"
   },
   "dependencies": {
     "clsx": "2.1.1",
@@ -20,15 +27,21 @@
     "yjs": "^13.6.30"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.1",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "4.1.17",
     "@types/node": "22.19.17",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "eslint": "9.39.1",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-react-refresh": "0.4.24",
+    "globals": "16.5.0",
     "playwright": "^1.62.1",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
+    "typescript-eslint": "8.46.4",
     "vite": "7.2.4",
     "vite-plugin-singlefile": "2.3.0"
   }

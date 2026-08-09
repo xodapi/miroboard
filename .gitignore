@@ -1,1 +1,20 @@
 node_modules/
+
+# Rust build artifacts (contains multi-MB .pdb files)
+wasm/board-core/target/
+
+# Stray wasm-pack output when --out-dir is resolved from the crate directory
+wasm/board-core/src/wasm/
+
+# Playwright output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Jujutsu co-located metadata
+.jj/
+
+# Local environment
+.env
+.env.local
