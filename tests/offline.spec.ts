@@ -90,6 +90,7 @@ test('offline board editing creates, renames, moves, deletes, and undoes local n
   await page.keyboard.press('o')
   await canvas.click({ position: { x: 650, y: 160 } })
   await expect(page.locator('[data-id]')).toHaveCount(4)
+  await page.keyboard.press('v')
 
   const sticky = page.locator('[data-id]').filter({ hasText: 'Заметка' })
   await sticky.dblclick({ force: true })
@@ -122,6 +123,7 @@ test('offline board editing creates, renames, moves, deletes, and undoes local n
 test('offline BPMN flow reroutes with its endpoint, survives undo redo, and simulates locally', async ({ page }) => {
   await page.context().route(/^(?!file:|data:|blob:).*/, route => route.abort())
   const { errors, requests } = await bootFile(page)
+  const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
   await createBpmnNode(page, 'Старт', { x: 180, y: 250 })
   await createBpmnNode(page, 'Конец', { x: 420, y: 250 })
 
