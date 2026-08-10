@@ -2,7 +2,6 @@ import { test, expect } from '@playwright/test'
 
 test('FIFO vs Priority learning module displays priority class metrics', async ({ page }) => {
   await page.addInitScript(() => {
-    window.__MIROBOARD_DISABLE_COLLABORATION__ = true
     localStorage.setItem('miro-onboarding-seen', 'true')
   })
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 60_000 })

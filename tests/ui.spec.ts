@@ -2,7 +2,6 @@ import { test, expect } from '@playwright/test'
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.__MIROBOARD_DISABLE_COLLABORATION__ = true
     if (!window.location.search.includes('showTour=true')) {
       localStorage.setItem('miro-onboarding-seen', 'true')
     }
@@ -32,13 +31,6 @@ test('simulation exposes a focusable Seed input', async ({ page }) => {
   await seed.fill('123')
   await expect(page.getByRole('heading', { name: 'Monte Carlo симуляция' })).toBeVisible()
   await expect(seed).toHaveValue('123')
-})
-
-test('share dialog generates an invitation QR code locally', async ({ page }) => {
-  await page.getByRole('button', { name: 'Поделиться' }).click()
-  const qrCode = page.getByAltText('QR-код ссылки-приглашения')
-  await expect(qrCode).toBeVisible()
-  await expect(qrCode).toHaveAttribute('src', /^data:image\/png;base64,/)
 })
 
 test('simulation opens from the explicit mode', async ({ page }) => {

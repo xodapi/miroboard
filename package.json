@@ -2,7 +2,7 @@
   "name": "miroboard",
   "private": false,
   "version": "0.15.0",
-  "description": "Single-file collaborative whiteboard",
+  "description": "Single-file local whiteboard",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -22,12 +22,10 @@
   },
   "dependencies": {
     "clsx": "2.1.1",
-    "qrcode": "^1.5.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tailwind-merge": "3.4.0",
     "y-indexeddb": "^9.0.12",
-    "y-webrtc": "^10.3.0",
     "yjs": "^13.6.30"
   },
   "devDependencies": {
@@ -35,7 +33,6 @@
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "4.1.17",
     "@types/node": "22.19.17",
-    "@types/qrcode": "^1.5.5",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",

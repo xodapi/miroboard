@@ -24,7 +24,6 @@ type SessionKind = 'first-load' | 'same-session-reload' | 'post-browser-restart'
 
 async function prepare(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    window.__MIROBOARD_DISABLE_COLLABORATION__ = true
     localStorage.setItem('miro-onboarding-seen', 'true')
   })
 }

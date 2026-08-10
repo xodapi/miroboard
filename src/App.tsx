@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
-import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
-import QRCode from 'qrcode'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
 import basicFixedExample from '../examples/basic-fixed.json'
@@ -14,23 +12,14 @@ import fifoPriorityExample from '../examples/fifo-vs-priority.json'
 
 declare global {
   interface Window {
-    __MIROBOARD_DISABLE_COLLABORATION__?: boolean
     __MIROBOARD_DEBUG__?: { version: string; createBpmnModel: () => unknown; validateBpmn: () => unknown; runBpmn: () => unknown; simulateBpmn: (seed: number | string | bigint, runs: number) => BpmnSimulationResult; getElements: () => BoardElement[] }
   }
 }
 
-// ======================== TYPES ========================
 type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
-// y-protocols is only a transitive dependency, so the awareness type is taken
-// from the provider instead of imported directly.
-type Awareness = WebrtcProvider['awareness']
-type AwarenessState = {
-  user?: { id: string; name: string; color: string }
-  cursor?: { x: number; y: number; tool: Tool; isLaser?: boolean }
-}
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
 declare const __MIROBOARD_VERSION__: string
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
@@ -83,17 +72,6 @@ interface BoardElement {
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
 }
 
-interface Cursor {
-  id: string
-  x: number
-  y: number
-  name: string
-  color: string
-  tool?: string
-  isLaser?: boolean
-}
-
-// ======================== CONSTANTS ========================
 const COLORS = [
   '#FF5D5D', '#FF9F43', '#FFD93D',
   '#6BCB77', '#4D96FF', '#9D65C9',
@@ -105,14 +83,6 @@ const STICKY_COLORS = [
   '#FF9F43', '#9D65C9', '#FF5D5D',
   '#F9F871', '#A0E7E5'
 ]
-
-const USER_COLORS = [
-  '#FF5D5D', '#4D96FF', '#6BCB77',
-  '#FF9F43', '#9D65C9', '#EC4899',
-  '#14B8A6', '#F97316'
-]
-
-const RUSSIAN_NAMES = ['Аня', 'Макс', 'Саша', 'Лера', 'Дима', 'Катя', 'Илья', 'Соня', 'Ваня', 'Даша']
 
 const EMOJIS = ['👍', '❤️', '⭐', '🔥', '💡', '✅', '❌', '🎯', '📌', '❓', '💪', '🎉', '🚀', '💯', '⚡', '🏆', '👀', '🤔', '💬', '🧠']
 type ContextMenuAction = 'edit' | 'duplicate' | 'front' | 'back' | 'delete'
@@ -138,7 +108,6 @@ function genId() {
   return Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9)
 }
 
-// ======================== UTILITY FUNCTIONS ========================
 function pointToLineDistance(p: Point, a: Point, b: Point): number {
   const dx = b.x - a.x
   const dy = b.y - a.y
@@ -200,7 +169,6 @@ function bpmnEdgeAnchor(element: BoardElement, towardX: number, towardY: number)
   return { x: centerX + dx * scale, y: centerY + dy * scale }
 }
 
-// ======================== MAIN APP ========================
 export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -214,10 +182,6 @@ export default function App() {
   const [currentPath, setCurrentPath] = useState<Point[]>([])
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
   const [showColorPicker, setShowColorPicker] = useState(false)
-  const [showShare, setShowShare] = useState(false)
-  const [shareQrCodeUrl, setShareQrCodeUrl] = useState<string | null>(null)
-  const [cursors, setCursors] = useState<Cursor[]>([])
-  const [participants, setParticipants] = useState(1)
   const [isPanning, setIsPanning] = useState(false)
   const [panStart, setPanStart] = useState<Point | null>(null)
   const [lastPinchDist, setLastPinchDist] = useState<number | null>(null)
@@ -291,9 +255,7 @@ export default function App() {
 
   // Yjs
   const ydoc = useMemo(() => new Y.Doc(), [])
-  const providerRef = useRef<WebrtcProvider | null>(null)
   const yElements = useRef<Y.Array<BoardElement> | null>(null)
-  const awarenessRef = useRef<Awareness | null>(null)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
   const showToast = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, tone })
@@ -400,93 +362,16 @@ export default function App() {
   )
 
   const user = useMemo(() => {
-    const saved = localStorage.getItem('miro-user')
-    if (saved) {
-      try {
-        const parsed: unknown = JSON.parse(saved)
-        if (typeof parsed === 'object' && parsed !== null
-          && typeof (parsed as { id?: unknown }).id === 'string'
-          && typeof (parsed as { name?: unknown }).name === 'string'
-          && typeof (parsed as { color?: unknown }).color === 'string') {
-          return parsed as { id: string; name: string; color: string }
-        }
-      } catch {
-        console.warn('Ignoring invalid local user profile')
-      }
-    }
-    // Name and colour are derived from the id so the profile is generated by a
-    // single source of randomness, which keeps this memo free of extra impure
-    // calls during render.
+    const saved = localStorage.getItem('miro-author-id')
+    if (saved) return { id: saved }
     const id = genId()
-    let hash = 0
-    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0
-    const u = {
-      id,
-      name: RUSSIAN_NAMES[hash % RUSSIAN_NAMES.length],
-      color: USER_COLORS[(hash >>> 8) % USER_COLORS.length]
-    }
-    try { localStorage.setItem('miro-user', JSON.stringify(u)) } catch { console.warn('Could not save local user profile') }
-    return u
+    try { localStorage.setItem('miro-author-id', id) } catch { /* author id is optional metadata */ }
+    return { id }
   }, [])
 
-  const collaborationCredentials = useMemo(() => {
-    const url = new URL(window.location.href)
-    let roomId = url.searchParams.get('board')
-    let collaborationSecret = url.searchParams.get('key')
-    if (!roomId) {
-      roomId = genId() + genId()
-      collaborationSecret = genId() + genId()
-      url.searchParams.set('board', roomId)
-      url.searchParams.set('key', collaborationSecret)
-      window.history.replaceState({}, '', url.toString())
-    }
-    // Existing invite links without a key remain interoperable, while every
-    // new board has an independent capability secret.
-    return { roomId, collaborationSecret: collaborationSecret ?? roomId }
-  }, [])
-  const { roomId, collaborationSecret } = collaborationCredentials
-
-  const shareUrl = typeof window !== 'undefined' ? window.location.href : ''
-
-  useEffect(() => {
-    if (!showShare) return
-    let cancelled = false
-    QRCode.toDataURL(shareUrl, {
-      width: 240,
-      margin: 1,
-      color: { dark: '#000000', light: '#ffffff' },
-    }).then((dataUrl) => {
-      if (!cancelled) setShareQrCodeUrl(dataUrl)
-    }).catch((error: unknown) => {
-      console.warn('Could not generate local QR code', error)
-      if (!cancelled) setShareQrCodeUrl(null)
-    })
-    return () => { cancelled = true }
-  }, [showShare, shareUrl])
-
-  // ======================== YJS SETUP ========================
   useEffect(() => {
     const yarray = ydoc.getArray<BoardElement>('elements')
     yElements.current = yarray
-
-    let provider: WebrtcProvider | null = null
-    let offlineToastTimer: number | null = null
-    if (!window.__MIROBOARD_DISABLE_COLLABORATION__) {
-      try {
-        provider = new WebrtcProvider(roomId, ydoc, {
-          signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com'],
-          password: collaborationSecret
-        })
-        providerRef.current = provider
-        awarenessRef.current = provider.awareness
-      } catch (e) {
-        console.warn('WebRTC setup failed, working offline', e)
-        offlineToastTimer = window.setTimeout(
-          () => showToast('Работа в оффлайн-режиме (WebRTC недоступен)', 'info'),
-          0,
-        )
-      }
-    }
 
     // UndoManager
     const undoManager = new Y.UndoManager(yarray, { captureTimeout: 500 })
@@ -502,33 +387,7 @@ export default function App() {
 
     // IndexedDB persistence
     let persistence: IndexeddbPersistence | null = null
-    try { persistence = new IndexeddbPersistence(roomId, ydoc) } catch (e) { console.warn('IndexedDB failed', e) }
-
-    // Awareness
-    const awareness = awarenessRef.current
-    if (awareness) {
-      awareness.setLocalStateField('user', {
-        name: user.name, color: user.color, id: user.id
-      })
-
-      const updateCursors = () => {
-        const states = Array.from(awareness.getStates().entries()) as [number, AwarenessState][]
-        const cs: Cursor[] = []
-        states.forEach(([cid, state]) => {
-          if (cid !== awareness.clientID && state.cursor && state.user) {
-            cs.push({
-              id: state.user.id, x: state.cursor.x, y: state.cursor.y,
-              name: state.user.name, color: state.user.color,
-              tool: state.cursor.tool, isLaser: state.cursor.isLaser
-            })
-          }
-        })
-        setCursors(cs)
-        setParticipants(states.length)
-      }
-      awareness.on('change', updateCursors)
-      updateCursors()
-    }
+    try { persistence = new IndexeddbPersistence('miroboard-local', ydoc) } catch (e) { console.warn('IndexedDB failed', e) }
 
     // Sync
     const updateElements = () => setElements(yarray.toArray())
@@ -537,7 +396,7 @@ export default function App() {
 
     // Fallback load only after IndexedDB has finished restoring, otherwise it duplicates data.
     const restoreFallback = () => {
-      const saved = localStorage.getItem(`board-${roomId}`)
+      const saved = localStorage.getItem('board-local')
       if (saved && yarray.length === 0) {
         try {
           const parsed: unknown = JSON.parse(saved)
@@ -551,7 +410,7 @@ export default function App() {
     // Auto-save
     const si = setInterval(() => {
       try {
-        localStorage.setItem(`board-${roomId}`, JSON.stringify(yarray.toArray()))
+        localStorage.setItem('board-local', JSON.stringify(yarray.toArray()))
       } catch (error) {
         console.warn('Could not autosave board to localStorage', error)
       }
@@ -559,23 +418,16 @@ export default function App() {
 
     return () => {
       clearInterval(si)
-      if (offlineToastTimer !== null) window.clearTimeout(offlineToastTimer)
       yarray.unobserve(updateElements)
       undoManager.off('stack-item-added', updateUndoState)
       undoManager.off('stack-item-popped', updateUndoState)
       undoManager.off('stack-item-updated', updateUndoState)
-      provider?.destroy()
       persistence?.destroy()
       ydoc.destroy()
     }
-  }, [roomId, collaborationSecret, ydoc, user, showToast])
+  }, [ydoc])
 
   // ======================== HELPERS ========================
-  const updateCursor = useCallback((x: number, y: number, isLaser = false) => {
-    if (awarenessRef.current) {
-      awarenessRef.current.setLocalStateField('cursor', { x, y, tool, isLaser })
-    }
-  }, [tool])
 
   const screenToWorld = useCallback((sx: number, sy: number): Point => {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -736,14 +588,14 @@ export default function App() {
         if (b) {
           const a = document.createElement('a')
           a.href = URL.createObjectURL(b)
-          a.download = `board-${roomId.slice(0, 6)}.png`
+          a.download = 'board.png'
           a.click()
         }
       }, 'image/png')
       URL.revokeObjectURL(url)
     }
     img.src = url
-  }, [elements.length, roomId])
+  }, [elements.length])
 
   const exportToBpmn = useCallback(() => {
     try {
@@ -752,13 +604,13 @@ export default function App() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `miroboard-${roomId.slice(0, 6)}.bpmn`
+      link.download = 'miroboard.bpmn'
       link.click()
       URL.revokeObjectURL(url)
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'BPMN-модель нельзя экспортировать.', 'error')
     }
-  }, [createBpmnModel, roomId, showToast])
+  }, [createBpmnModel, showToast])
 
   const runBpmn = useCallback(() => {
     bpmnRunTimersRef.current.forEach(window.clearTimeout)
@@ -940,8 +792,6 @@ export default function App() {
     setShowBpmnPalette(false)
 
     const point = screenToWorld(e.clientX, e.clientY)
-    updateCursor(point.x, point.y, tool === 'laser')
-
     if (e.pointerType === 'touch' && e.isPrimary === false) return
 
     // Two fingers = pan
@@ -1127,12 +977,11 @@ export default function App() {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, updateCursor, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool])
+  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
     const isLaser = tool === 'laser'
-    updateCursor(point.x, point.y, isLaser)
     if (isLaser) setLaserPos(point)
     if (tool === 'bpmnSequence' && bpmnFlowSourceId) setFlowPreviewPoint(point)
 
@@ -1195,7 +1044,7 @@ export default function App() {
         updateElement(selectedId, { w, h })
       }
     }
-  }, [isPanning, panStart, isDrawing, tool, selectedId, elements, screenToWorld, updateCursor, updateElement, dragInfo, resizeInfo, snapGrid, bpmnFlowSourceId])
+  }, [isPanning, panStart, isDrawing, tool, selectedId, elements, screenToWorld, updateElement, dragInfo, resizeInfo, snapGrid, bpmnFlowSourceId])
 
   const handlePointerUp = useCallback(() => {
     // Cancel long press
@@ -1675,20 +1524,9 @@ export default function App() {
             {dk ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
               : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>}
           </button>
-          {/* Participants */}
-          <div className={`h-7 px-2 rounded-full ${dk ? 'bg-slate-700' : 'bg-black/5'} flex items-center gap-1.5 text-[12px] font-medium`}>
-            <span className={`size-1.5 rounded-full ${participants > 1 ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
-            {participants}
-          </div>
           {/* Minimap toggle */}
           <button onClick={() => setShowMiniMap(!showMiniMap)} className={`size-8 grid place-items-center rounded-lg transition ${hoverBg} ${textSec}`} title="Мини-карта">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18" /></svg>
-          </button>
-          {/* Share */}
-          <button onClick={() => setShowShare(true)}
-            className="h-8 px-3 rounded-xl bg-gradient-to-r from-violet-500 to-blue-500 text-white text-[13px] font-semibold flex items-center gap-1.5 active:scale-95 transition shadow-md shadow-violet-500/20">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" /></svg>
-            <span className="hidden sm:inline">Поделиться</span>
           </button>
         </div>
       </div>
@@ -1785,26 +1623,6 @@ export default function App() {
               </g>
             )}
 
-            {/* Remote cursors */}
-            {cursors.map(c => (
-              <g key={c.id} transform={`translate(${c.x},${c.y})`} className="pointer-events-none">
-                {c.isLaser ? (
-                  <g>
-                    <circle r={10} fill={c.color} opacity={0.7}>
-                      <animate attributeName="r" values="8;14;8" dur="1s" repeatCount="indefinite" />
-                      <animate attributeName="opacity" values="0.7;0.3;0.7" dur="1s" repeatCount="indefinite" />
-                    </circle>
-                    <circle r={4} fill={c.color} />
-                  </g>
-                ) : (
-                  <>
-                    <path d="M0 0 L0 16 L4 12 L8 18 L10 17 L6 11 L12 11 Z" fill={c.color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
-                    <rect x="12" y="8" rx="4" ry="4" width={c.name.length * 7 + 12} height="18" fill={c.color} />
-                    <text x="18" y="20" fontSize="11" fill="white" fontWeight="600" fontFamily="inherit">{c.name}</text>
-                  </>
-                )}
-              </g>
-            ))}
           </g>
         </svg>
 
@@ -1842,12 +1660,6 @@ export default function App() {
               <p className={`text-[14px] ${dk ? 'text-slate-400' : 'text-black/55'} mt-1.5 max-w-[280px] mx-auto leading-snug`}>
                 Выберите инструмент внизу и касайтесь экрана. Или начните с шаблона!
               </p>
-              <div className="flex items-center justify-center gap-2 mt-4">
-                <div className={`h-7 px-3 rounded-full ${dk ? 'bg-slate-700 text-slate-300' : 'bg-black/5 text-black/70'} text-[12px] font-medium flex items-center gap-1.5`}>
-                  <span className={`size-1.5 rounded-full ${participants > 1 ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
-                  {participants > 1 ? `${participants} онлайн` : 'Ожидание...'}
-                </div>
-              </div>
               <button onClick={() => setShowTemplates(true)}
                 className="mt-4 h-9 px-5 rounded-xl bg-gradient-to-r from-violet-500 to-blue-500 text-white text-[14px] font-medium pointer-events-auto active:scale-95 transition shadow-md">
                 📋 Начать с шаблона
@@ -2423,80 +2235,6 @@ export default function App() {
                   <div className={`mt-1 text-xs ${dk ? 'text-slate-300' : 'text-slate-600'}`}>{example.explanation}</div>
                 </button>
               ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== SHARE MODAL ===== */}
-      {showShare && (
-        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowShare(false)} data-ui>
-          <div className={`w-full max-w-[380px] rounded-[28px] ${dk ? 'bg-slate-800' : 'bg-white'} shadow-2xl p-6`} onClick={e => e.stopPropagation()}>
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-[20px] font-semibold tracking-tight">Пригласить в доску</h3>
-                <p className={`text-[14px] ${dk ? 'text-slate-400' : 'text-black/60'} mt-1`}>Работайте вместе в реальном времени</p>
-              </div>
-              <button onClick={() => setShowShare(false)} className={`size-8 grid place-items-center rounded-full ${hoverBg} -mr-1 -mt-1`}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
-              </button>
-            </div>
-
-            <div className={`mt-5 p-3 rounded-2xl ${dk ? 'bg-slate-700' : 'bg-[#F7F7F5]'} border ${borderC}`}>
-              <div className={`text-[12px] font-medium ${dk ? 'text-slate-400' : 'text-black/50'} uppercase tracking-wide`}>Ссылка-приглашение</div>
-              <div className="mt-1.5 flex items-center gap-2">
-                <div className={`flex-1 truncate text-[14px] font-mono ${dk ? 'bg-slate-600' : 'bg-white'} rounded-xl px-3 py-2 border ${borderC}`}>{shareUrl}</div>
-                <button onClick={() => { navigator.clipboard.writeText(shareUrl); if ('vibrate' in navigator) navigator.vibrate(10) }}
-                  className="h-9 px-3 rounded-xl bg-black text-white text-[13px] font-medium active:scale-95 transition whitespace-nowrap">
-                  Копировать
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-4 flex justify-center">
-              <div className="rounded-2xl bg-white p-3 shadow-inner">
-                {shareQrCodeUrl ? (
-                  <img src={shareQrCodeUrl} alt="QR-код ссылки-приглашения" width={120} height={120} className="rounded-lg" />
-                ) : (
-                  <div className="grid size-[120px] place-items-center text-center text-[11px] text-slate-500">Генерация QR-кода…</div>
-                )}
-              </div>
-            </div>
-            <p className={`mt-2 text-center text-[12px] ${dk ? 'text-slate-400' : 'text-black/40'}`}>QR-код создаётся локально в браузере</p>
-
-            {/* Share buttons */}
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              {[
-                { label: 'WhatsApp', color: '#25D366', url: `https://wa.me/?text=${encodeURIComponent('Присоединяйся к доске: ' + shareUrl)}` },
-                { label: 'Telegram', color: '#229ED9', url: `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent('Присоединяйся к доске!')}` },
-                { label: 'Копировать', color: '#000', url: '' },
-              ].map(b => (
-                <button key={b.label} onClick={() => {
-                  if (b.url) window.open(b.url, '_blank')
-                  else navigator.clipboard.writeText(shareUrl)
-                  if ('vibrate' in navigator) navigator.vibrate(10)
-                }} className="h-11 rounded-xl font-medium text-[13px] text-white active:scale-95 transition" style={{ background: b.color }}>
-                  {b.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Participants */}
-            <div className={`mt-5 pt-5 border-t ${dk ? 'border-slate-600' : 'border-black/5'}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[13px] font-medium">Кто онлайн</div>
-                  <div className={`text-[12px] ${dk ? 'text-slate-400' : 'text-black/55'}`}>{participants} участников</div>
-                </div>
-                <div className="flex -space-x-2">
-                  {cursors.slice(0, 3).map(c => (
-                    <div key={c.id} className="size-8 rounded-full grid place-items-center text-[11px] font-bold text-white"
-                      style={{ background: c.color, border: `2px solid ${dk ? '#1e293b' : '#fff'}` }}>{c.name[0]}</div>
-                  ))}
-                  <div className="size-8 rounded-full bg-black grid place-items-center text-[11px] font-bold text-white"
-                    style={{ border: `2px solid ${dk ? '#1e293b' : '#fff'}` }}>{user.name[0]}</div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
