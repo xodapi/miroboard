@@ -18,6 +18,20 @@ async function bootFile(page: import('@playwright/test').Page) {
   return { errors, requests }
 }
 
+function transformFor(element: import('@playwright/test').Locator) {
+  return element.getAttribute('transform')
+}
+
+async function createBpmnNode(
+  page: import('@playwright/test').Page,
+  tool: string,
+  point: { x: number; y: number },
+) {
+  await page.getByRole('button', { name: 'BPMN' }).click()
+  await page.keyboard.press(tool === 'Старт' ? 's' : 'e')
+  await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: point })
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('miro-onboarding-seen', 'true'))
 })
@@ -57,5 +71,130 @@ test('file and local HTTP expose the same interactive UI', async ({ page, browse
 test('cold file load has no protocol or uncaught-runtime failures', async ({ page }) => {
   const { errors } = await bootFile(page)
   expect(errors.filter(error => /cors|csp|cross origin|module|uncaught|promise/i.test(error))).toEqual([])
+  expect(errors).toEqual([])
+})
+
+test('offline board editing creates, renames, moves, deletes, and undoes local nodes', async ({ page }) => {
+  await page.context().route(/^(?!file:|data:|blob:).*/, route => route.abort())
+  const { errors, requests } = await bootFile(page)
+  const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
+
+  await page.keyboard.press('s')
+  await canvas.click({ position: { x: 180, y: 160 } })
+  await page.locator('textarea').press('Enter')
+  await page.keyboard.press('t')
+  await canvas.click({ position: { x: 360, y: 160 } })
+  await page.getByRole('textbox').press('Enter')
+  await page.keyboard.press('r')
+  await canvas.click({ position: { x: 500, y: 160 } })
+  await page.keyboard.press('o')
+  await canvas.click({ position: { x: 650, y: 160 } })
+  await expect(page.locator('[data-id]')).toHaveCount(4)
+
+  const sticky = page.locator('[data-id]').filter({ hasText: 'Заметка' })
+  await sticky.dblclick({ force: true })
+  const editor = page.locator('textarea')
+  await editor.fill('Офлайн заметка')
+  await editor.press('Enter')
+  await expect(page.getByText('Офлайн заметка', { exact: true })).toBeVisible()
+
+  const selected = page.locator('[data-id]').filter({ hasText: 'Офлайн заметка' })
+  const beforeMove = await transformFor(selected)
+  const selectedBox = await selected.boundingBox()
+  expect(selectedBox).not.toBeNull()
+  await selected.dispatchEvent('pointerdown', { clientX: selectedBox!.x + 50, clientY: selectedBox!.y + 40, pointerId: 1, button: 0 })
+  await canvas.dispatchEvent('pointermove', { clientX: selectedBox!.x + 170, clientY: selectedBox!.y + 140, pointerId: 1 })
+  await canvas.dispatchEvent('pointerup', { clientX: selectedBox!.x + 170, clientY: selectedBox!.y + 140, pointerId: 1 })
+  expect(await transformFor(selected)).not.toBe(beforeMove)
+
+  await selected.click({ force: true })
+  await page.keyboard.press('Delete')
+  await expect(page.getByText('Офлайн заметка', { exact: true })).toHaveCount(0)
+  await page.keyboard.press('Control+z')
+  await expect(page.getByText('Офлайн заметка', { exact: true })).toBeVisible()
+  await page.keyboard.press('Control+Shift+z')
+  await expect(page.getByText('Офлайн заметка', { exact: true })).toHaveCount(0)
+
+  expect(errors).toEqual([])
+  expect(requests.filter(url => !url.startsWith('file://') && !url.startsWith('data:') && !url.startsWith('blob:'))).toEqual([])
+})
+
+test('offline BPMN flow reroutes with its endpoint, survives undo redo, and simulates locally', async ({ page }) => {
+  await page.context().route(/^(?!file:|data:|blob:).*/, route => route.abort())
+  const { errors, requests } = await bootFile(page)
+  await createBpmnNode(page, 'Старт', { x: 180, y: 250 })
+  await createBpmnNode(page, 'Конец', { x: 420, y: 250 })
+
+  await page.getByRole('button', { name: 'BPMN' }).click()
+  await page.keyboard.press('f')
+  const bpmnNodes = page.locator('[data-id]')
+  await bpmnNodes.nth(0).click({ force: true })
+  await bpmnNodes.nth(1).click({ force: true })
+
+  const flow = page.locator('[data-testid^="bpmn-flow-"]')
+  await expect(flow).toHaveCount(1)
+  const target = page.locator('[data-id]').filter({ hasText: 'Конец' })
+  const flowBeforeReroute = await transformFor(flow)
+  const targetBox = await target.boundingBox()
+  expect(targetBox).not.toBeNull()
+  await target.dispatchEvent('pointerdown', { clientX: targetBox!.x + 60, clientY: targetBox!.y + 35, pointerId: 1, button: 0 })
+  await canvas.dispatchEvent('pointermove', { clientX: targetBox!.x + 200, clientY: targetBox!.y + 135, pointerId: 1 })
+  await canvas.dispatchEvent('pointerup', { clientX: targetBox!.x + 200, clientY: targetBox!.y + 135, pointerId: 1 })
+  expect(await transformFor(flow)).not.toBe(flowBeforeReroute)
+
+  await flow.click({ force: true })
+  await page.keyboard.press('Delete')
+  await expect(flow).toHaveCount(0)
+  await page.keyboard.press('Control+z')
+  await expect(flow).toHaveCount(1)
+  await page.keyboard.press('Control+Shift+z')
+  await expect(flow).toHaveCount(0)
+  await page.keyboard.press('Control+z')
+
+  await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+  await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
+  await expect(page.getByText('Средняя стоимость:')).toBeVisible()
+  await expect(page.locator('[data-ui]').filter({ hasText: /Не удалось|error/i })).toHaveCount(0)
+  expect(errors).toEqual([])
+  expect(requests.filter(url => !url.startsWith('file://') && !url.startsWith('data:') && !url.startsWith('blob:'))).toEqual([])
+})
+
+test('drag and resize render transient frames without snapping back and keep the minimap current', async ({ page }) => {
+  const { errors } = await bootFile(page)
+  const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
+  await page.keyboard.press('s')
+  await canvas.click({ position: { x: 200, y: 200 } })
+  await page.keyboard.press('s')
+  await canvas.click({ position: { x: 500, y: 200 } })
+  await page.getByTitle('Мини-карта').click()
+
+  const sticky = page.locator('[data-id]').filter({ hasText: 'Заметка' }).first()
+  await sticky.click({ force: true })
+  const beforeDrag = await transformFor(sticky)
+  const miniMap = page.locator('svg.cursor-pointer')
+  const beforeMap = await miniMap.locator('rect').nth(1).getAttribute('x')
+  const stickyBox = await sticky.boundingBox()
+  expect(stickyBox).not.toBeNull()
+  await sticky.dispatchEvent('pointerdown', { clientX: stickyBox!.x + 50, clientY: stickyBox!.y + 40, pointerId: 1, button: 0 })
+  await canvas.dispatchEvent('pointermove', { clientX: stickyBox!.x + 180, clientY: stickyBox!.y + 140, pointerId: 1 })
+  const previewTransform = await transformFor(sticky)
+  const previewMap = await miniMap.locator('rect').nth(1).getAttribute('x')
+  expect(previewTransform).not.toBe(beforeDrag)
+  expect(previewMap).not.toBe(beforeMap)
+  await canvas.dispatchEvent('pointerup', { clientX: stickyBox!.x + 180, clientY: stickyBox!.y + 140, pointerId: 1 })
+  expect(await transformFor(sticky)).toBe(previewTransform)
+  expect(await miniMap.locator('rect').nth(1).getAttribute('x')).toBe(previewMap)
+
+  const resize = sticky.locator('[data-resize="se"]')
+  const resizeBox = await resize.boundingBox()
+  expect(resizeBox).not.toBeNull()
+  await resize.dispatchEvent('pointerdown', { clientX: resizeBox!.x + resizeBox!.width / 2, clientY: resizeBox!.y + resizeBox!.height / 2, pointerId: 1, button: 0 })
+  await canvas.dispatchEvent('pointermove', { clientX: resizeBox!.x + 140, clientY: resizeBox!.y + 120, pointerId: 1 })
+  const previewBox = await sticky.boundingBox()
+  const previewResizeMap = await miniMap.locator('rect').nth(1).getAttribute('width')
+  await canvas.dispatchEvent('pointerup', { clientX: resizeBox!.x + 140, clientY: resizeBox!.y + 120, pointerId: 1 })
+  const committedBox = await sticky.boundingBox()
+  expect(committedBox).toEqual(previewBox)
+  expect(await miniMap.locator('rect').nth(1).getAttribute('width')).toBe(previewResizeMap)
   expect(errors).toEqual([])
 })
