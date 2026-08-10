@@ -76,4 +76,32 @@ test.describe('BPMN token execution, baseline-invariance and characterization', 
     await page.getByTitle('Проверить поток').click()
     await expect(page.getByText('Оценка:', { exact: false })).toBeVisible()
   })
+
+  test('CHARACTERIZATION: condition edits on the shipped parallel topology preserve its AND trace', async ({ page }) => {
+    await loadModule(page, 'parallel-queue')
+    const flows = page.locator('[data-testid^="bpmn-flow-"]')
+    const firstFlow = flows.nth(1)
+    await firstFlow.click({ force: true })
+    await page.locator('#bpmn-flow-condition').fill('false')
+    const secondFlow = flows.nth(2)
+    await secondFlow.click({ force: true })
+    await page.locator('#bpmn-flow-condition').fill('true')
+    const run = (await page.evaluate(() => window.__MIROBOARD_DEBUG__!.runBpmn())) as Run
+    expect(run.completed).toBe(true)
+    expect(run.tokenPath).toEqual(['start', 'split', 'left', 'join', 'right', 'join', 'end'])
+  })
+
+  test('CHARACTERIZATION: unmatched conditions on the shipped parallel topology preserve its AND trace', async ({ page }) => {
+    await loadModule(page, 'parallel-queue')
+    const flows = page.locator('[data-testid^="bpmn-flow-"]')
+    const firstFlow = flows.nth(1)
+    await firstFlow.click({ force: true })
+    await page.locator('#bpmn-flow-condition').fill('false')
+    const secondFlow = flows.nth(2)
+    await secondFlow.click({ force: true })
+    await page.locator('#bpmn-flow-condition').fill('false')
+    const run = (await page.evaluate(() => window.__MIROBOARD_DEBUG__!.runBpmn())) as Run
+    expect(run.completed).toBe(true)
+    expect(run.tokenPath).toEqual(['start', 'split', 'left', 'join', 'right', 'join', 'end'])
+  })
 })
