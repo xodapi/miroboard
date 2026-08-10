@@ -14,6 +14,7 @@ import fifoPriorityExample from '../examples/fifo-vs-priority.json'
 declare global {
   interface Window {
     __MIROBOARD_DISABLE_COLLABORATION__?: boolean
+    __MIROBOARD_DEBUG__?: { version: string; createBpmnModel: () => unknown; validateBpmn: () => unknown; runBpmn: () => unknown; simulateBpmn: (seed: number | string | bigint, runs: number) => BpmnSimulationResult; getElements: () => BoardElement[] }
   }
 }
 
@@ -32,6 +33,7 @@ type AwarenessState = {
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
 declare const __MIROBOARD_VERSION__: string
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
+declare const __MIROBOARD_DEBUG_HOOK__: boolean
 const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
   nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number; priority?: number }[]
@@ -43,30 +45,12 @@ type QueuePolicy = 'fifo' | 'priority'
 type ArrivalClassDraft = { count: string; intervalSec: string; priority: string }
 type RolePolicyDraft = { capacity: string; queuePolicy: QueuePolicy }
 type BpmnSimulationResult = {
-  seed: number
-  runs: number
-  completedRuns: number
-  simulationInstances: number
-  arrivalIntervalMs: number
-  minDurationMs: number
-  meanDurationMs: number
-  standardDeviationMs: number
-  p50DurationMs: number
-  p90DurationMs: number
-  p95DurationMs: number
-  maxDurationMs: number
-  meanCost: number
-  slaTargetMs?: number
-  onTimeRate?: number
-  roleUtilization: { role: string; capacity: number; meanWorkloadMs: number; meanWaitingMs: number; utilization: number }[]
-  priorityClasses: { priority: number; instances: number; meanWaitingMs: number; meanDurationMs: number }[]
+  seed: number; runs: number; completedRuns: number; simulationInstances: number; arrivalIntervalMs: number
+  minDurationMs: number; meanDurationMs: number; standardDeviationMs: number
+  p50DurationMs: number; p90DurationMs: number; p95DurationMs: number; maxDurationMs: number; meanCost: number
+  slaTargetMs?: number; onTimeRate?: number; roleUtilization: { role: string; capacity: number; meanWorkloadMs: number; meanWaitingMs: number; utilization: number }[]; priorityClasses: { priority: number; instances: number; meanWaitingMs: number; meanDurationMs: number }[]
 }
-type EducationalExample = {
-  title: string
-  explanation: string
-  checks: string[]
-  model: ImportedBpmnModel
-}
+type EducationalExample = { title: string; explanation: string; checks: string[]; model: ImportedBpmnModel }
 const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample, batchWorkloadExample, priorityQueueExample, fifoPriorityExample] as unknown as EducationalExample[]
 
 interface BoardElement {
@@ -818,6 +802,19 @@ export default function App() {
       showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.', 'error')
     }
   }, [createBpmnModel, simulationRuns, simulationSeed, showToast])
+
+  useEffect(() => {
+    if (!__MIROBOARD_DEBUG_HOOK__) return
+    window.__MIROBOARD_DEBUG__ = {
+      version: __MIROBOARD_VERSION__,
+      createBpmnModel,
+      validateBpmn: () => JSON.parse(validate_bpmn(JSON.stringify(createBpmnModel()))),
+      runBpmn: () => JSON.parse(run_bpmn(JSON.stringify(createBpmnModel()))),
+      simulateBpmn: (seed, runs) => JSON.parse(simulate_bpmn(JSON.stringify(createBpmnModel()), BigInt(seed), runs)) as BpmnSimulationResult,
+      getElements: () => elements.map((element) => ({ ...element, points: element.points?.map((point) => ({ ...point })), bpmnFlow: element.bpmnFlow && { ...element.bpmnFlow } })),
+    }
+    return () => { delete window.__MIROBOARD_DEBUG__ }
+  }, [createBpmnModel, elements])
 
   const importFromBpmn = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]

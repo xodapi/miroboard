@@ -37,12 +37,14 @@ const buildHistory = process.env.MIROBOARD_HISTORY_JSON ?? (() => {
     return "[]";
   }
 })();
+const debugHook = process.env.MIROBOARD_DEBUG_HOOK === "1";
 
 // https://vite.dev/config/
 export default defineConfig({
   define: {
     __MIROBOARD_VERSION__: JSON.stringify(buildVersion),
     __MIROBOARD_HISTORY__: buildHistory,
+    __MIROBOARD_DEBUG_HOOK__: JSON.stringify(debugHook),
   },
   plugins: [react(), tailwindcss(), viteSingleFile()],
   build: {
