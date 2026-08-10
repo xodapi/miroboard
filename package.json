@@ -14,6 +14,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "test": "node node_modules\\vitest\\vitest.mjs run",
+    "test:watch": "node node_modules\\vitest\\vitest.mjs watch",
+    "test:coverage": "node node_modules\\vitest\\vitest.mjs run --coverage",
     "test:e2e": "playwright test",
     "test:rust": "cargo test --manifest-path wasm/board-core/Cargo.toml"
   },
@@ -36,15 +39,18 @@
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.1",
+    "@vitest/coverage-v8": "4.1.10",
     "eslint": "9.39.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.4.24",
     "globals": "16.5.0",
+    "jsdom": "26.1.0",
     "playwright": "^1.62.1",
     "tailwindcss": "4.1.17",
     "typescript": "5.9.3",
     "typescript-eslint": "8.46.4",
     "vite": "^7.3.6",
-    "vite-plugin-singlefile": "2.3.0"
+    "vite-plugin-singlefile": "2.3.0",
+    "vitest": "4.1.10"
   }
 }
