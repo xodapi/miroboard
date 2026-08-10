@@ -4,6 +4,7 @@ import { WebrtcProvider } from 'y-webrtc'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import QRCode from 'qrcode'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
+import { commitElementUpdate } from './persistence/updates'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
 import slaCalendarExample from '../examples/sla-calendar.json'
@@ -278,6 +279,10 @@ export default function App() {
     id: string; corner: string; startX: number; startY: number;
     elX: number; elY: number; elW: number; elH: number
   } | null>(null)
+  // Gesture frames stay local until pointer-up, preventing one Yjs item rewrite
+  // (and one gc:false tombstone) per pointer event.
+  const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> } | null>(null)
+  const transientFrameRef = useRef<{ id: string; updates: Partial<BoardElement> } | null>(null)
 
   // Long press
   const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null)
@@ -589,14 +594,7 @@ export default function App() {
 
   const updateElement = useCallback((id: string, updates: Partial<BoardElement>) => {
     if (!yElements.current) return
-    const idx = yElements.current.toArray().findIndex(e => e.id === id)
-    if (idx >= 0) {
-      ydoc.transact(() => {
-        const cur = yElements.current!.get(idx)
-        yElements.current!.delete(idx, 1)
-        yElements.current!.insert(idx, [{ ...cur, ...updates }])
-      })
-    }
+    commitElementUpdate(ydoc, yElements.current, id, updates)
   }, [ydoc])
 
   const deleteElement = useCallback((id: string) => {
@@ -611,10 +609,12 @@ export default function App() {
     if (!yElements.current) return
     const idx = yElements.current.toArray().findIndex(e => e.id === id)
     if (idx >= 0) {
+      if (idx === yElements.current.length - 1) return
+      const el = yElements.current.get(idx)
+      const zIndex = Date.now()
       ydoc.transact(() => {
-        const el = yElements.current!.get(idx)
         yElements.current!.delete(idx, 1)
-        yElements.current!.push([{ ...el, zIndex: Date.now() }])
+        yElements.current!.push([{ ...el, zIndex }])
       })
     }
   }, [ydoc])
@@ -1163,7 +1163,9 @@ export default function App() {
       else if (c === 'nw') { newX = resizeInfo.elX + dx; newY = resizeInfo.elY + dy; newW = Math.max(30, resizeInfo.elW - dx); newH = Math.max(30, resizeInfo.elH - dy) }
 
       if (snapGrid) { newX = snapVal(newX); newY = snapVal(newY); newW = snapVal(newW); newH = snapVal(newH) }
-      updateElement(resizeInfo.id, { x: newX, y: newY, w: newW, h: newH })
+      const frame = { id: resizeInfo.id, updates: { x: newX, y: newY, w: newW, h: newH } }
+      transientFrameRef.current = frame
+      setTransientFrame(frame)
       return
     }
 
@@ -1172,7 +1174,9 @@ export default function App() {
       let newX = dragInfo.elStartX + (point.x - dragInfo.startX)
       let newY = dragInfo.elStartY + (point.y - dragInfo.startY)
       if (snapGrid) { newX = snapVal(newX); newY = snapVal(newY) }
-      updateElement(dragInfo.id, { x: newX, y: newY })
+      const frame = { id: dragInfo.id, updates: { x: newX, y: newY } }
+      transientFrameRef.current = frame
+      setTransientFrame(frame)
       return
     }
 
@@ -1213,6 +1217,10 @@ export default function App() {
         createdBy: user.id
       })
     }
+    const frame = transientFrameRef.current
+    if (frame) updateElement(frame.id, frame.updates)
+    transientFrameRef.current = null
+    setTransientFrame(null)
     setIsDrawing(false)
     setCurrentPath([])
     setIsPanning(false)
@@ -1220,7 +1228,7 @@ export default function App() {
     setLastPinchDist(null)
     setDragInfo(null)
     setResizeInfo(null)
-  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, user.id])
+  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, user.id, updateElement])
 
   // Touch pinch
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
@@ -1319,6 +1327,13 @@ export default function App() {
   }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool])
 
   // ======================== RENDER ELEMENT ========================
+  const renderedElements = useMemo(() => {
+    if (!transientFrame) return elements
+    return elements.map(element => element.id === transientFrame.id
+      ? { ...element, ...transientFrame.updates }
+      : element)
+  }, [elements, transientFrame])
+
   const renderElement = (el: BoardElement) => {
     const isSelected = selectedId === el.id
     const invS = 1 / transform.scale
@@ -1458,8 +1473,8 @@ export default function App() {
         )
 
       case 'arrow': {
-        const source = el.bpmnFlow ? elements.find(node => node.id === el.bpmnFlow?.sourceId) : undefined
-        const target = el.bpmnFlow ? elements.find(node => node.id === el.bpmnFlow?.targetId) : undefined
+        const source = el.bpmnFlow ? renderedElements.find(node => node.id === el.bpmnFlow?.sourceId) : undefined
+        const target = el.bpmnFlow ? renderedElements.find(node => node.id === el.bpmnFlow?.targetId) : undefined
         const sourceCenter = source ? { x: source.x + (source.w || 0) / 2, y: source.y + (source.h || 0) / 2 } : undefined
         const targetCenter = target ? { x: target.x + (target.w || 0) / 2, y: target.y + (target.h || 0) / 2 } : undefined
         const start = source && targetCenter ? bpmnEdgeAnchor(source, targetCenter.x, targetCenter.y) : { x: el.x, y: el.y }
@@ -1522,7 +1537,7 @@ export default function App() {
     if (!showMiniMap || elements.length === 0) return null
     const MW = 130, MH = 90
     let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity
-    elements.forEach(el => {
+    renderedElements.forEach(el => {
       mnx = Math.min(mnx, el.x); mny = Math.min(mny, el.y)
       mxx = Math.max(mxx, el.x + (el.w || 20)); mxy = Math.max(mxy, el.y + (el.h || 20))
     })
@@ -1547,7 +1562,7 @@ export default function App() {
       <div className={`absolute bottom-[100px] left-3 z-20 rounded-2xl overflow-hidden shadow-xl border ${darkMode ? 'bg-[#1e293b] border-slate-600' : 'bg-white border-black/10'}`} data-ui>
         <svg width={MW} height={MH} onClick={handleNav} className="cursor-pointer">
           <rect width={MW} height={MH} fill={darkMode ? '#1e293b' : '#f8f8f6'} />
-          {elements.map(el => {
+          {renderedElements.map(el => {
             const p = tm(el.x, el.y)
             const w = Math.max((el.w || 6) * ms, 2), h = Math.max((el.h || 6) * ms, 2)
             return <rect key={el.id} x={p.x} y={p.y} width={w} height={h}
@@ -1743,7 +1758,7 @@ export default function App() {
           <rect width="100%" height="100%" fill="url(#grid-large)" />
 
           <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
-            {elements.map(renderElement)}
+            {renderedElements.map(renderElement)}
             {bpmnFlowSourceId && flowPreviewPoint && (() => {
               const source = elements.find(element => element.id === bpmnFlowSourceId)
               if (!source) return null
