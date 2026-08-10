@@ -1,0 +1,177 @@
+{
+  "provenance": {
+    "captureId": "capture1",
+    "capturedAt": "2026-08-10T09:35:33.144Z",
+    "url": "http://127.0.0.1:4173/?board=34b7e162-2ebd-48c9-bdd0-9304b156b2fc2dff2063-cb34-49b3-8291-4b090af6711b&key=997a94a8-b4b8-4946-9d02-a190a63b7d7e3520decd-3eaa-4794-a767-eb8356021633",
+    "sessionKind": "first-load",
+    "browserSessionId": "fifo-vs-priority-context-1",
+    "buildMode": "test-build-with-debug-hook",
+    "captureScript": "tests/baseline-capture.spec.ts",
+    "loadGate": {
+      "toastSeen": "Загружен модуль: FIFO vs Priority: классы прибытия",
+      "expectedGDataIdCount": 5,
+      "observedGDataIdCount": 5
+    },
+    "invocations": [
+      {
+        "target": "createBpmnModel",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.createBpmnModel()"
+      },
+      {
+        "target": "validateBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.validateBpmn()"
+      },
+      {
+        "target": "runBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.runBpmn()"
+      },
+      {
+        "target": "simulateBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.simulateBpmn(42, 500)",
+        "seed": 42,
+        "runs": 500
+      }
+    ]
+  },
+  "payload": {
+    "createBpmnModel": {
+      "nodes": [
+        {
+          "id": "start",
+          "type": "startEvent",
+          "poolId": "default",
+          "name": "Старт",
+          "x": 80,
+          "y": 180,
+          "width": 78,
+          "height": 78
+        },
+        {
+          "id": "task",
+          "type": "task",
+          "poolId": "default",
+          "name": "Обработка заявки",
+          "durationMs": 1000,
+          "resourceRole": "Оператор",
+          "resourceCapacity": 1,
+          "x": 250,
+          "y": 160,
+          "width": 176,
+          "height": 76
+        },
+        {
+          "id": "end",
+          "type": "endEvent",
+          "poolId": "default",
+          "name": "Финиш",
+          "x": 480,
+          "y": 180,
+          "width": 78,
+          "height": 78
+        }
+      ],
+      "flows": [
+        {
+          "id": "f1",
+          "sourceId": "start",
+          "targetId": "task",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f2",
+          "sourceId": "task",
+          "targetId": "end",
+          "flowType": "sequence"
+        }
+      ],
+      "simulationInstances": 1,
+      "arrivalIntervalMs": 0,
+      "arrivalClasses": [
+        {
+          "count": 2,
+          "intervalMs": 500,
+          "priority": 1
+        },
+        {
+          "count": 1,
+          "intervalMs": 0,
+          "priority": 10
+        }
+      ],
+      "resourceRoles": [
+        {
+          "name": "Оператор",
+          "capacity": 1,
+          "queuePolicy": "priority"
+        }
+      ]
+    },
+    "validateBpmn": {
+      "valid": true,
+      "issues": []
+    },
+    "runBpmn": {
+      "completed": true,
+      "tokenPath": [
+        "start",
+        "task",
+        "end"
+      ],
+      "estimatedDurationMs": 1000,
+      "estimatedCost": 0,
+      "roleWorkloadMs": {
+        "Оператор": 1000
+      },
+      "roleCapacity": {
+        "Оператор": 1
+      },
+      "roleWaitingMs": {
+        "Оператор": 0
+      }
+    },
+    "simulateBpmn": {
+      "seed": 42,
+      "runs": 500,
+      "completedRuns": 500,
+      "simulationInstances": 3,
+      "arrivalIntervalMs": 0,
+      "minDurationMs": 1500,
+      "meanDurationMs": 1500,
+      "standardDeviationMs": 0,
+      "p50DurationMs": 1500,
+      "p90DurationMs": 1500,
+      "p95DurationMs": 1500,
+      "maxDurationMs": 1500,
+      "meanCost": 0,
+      "roleUtilization": [
+        {
+          "role": "Оператор",
+          "capacity": 1,
+          "meanWorkloadMs": 3000,
+          "utilization": 2,
+          "meanWaitingMs": 1500
+        }
+      ],
+      "priorityClasses": [
+        {
+          "priority": 10,
+          "instances": 500,
+          "meanWaitingMs": 0,
+          "meanDurationMs": 1000
+        },
+        {
+          "priority": 1,
+          "instances": 1000,
+          "meanWaitingMs": 750,
+          "meanDurationMs": 1750
+        }
+      ],
+      "slaTargetMs": null,
+      "onTimeRate": null
+    }
+  }
+}

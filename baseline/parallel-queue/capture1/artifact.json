@@ -1,0 +1,217 @@
+{
+  "provenance": {
+    "captureId": "capture1",
+    "capturedAt": "2026-08-10T09:35:18.925Z",
+    "url": "http://127.0.0.1:4173/?board=f236fa73-13f3-4019-ac23-6e5ad5c7fff33ea87c18-9edf-47ff-9c6f-b5a505479a7a&key=70585907-87b1-43dc-b779-47fa1d032437df4480fc-5cd9-4585-86eb-d2a61780b6c7",
+    "sessionKind": "first-load",
+    "browserSessionId": "parallel-queue-context-1",
+    "buildMode": "test-build-with-debug-hook",
+    "captureScript": "tests/baseline-capture.spec.ts",
+    "loadGate": {
+      "toastSeen": "Загружен модуль: Параллельные задачи и очередь ресурса",
+      "expectedGDataIdCount": 12,
+      "observedGDataIdCount": 12
+    },
+    "invocations": [
+      {
+        "target": "createBpmnModel",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.createBpmnModel()"
+      },
+      {
+        "target": "validateBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.validateBpmn()"
+      },
+      {
+        "target": "runBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.runBpmn()"
+      },
+      {
+        "target": "simulateBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.simulateBpmn(42, 500)",
+        "seed": 42,
+        "runs": 500
+      }
+    ]
+  },
+  "payload": {
+    "createBpmnModel": {
+      "nodes": [
+        {
+          "id": "start",
+          "type": "startEvent",
+          "poolId": "default",
+          "name": "Старт",
+          "x": 40,
+          "y": 160,
+          "width": 78,
+          "height": 78
+        },
+        {
+          "id": "split",
+          "type": "andGateway",
+          "poolId": "default",
+          "name": "AND split",
+          "x": 150,
+          "y": 160,
+          "width": 78,
+          "height": 78
+        },
+        {
+          "id": "left",
+          "type": "task",
+          "poolId": "default",
+          "name": "Собрать данные",
+          "durationMs": 4000,
+          "resourceRole": "Оператор",
+          "costPerHour": 25,
+          "resourceCapacity": 1,
+          "x": 280,
+          "y": 80,
+          "width": 176,
+          "height": 76
+        },
+        {
+          "id": "right",
+          "type": "task",
+          "poolId": "default",
+          "name": "Сверить данные",
+          "durationMs": 3000,
+          "resourceRole": "Оператор",
+          "costPerHour": 25,
+          "resourceCapacity": 1,
+          "x": 280,
+          "y": 240,
+          "width": 176,
+          "height": 76
+        },
+        {
+          "id": "join",
+          "type": "andGateway",
+          "poolId": "default",
+          "name": "AND join",
+          "x": 470,
+          "y": 160,
+          "width": 78,
+          "height": 78
+        },
+        {
+          "id": "end",
+          "type": "endEvent",
+          "poolId": "default",
+          "name": "Финиш",
+          "x": 600,
+          "y": 160,
+          "width": 78,
+          "height": 78
+        }
+      ],
+      "flows": [
+        {
+          "id": "f1",
+          "sourceId": "start",
+          "targetId": "split",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f2",
+          "sourceId": "split",
+          "targetId": "left",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f3",
+          "sourceId": "split",
+          "targetId": "right",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f4",
+          "sourceId": "left",
+          "targetId": "join",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f5",
+          "sourceId": "right",
+          "targetId": "join",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f6",
+          "sourceId": "join",
+          "targetId": "end",
+          "flowType": "sequence"
+        }
+      ],
+      "simulationInstances": 1,
+      "arrivalIntervalMs": 0,
+      "arrivalClasses": [],
+      "resourceRoles": []
+    },
+    "validateBpmn": {
+      "valid": true,
+      "issues": []
+    },
+    "runBpmn": {
+      "completed": true,
+      "tokenPath": [
+        "start",
+        "split",
+        "left",
+        "join",
+        "right",
+        "join",
+        "end"
+      ],
+      "estimatedDurationMs": 7000,
+      "estimatedCost": 0.04861111111111111,
+      "roleWorkloadMs": {
+        "Оператор": 7000
+      },
+      "roleCapacity": {
+        "Оператор": 1
+      },
+      "roleWaitingMs": {
+        "Оператор": 4000
+      }
+    },
+    "simulateBpmn": {
+      "seed": 42,
+      "runs": 500,
+      "completedRuns": 500,
+      "simulationInstances": 1,
+      "arrivalIntervalMs": 0,
+      "minDurationMs": 7000,
+      "meanDurationMs": 7000,
+      "standardDeviationMs": 0,
+      "p50DurationMs": 7000,
+      "p90DurationMs": 7000,
+      "p95DurationMs": 7000,
+      "maxDurationMs": 7000,
+      "meanCost": 0.048611111111110786,
+      "roleUtilization": [
+        {
+          "role": "Оператор",
+          "capacity": 1,
+          "meanWorkloadMs": 7000,
+          "utilization": 1,
+          "meanWaitingMs": 4000
+        }
+      ],
+      "priorityClasses": [
+        {
+          "priority": 0,
+          "instances": 500,
+          "meanWaitingMs": 4000,
+          "meanDurationMs": 7000
+        }
+      ],
+      "slaTargetMs": null,
+      "onTimeRate": null
+    }
+  }
+}

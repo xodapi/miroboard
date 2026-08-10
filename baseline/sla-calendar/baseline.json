@@ -1,0 +1,234 @@
+{
+  "payload": {
+    "createBpmnModel": {
+      "nodes": [
+        {
+          "id": "start",
+          "type": "startEvent",
+          "poolId": "default",
+          "name": "Старт",
+          "x": 40,
+          "y": 120,
+          "width": 78,
+          "height": 78
+        },
+        {
+          "id": "work",
+          "type": "task",
+          "poolId": "default",
+          "name": "Обработать заявку",
+          "durationMs": 8000,
+          "resourceRole": "Оператор",
+          "costPerHour": 25,
+          "resourceCapacity": 1,
+          "x": 180,
+          "y": 120,
+          "width": 176,
+          "height": 76
+        },
+        {
+          "id": "end",
+          "type": "endEvent",
+          "poolId": "default",
+          "name": "Финиш",
+          "x": 430,
+          "y": 120,
+          "width": 78,
+          "height": 78
+        }
+      ],
+      "flows": [
+        {
+          "id": "f1",
+          "sourceId": "start",
+          "targetId": "work",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f2",
+          "sourceId": "work",
+          "targetId": "end",
+          "flowType": "sequence"
+        }
+      ],
+      "simulationInstances": 1,
+      "arrivalIntervalMs": 0,
+      "arrivalClasses": [],
+      "resourceRoles": []
+    },
+    "validateBpmn": {
+      "valid": true,
+      "issues": []
+    },
+    "runBpmn": {
+      "completed": true,
+      "tokenPath": [
+        "start",
+        "work",
+        "end"
+      ],
+      "estimatedDurationMs": 8000,
+      "estimatedCost": 0.05555555555555555,
+      "roleWorkloadMs": {
+        "Оператор": 8000
+      },
+      "roleCapacity": {
+        "Оператор": 1
+      },
+      "roleWaitingMs": {
+        "Оператор": 0
+      }
+    },
+    "simulateBpmn": {
+      "seed": 42,
+      "runs": 500,
+      "completedRuns": 500,
+      "simulationInstances": 1,
+      "arrivalIntervalMs": 0,
+      "minDurationMs": 8000,
+      "meanDurationMs": 8000,
+      "standardDeviationMs": 0,
+      "p50DurationMs": 8000,
+      "p90DurationMs": 8000,
+      "p95DurationMs": 8000,
+      "maxDurationMs": 8000,
+      "meanCost": 0.05555555555555613,
+      "roleUtilization": [
+        {
+          "role": "Оператор",
+          "capacity": 1,
+          "meanWorkloadMs": 8000,
+          "utilization": 1,
+          "meanWaitingMs": 0
+        }
+      ],
+      "priorityClasses": [
+        {
+          "priority": 0,
+          "instances": 500,
+          "meanWaitingMs": 0,
+          "meanDurationMs": 8000
+        }
+      ],
+      "slaTargetMs": null,
+      "onTimeRate": null
+    }
+  },
+  "sha256": "fd21a43377b787a663e4c917619237653343e70da5fbf49da26c0f614ab3cd46",
+  "provenanceSummary": [
+    {
+      "captureId": "capture1",
+      "capturedAt": "2026-08-10T09:35:22.558Z",
+      "url": "http://127.0.0.1:4173/?board=b5ce5574-61c3-41b9-bc57-27ff18cb02a28d27dd2d-e8ab-4530-9a75-8ba6ac062e82&key=6896457b-9410-4c52-bf50-44391050e36c0f757935-bcda-49b7-a837-3356558a6a4c",
+      "sessionKind": "first-load",
+      "browserSessionId": "sla-calendar-context-1",
+      "buildMode": "test-build-with-debug-hook",
+      "captureScript": "tests/baseline-capture.spec.ts",
+      "loadGate": {
+        "toastSeen": "Загружен модуль: SLA и рабочий календарь",
+        "expectedGDataIdCount": 5,
+        "observedGDataIdCount": 5
+      },
+      "invocations": [
+        {
+          "target": "createBpmnModel",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.createBpmnModel()"
+        },
+        {
+          "target": "validateBpmn",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.validateBpmn()"
+        },
+        {
+          "target": "runBpmn",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.runBpmn()"
+        },
+        {
+          "target": "simulateBpmn",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.simulateBpmn(42, 500)",
+          "seed": 42,
+          "runs": 500
+        }
+      ]
+    },
+    {
+      "captureId": "capture2",
+      "capturedAt": "2026-08-10T09:35:23.460Z",
+      "url": "http://127.0.0.1:4173/?board=b5ce5574-61c3-41b9-bc57-27ff18cb02a28d27dd2d-e8ab-4530-9a75-8ba6ac062e82&key=6896457b-9410-4c52-bf50-44391050e36c0f757935-bcda-49b7-a837-3356558a6a4c",
+      "sessionKind": "same-session-reload",
+      "browserSessionId": "sla-calendar-context-1",
+      "buildMode": "test-build-with-debug-hook",
+      "captureScript": "tests/baseline-capture.spec.ts",
+      "loadGate": {
+        "toastSeen": "Загружен модуль: SLA и рабочий календарь",
+        "expectedGDataIdCount": 5,
+        "observedGDataIdCount": 5
+      },
+      "invocations": [
+        {
+          "target": "createBpmnModel",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.createBpmnModel()"
+        },
+        {
+          "target": "validateBpmn",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.validateBpmn()"
+        },
+        {
+          "target": "runBpmn",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.runBpmn()"
+        },
+        {
+          "target": "simulateBpmn",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.simulateBpmn(42, 500)",
+          "seed": 42,
+          "runs": 500
+        }
+      ]
+    },
+    {
+      "captureId": "capture3",
+      "capturedAt": "2026-08-10T09:35:24.812Z",
+      "url": "http://127.0.0.1:4173/?board=4cdfc17e-2285-4819-8230-5f279c14f8a96c15e94d-c1eb-452b-aa83-241125204a26&key=0350a170-9e8c-48c7-abd5-486d8c3eaaa033347115-a9a6-4e2c-93dc-7ed3640a8b48",
+      "sessionKind": "post-browser-restart",
+      "browserSessionId": "sla-calendar-context-3",
+      "buildMode": "test-build-with-debug-hook",
+      "captureScript": "tests/baseline-capture.spec.ts",
+      "loadGate": {
+        "toastSeen": "Загружен модуль: SLA и рабочий календарь",
+        "expectedGDataIdCount": 5,
+        "observedGDataIdCount": 5
+      },
+      "invocations": [
+        {
+          "target": "createBpmnModel",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.createBpmnModel()"
+        },
+        {
+          "target": "validateBpmn",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.validateBpmn()"
+        },
+        {
+          "target": "runBpmn",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.runBpmn()"
+        },
+        {
+          "target": "simulateBpmn",
+          "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+          "expression": "window.__MIROBOARD_DEBUG__.simulateBpmn(42, 500)",
+          "seed": 42,
+          "runs": 500
+        }
+      ]
+    }
+  ]
+}

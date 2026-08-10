@@ -1,0 +1,176 @@
+{
+  "provenance": {
+    "captureId": "capture3",
+    "capturedAt": "2026-08-10T09:35:17.407Z",
+    "url": "http://127.0.0.1:4173/?board=a4d81589-198a-4c7c-a202-a085322f2f6c76571086-10b2-4d2d-adee-0c1292ce3b70&key=d74a25bc-5c97-414d-be47-d43e00a399705d697c99-40df-4a63-afe1-587c2cb2b8d2",
+    "sessionKind": "post-browser-restart",
+    "browserSessionId": "basic-fixed-context-3",
+    "buildMode": "test-build-with-debug-hook",
+    "captureScript": "tests/baseline-capture.spec.ts",
+    "loadGate": {
+      "toastSeen": "Загружен модуль: Линейный процесс: фиксированная длительность",
+      "expectedGDataIdCount": 7,
+      "observedGDataIdCount": 7
+    },
+    "invocations": [
+      {
+        "target": "createBpmnModel",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.createBpmnModel()"
+      },
+      {
+        "target": "validateBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.validateBpmn()"
+      },
+      {
+        "target": "runBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.runBpmn()"
+      },
+      {
+        "target": "simulateBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.simulateBpmn(42, 500)",
+        "seed": 42,
+        "runs": 500
+      }
+    ]
+  },
+  "payload": {
+    "createBpmnModel": {
+      "nodes": [
+        {
+          "id": "start",
+          "type": "startEvent",
+          "poolId": "default",
+          "name": "Старт",
+          "x": 40,
+          "y": 100,
+          "width": 78,
+          "height": 78
+        },
+        {
+          "id": "prepare",
+          "type": "task",
+          "poolId": "default",
+          "name": "Подготовить данные",
+          "durationMs": 3000,
+          "resourceRole": "Аналитик",
+          "costPerHour": 40,
+          "resourceCapacity": 1,
+          "x": 160,
+          "y": 100,
+          "width": 176,
+          "height": 76
+        },
+        {
+          "id": "review",
+          "type": "task",
+          "poolId": "default",
+          "name": "Проверить результат",
+          "durationMs": 5000,
+          "resourceRole": "Аналитик",
+          "costPerHour": 40,
+          "resourceCapacity": 1,
+          "x": 380,
+          "y": 100,
+          "width": 176,
+          "height": 76
+        },
+        {
+          "id": "end",
+          "type": "endEvent",
+          "poolId": "default",
+          "name": "Финиш",
+          "x": 600,
+          "y": 100,
+          "width": 78,
+          "height": 78
+        }
+      ],
+      "flows": [
+        {
+          "id": "f1",
+          "sourceId": "start",
+          "targetId": "prepare",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f2",
+          "sourceId": "prepare",
+          "targetId": "review",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f3",
+          "sourceId": "review",
+          "targetId": "end",
+          "flowType": "sequence"
+        }
+      ],
+      "simulationInstances": 1,
+      "arrivalIntervalMs": 0,
+      "arrivalClasses": [],
+      "resourceRoles": []
+    },
+    "validateBpmn": {
+      "valid": true,
+      "issues": []
+    },
+    "runBpmn": {
+      "completed": true,
+      "tokenPath": [
+        "start",
+        "prepare",
+        "review",
+        "end"
+      ],
+      "estimatedDurationMs": 8000,
+      "estimatedCost": 0.08888888888888889,
+      "roleWorkloadMs": {
+        "Аналитик": 8000
+      },
+      "roleCapacity": {
+        "Аналитик": 1
+      },
+      "roleWaitingMs": {
+        "Аналитик": 0
+      }
+    },
+    "simulateBpmn": {
+      "seed": 42,
+      "runs": 500,
+      "completedRuns": 500,
+      "simulationInstances": 1,
+      "arrivalIntervalMs": 0,
+      "minDurationMs": 8000,
+      "meanDurationMs": 8000,
+      "standardDeviationMs": 0,
+      "p50DurationMs": 8000,
+      "p90DurationMs": 8000,
+      "p95DurationMs": 8000,
+      "maxDurationMs": 8000,
+      "meanCost": 0.08888888888888861,
+      "roleUtilization": [
+        {
+          "role": "Аналитик",
+          "capacity": 1,
+          "meanWorkloadMs": 8000,
+          "utilization": 1,
+          "meanWaitingMs": 0
+        }
+      ],
+      "priorityClasses": [
+        {
+          "priority": 0,
+          "instances": 500,
+          "meanWaitingMs": 0,
+          "meanDurationMs": 8000
+        }
+      ],
+      "slaTargetMs": null,
+      "onTimeRate": null
+    }
+  }
+}

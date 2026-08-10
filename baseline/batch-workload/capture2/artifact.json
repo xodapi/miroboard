@@ -1,0 +1,155 @@
+{
+  "provenance": {
+    "captureId": "capture2",
+    "capturedAt": "2026-08-10T09:35:27.095Z",
+    "url": "http://127.0.0.1:4173/?board=b4375804-96f3-4dcd-9128-5ea0cdd00fb50abfcddd-19c6-40cb-a05f-e26038f7e350&key=90dc5ba0-64df-4d39-b389-264a5c951ee889da4827-d092-4bb2-9cb8-ff58f8ddca06",
+    "sessionKind": "same-session-reload",
+    "browserSessionId": "batch-workload-context-1",
+    "buildMode": "test-build-with-debug-hook",
+    "captureScript": "tests/baseline-capture.spec.ts",
+    "loadGate": {
+      "toastSeen": "Загружен модуль: Поток заявок: несколько instances",
+      "expectedGDataIdCount": 5,
+      "observedGDataIdCount": 5
+    },
+    "invocations": [
+      {
+        "target": "createBpmnModel",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.createBpmnModel()"
+      },
+      {
+        "target": "validateBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.validateBpmn()"
+      },
+      {
+        "target": "runBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.runBpmn()"
+      },
+      {
+        "target": "simulateBpmn",
+        "howInvoked": "page.evaluate via window.__MIROBOARD_DEBUG__",
+        "expression": "window.__MIROBOARD_DEBUG__.simulateBpmn(42, 500)",
+        "seed": 42,
+        "runs": 500
+      }
+    ]
+  },
+  "payload": {
+    "createBpmnModel": {
+      "nodes": [
+        {
+          "id": "start",
+          "type": "startEvent",
+          "poolId": "default",
+          "name": "Старт",
+          "x": 40,
+          "y": 120,
+          "width": 78,
+          "height": 78
+        },
+        {
+          "id": "task",
+          "type": "task",
+          "poolId": "default",
+          "name": "Обработать заявку",
+          "durationMs": 3000,
+          "resourceRole": "Оператор",
+          "costPerHour": 25,
+          "resourceCapacity": 1,
+          "x": 180,
+          "y": 120,
+          "width": 176,
+          "height": 76
+        },
+        {
+          "id": "end",
+          "type": "endEvent",
+          "poolId": "default",
+          "name": "Финиш",
+          "x": 440,
+          "y": 120,
+          "width": 78,
+          "height": 78
+        }
+      ],
+      "flows": [
+        {
+          "id": "f1",
+          "sourceId": "start",
+          "targetId": "task",
+          "flowType": "sequence"
+        },
+        {
+          "id": "f2",
+          "sourceId": "task",
+          "targetId": "end",
+          "flowType": "sequence"
+        }
+      ],
+      "simulationInstances": 1,
+      "arrivalIntervalMs": 0,
+      "arrivalClasses": [],
+      "resourceRoles": []
+    },
+    "validateBpmn": {
+      "valid": true,
+      "issues": []
+    },
+    "runBpmn": {
+      "completed": true,
+      "tokenPath": [
+        "start",
+        "task",
+        "end"
+      ],
+      "estimatedDurationMs": 3000,
+      "estimatedCost": 0.020833333333333336,
+      "roleWorkloadMs": {
+        "Оператор": 3000
+      },
+      "roleCapacity": {
+        "Оператор": 1
+      },
+      "roleWaitingMs": {
+        "Оператор": 0
+      }
+    },
+    "simulateBpmn": {
+      "seed": 42,
+      "runs": 500,
+      "completedRuns": 500,
+      "simulationInstances": 1,
+      "arrivalIntervalMs": 0,
+      "minDurationMs": 3000,
+      "meanDurationMs": 3000,
+      "standardDeviationMs": 0,
+      "p50DurationMs": 3000,
+      "p90DurationMs": 3000,
+      "p95DurationMs": 3000,
+      "maxDurationMs": 3000,
+      "meanCost": 0.020833333333333377,
+      "roleUtilization": [
+        {
+          "role": "Оператор",
+          "capacity": 1,
+          "meanWorkloadMs": 3000,
+          "utilization": 1,
+          "meanWaitingMs": 0
+        }
+      ],
+      "priorityClasses": [
+        {
+          "priority": 0,
+          "instances": 500,
+          "meanWaitingMs": 0,
+          "meanDurationMs": 3000
+        }
+      ],
+      "slaTargetMs": null,
+      "onTimeRate": null
+    }
+  }
+}
