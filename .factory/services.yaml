@@ -1,9 +1,13 @@
 commands:
   install: npm ci
   build: node node_modules\vite\bin\vite.js build
+  # Test-only artifact for the explicitly opt-in baseline capture driver.
+  build:test: powershell -Command "$env:MIROBOARD_DEBUG_HOOK='1'; node node_modules\vite\bin\vite.js build"
   typecheck: node node_modules\typescript\bin\tsc --noEmit
   lint: node node_modules\eslint\bin\eslint.js .
   test:e2e: node node_modules\playwright\cli.js test
+  # Never run during ordinary E2E validation; this may replace baseline/.
+  test:baseline-capture: powershell -Command "$env:MIROBOARD_DEBUG_HOOK='1'; node node_modules\vite\bin\vite.js build; node node_modules\playwright\cli.js test --config playwright.capture.config.ts"
   test:rust: cargo test --manifest-path wasm/board-core/Cargo.toml
   wasm:build: cd wasm/board-core && wasm-pack build --target web --out-dir ../../src/wasm/board-core --out-name board_core
 
