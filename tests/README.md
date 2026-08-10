@@ -17,3 +17,11 @@ normal `test:e2e` lane, which builds the hook-free production artifact.
 Run it through `test:e2e:debug` in `services.yaml`. That command builds with
 `MIROBOARD_DEBUG_HOOK=1`, serves the instrumented artifact, and selects the suite via
 `playwright.debug.config.ts`. Do not add hook-dependent specs to the default config.
+
+Token execution regression coverage follows the same split. Tests labelled
+`BASELINE-INVARIANCE` compare only the six shipped models at seed 42/runs 500
+with immutable `baseline/` payloads. Tests labelled `CHARACTERIZATION` or
+`RELATIONAL` cover changed configurations and assert observed behaviour without
+inventing baseline artifacts. The suite is
+`bpmn-token-execution-regression-suite.spec.ts` and runs only through
+`test:e2e:debug`.
