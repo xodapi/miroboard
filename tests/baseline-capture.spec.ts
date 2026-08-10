@@ -29,6 +29,14 @@ async function prepare(page: Page): Promise<void> {
   })
 }
 
+async function assertDebugHook(page: Page): Promise<void> {
+  await page.goto('/')
+  await expect.poll(
+    () => page.evaluate(() => Boolean(window.__MIROBOARD_DEBUG__)),
+    'baseline capture requires a test build with MIROBOARD_DEBUG_HOOK=1; baseline/ has not been modified',
+  ).toBe(true)
+}
+
 async function capture(page: Page, fixture: ReturnType<typeof readFixture>, kind: SessionKind, id: string, captureId: string, navigate = true) {
   if (navigate) await page.goto('/')
   await page.getByRole('button', { name: 'Примеры' }).click()
@@ -38,7 +46,7 @@ async function capture(page: Page, fixture: ReturnType<typeof readFixture>, kind
   await expect(toast).toBeVisible()
   const groups = page.locator('svg g[data-id]')
   await expect(groups).toHaveCount(fixture.elementCount)
-  const payload = await page.evaluate((calls) => {
+  const payload = await page.evaluate(() => {
     const hook = window.__MIROBOARD_DEBUG__
     if (!hook) throw new Error('debug hook is unavailable')
     return {
@@ -47,7 +55,7 @@ async function capture(page: Page, fixture: ReturnType<typeof readFixture>, kind
       runBpmn: hook.runBpmn(),
       simulateBpmn: hook.simulateBpmn(42, 500),
     }
-  }, expressions)
+  })
   const simulation = payload.simulateBpmn as { completedRuns?: number } | null
   const model = payload.createBpmnModel as { nodes?: unknown[] } | null
   const run = payload.runBpmn as { tokenPath?: unknown[] } | null
@@ -88,6 +96,16 @@ function hashPayload(payload: unknown) {
 
 test('capture immutable BPMN simulation baseline', async ({ browser }) => {
   test.setTimeout(10 * 60_000)
+  const gateContext = await browser.newContext()
+  const gatePage = await gateContext.newPage()
+  await prepare(gatePage)
+  try {
+    await assertDebugHook(gatePage)
+  } finally {
+    await gateContext.close()
+  }
+
+  // The test-only hook is confirmed before replacing any immutable artifacts.
   rmSync(join(root, 'baseline'), { recursive: true, force: true })
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
   for (const name of examples) {

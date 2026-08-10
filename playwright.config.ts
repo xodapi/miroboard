@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests',
+  testIgnore: '**/baseline-capture.spec.ts',
   timeout: 60_000,
   workers: 1,
   webServer: {

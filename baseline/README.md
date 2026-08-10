@@ -24,3 +24,16 @@ This baseline is the immutable oracle for BPMN regression tests and migration in
 ## Capture Method
 
 Each module has independent first-load, same-session-reload, and post-browser-restart captures. Result payloads are SHA256-verified byte-identical, with seed=42 and runs=500; each module README records its shared hash.
+
+## Explicit Capture Command
+
+The capture driver is excluded from ordinary Playwright discovery. To deliberately
+rebuild the test artifact and regenerate this baseline, run from the repository root:
+
+```powershell
+powershell -Command "$env:MIROBOARD_DEBUG_HOOK='1'; node node_modules\vite\bin\vite.js build; node node_modules\playwright\cli.js test --config playwright.capture.config.ts"
+```
+
+This command is also available as `test:baseline-capture` in the mission
+`services.yaml`. The driver verifies `window.__MIROBOARD_DEBUG__` before it can
+remove `baseline/`; a normal build therefore fails without touching this directory.
