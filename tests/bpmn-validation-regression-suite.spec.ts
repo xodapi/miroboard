@@ -29,12 +29,45 @@ async function place(page: Page, title: string, x: number, y: number) {
   await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
 }
 
+async function placeShortcut(page: Page, shortcut: 's' | 'e' | 'x', x: number, y: number) {
+  await page.getByRole('button', { name: 'BPMN' }).click()
+  await page.keyboard.press(shortcut)
+  await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
+}
+
 async function model(page: Page) {
   return page.evaluate(() => window.__MIROBOARD_DEBUG__!.validateBpmn())
 }
 
 async function elementId(page: Page, text: string) {
   return page.locator('[data-id]').filter({ hasText: text }).first().getAttribute('data-id')
+}
+
+async function connect(page: Page, source: string, target: string) {
+  await palette(page)
+  await page.locator('button[title="Поток"]').click({ force: true })
+  const sourceNode = source === 'X' ? page.locator('[data-id]').nth(1) : page.locator('[data-id]').filter({ hasText: source }).first()
+  const targetNode = target === 'X' ? page.locator('[data-id]').nth(1) : page.locator('[data-id]').filter({ hasText: target }).first()
+  await sourceNode.click({ force: true })
+  await targetNode.click({ force: true })
+}
+
+async function flowIdsBetween(page: Page, source: string, target: string) {
+  const sourceId = source === 'X' ? await page.locator('[data-id]').nth(1).getAttribute('data-id') : await elementId(page, source)
+  const targetId = await elementId(page, target)
+  return page.evaluate(({ sourceId, targetId }) => window.__MIROBOARD_DEBUG__!.getElements()
+    .filter(element => element.bpmnFlow?.sourceId === sourceId && element.bpmnFlow?.targetId === targetId)
+    .map(element => element.id), { sourceId, targetId })
+}
+
+async function createTerminalTaskGraph(page: Page) {
+  await placeShortcut(page, 's', 360, 220)
+  await placeShortcut(page, 'e', 700, 220)
+  await connect(page, 'Старт', 'Конец')
+  await place(page, 'Задача', 500, 420)
+  await page.locator('[data-testid^="bpmn-flow-"]').click({ force: true })
+  await page.keyboard.press('Delete')
+  await connect(page, 'Старт', 'Задача')
 }
 
 test.describe('validate_bpmn characterization and invariance', () => {
@@ -69,48 +102,93 @@ test.describe('validate_bpmn characterization and invariance', () => {
     expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
   })
 
-  test('characterizes orphaned task diagnostics', async ({ page }) => {
+  test('characterizes a task with no incoming flow', async ({ page }) => {
     await palette(page)
-    await place(page, 'Задача', 360, 220)
-    await place(page, 'Задача', 650, 220)
+    await placeShortcut(page, 's', 360, 220)
+    await placeShortcut(page, 'e', 700, 220)
+    await connect(page, 'Старт', 'Конец')
+    await place(page, 'Задача', 500, 420)
     const validation = await model(page)
-    console.log('ORPHAN_TASKS', JSON.stringify(validation))
+    console.log('NO_INCOMING_TASK', JSON.stringify(validation))
+    expect(validation).toEqual({
+      valid: true,
+      issues: [{ severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Задача') }],
+    })
+  })
+
+  test('characterizes a task with no outgoing flow', async ({ page }) => {
+    await palette(page)
+    await createTerminalTaskGraph(page)
+    const validation = await model(page)
+    console.log('NO_OUTGOING_TASK', JSON.stringify(validation))
     expect(validation).toEqual({
       valid: false,
       issues: [
-        { severity: 'error', code: 'start-event-missing', message: 'A BPMN process needs at least one start event.', elementId: null },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Задача') },
+        { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
+        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
       ],
     })
   })
 
-  test('characterizes gateway branch diagnostics', async ({ page }) => {
+  test('characterizes a missing end path', async ({ page }) => {
     await palette(page)
-    await page.getByRole('button', { name: 'BPMN' }).click()
-    await page.keyboard.press('x')
-    await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x: 400, y: 220 }, force: true })
-    await place(page, 'Конец', 700, 180)
-    await place(page, 'Конец', 700, 320)
-    console.log('GATEWAY_ELEMENTS', JSON.stringify(await page.evaluate(() => window.__MIROBOARD_DEBUG__!.getElements())))
-    await palette(page)
-    await page.locator('button[title="Поток"]').click({ force: true })
-    await page.locator('[data-id]').first().click({ force: true })
-    await page.getByText('Конец', { exact: true }).first().click({ force: true })
-    await palette(page)
-    await page.locator('button[title="Поток"]').click({ force: true })
-    await page.locator('[data-id]').first().click({ force: true })
-    await page.getByText('Конец', { exact: true }).last().click({ force: true })
+    await createTerminalTaskGraph(page)
     const validation = await model(page)
-    console.log('XOR_NO_BRANCH_RULE', JSON.stringify(validation))
-    const gatewayId = await page.locator('[data-id]').first().getAttribute('data-id')
-    const endIds = await page.locator('[data-id]').filter({ hasText: 'Конец' }).evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))
+    const simulation = await page.evaluate(() => {
+      try { return { result: window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 10) } } catch (error) { return { error: String(error) } }
+    })
+    console.log('MISSING_END', JSON.stringify({ validation, simulation }))
     expect(validation).toEqual({
       valid: false,
       issues: [
-        { severity: 'error', code: 'start-event-missing', message: 'A BPMN process needs at least one start event.', elementId: null },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: gatewayId },
-        ...endIds.map(elementId => ({ severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId })),
+        { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
+        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
       ],
     })
+    expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
+  })
+
+  test('characterizes XOR flows with no conditions or default', async ({ page }) => {
+    await palette(page)
+    await placeShortcut(page, 's', 320, 220)
+    await placeShortcut(page, 'x', 500, 220)
+    await placeShortcut(page, 'e', 700, 160)
+    await placeShortcut(page, 'e', 700, 340)
+    await connect(page, 'Старт', 'X')
+    await connect(page, 'X', 'Конец')
+    await palette(page)
+    await page.locator('button[title="Поток"]').click({ force: true })
+    await page.locator('[data-id]').nth(1).click({ force: true })
+    await page.getByText('Конец', { exact: true }).last().click({ force: true })
+    const validation = await model(page)
+    console.log('XOR_NO_BRANCH_RULE', JSON.stringify(validation))
+    expect(validation).toEqual({ valid: true, issues: [] })
+  })
+
+  test('characterizes XOR probability totals above one', async ({ page }) => {
+    await palette(page)
+    await placeShortcut(page, 's', 320, 220)
+    await placeShortcut(page, 'x', 500, 220)
+    await placeShortcut(page, 'e', 700, 160)
+    await placeShortcut(page, 'e', 700, 340)
+    await connect(page, 'Старт', 'X')
+    await connect(page, 'X', 'Конец')
+    await palette(page)
+    await page.locator('button[title="Поток"]').click({ force: true })
+    await page.locator('[data-id]').nth(1).click({ force: true })
+    await page.getByText('Конец', { exact: true }).last().click({ force: true })
+    const flowIds = await flowIdsBetween(page, 'X', 'Конец')
+    for (const flowId of flowIds) {
+      await page.locator(`[data-id="${flowId}"]`).click({ force: true })
+      await page.locator('#bpmn-flow-probability').fill('0.7')
+    }
+    const validation = await model(page)
+    const simulation = await page.evaluate(() => {
+      try { return { result: window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 10) } } catch (error) { return { error: String(error) } }
+    })
+    console.log('XOR_PROBABILITY_TOTAL', JSON.stringify({ validation, simulation }))
+    expect(validation).toEqual({ valid: true, issues: [] })
+    expect(simulation.error).toBeUndefined()
+    expect(simulation.result).toBeDefined()
   })
 })
