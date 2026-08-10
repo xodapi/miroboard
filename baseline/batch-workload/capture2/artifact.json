@@ -1,0 +1,130 @@
+{
+  "module": "batch-workload.json",
+  "source": "examples/batch-workload.json",
+  "captureCommit": "2a8030971c9934727898c4e3a116efd9f0dcadce",
+  "parameters": {
+    "seed": "42",
+    "runs": 500,
+    "simulationInstances": 1,
+    "arrivalIntervalMs": 0,
+    "slaTargetMs": null,
+    "calendarWorkStartMs": null,
+    "calendarWorkEndMs": null,
+    "arrivalClasses": [],
+    "resourceRoles": [],
+    "parameterStrings": {
+      "seed": "42",
+      "runs": "500",
+      "simulationInstances": "1",
+      "arrivalInterval": "0",
+      "slaTarget": "",
+      "calendarStart": "",
+      "calendarEnd": ""
+    }
+  },
+  "createBpmnModel": {
+    "nodes": [
+      {
+        "id": "start",
+        "type": "startEvent",
+        "poolId": "default",
+        "name": "Старт",
+        "x": 40,
+        "y": 120
+      },
+      {
+        "id": "task",
+        "type": "task",
+        "poolId": "default",
+        "name": "Обработать заявку",
+        "durationMs": 3000,
+        "resourceRole": "Оператор",
+        "costPerHour": 25,
+        "resourceCapacity": 1,
+        "x": 180,
+        "y": 120
+      },
+      {
+        "id": "end",
+        "type": "endEvent",
+        "poolId": "default",
+        "name": "Финиш",
+        "x": 440,
+        "y": 120
+      }
+    ],
+    "flows": [
+      {
+        "id": "f1",
+        "sourceId": "start",
+        "targetId": "task"
+      },
+      {
+        "id": "f2",
+        "sourceId": "task",
+        "targetId": "end"
+      }
+    ],
+    "simulationInstances": 1,
+    "arrivalIntervalMs": 0,
+    "arrivalClasses": [],
+    "resourceRoles": []
+  },
+  "validateBpmn": {
+    "valid": true,
+    "issues": []
+  },
+  "runBpmn": {
+    "completed": true,
+    "tokenPath": [
+      "start",
+      "task",
+      "end"
+    ],
+    "estimatedDurationMs": 3000,
+    "estimatedCost": 0.020833333333333336,
+    "roleWorkloadMs": {
+      "Оператор": 3000
+    },
+    "roleCapacity": {
+      "Оператор": 1
+    },
+    "roleWaitingMs": {
+      "Оператор": 0
+    }
+  },
+  "simulateBpmn": {
+    "seed": 42,
+    "runs": 500,
+    "completedRuns": 500,
+    "simulationInstances": 1,
+    "arrivalIntervalMs": 0,
+    "minDurationMs": 3000,
+    "meanDurationMs": 3000,
+    "standardDeviationMs": 0,
+    "p50DurationMs": 3000,
+    "p90DurationMs": 3000,
+    "p95DurationMs": 3000,
+    "maxDurationMs": 3000,
+    "meanCost": 0.020833333333333377,
+    "roleUtilization": [
+      {
+        "role": "Оператор",
+        "capacity": 1,
+        "meanWorkloadMs": 3000,
+        "utilization": 1,
+        "meanWaitingMs": 0
+      }
+    ],
+    "priorityClasses": [
+      {
+        "priority": 0,
+        "instances": 500,
+        "meanWaitingMs": 0,
+        "meanDurationMs": 3000
+      }
+    ],
+    "slaTargetMs": null,
+    "onTimeRate": null
+  }
+}
