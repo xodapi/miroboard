@@ -72,13 +72,21 @@ test.describe('BPMN topology and configuration edge cases', () => {
   })
 
   test('VAL-BPMN-054: terminating loop completes within the runner bound', async ({ page }) => {
-    const elements = linear([node('task', 'task', { bpmnDurationMs: 100 })], [
-      flow('end-loop', 'task', 'end', { condition: 'true' }),
-    ])
+    // The loop must be a real cycle, with an explicit exit to the end event.
+    const elements = [
+      node('start', 'startEvent'), node('task', 'task', { bpmnDurationMs: 100 }),
+      node('gate', 'xorGateway'), node('end', 'endEvent'),
+      flow('start-task', 'start', 'task'), flow('task-gate', 'task', 'gate'),
+      flow('gate-loop', 'gate', 'task', { condition: 'false' }),
+      flow('gate-end', 'gate', 'end', { condition: 'false', isDefault: true }),
+    ]
     await inject(page, elements)
-    const result = await observe(page, 1)
-    expect(result.ok).toBe(false)
-    expect(result.error).toContain('validation errors')
+    const result = await page.evaluate(() => {
+      try { return { ok: true, run: window.__MIROBOARD_DEBUG__!.runBpmn() } }
+      catch (error) { return { ok: false, error: String(error) } }
+    })
+    expect(result.ok).toBe(true)
+    expect(result.run).toMatchObject({ completed: true })
     expect(finite(result)).toBe(true)
   })
 
@@ -93,36 +101,56 @@ test.describe('BPMN topology and configuration edge cases', () => {
       catch (error) { return { ok: false, error: String(error) } }
     })
     expect(result.ok).toBe(false)
+    // The runner guard is 100,000 transitions. This text is also the user-visible
+    // report shown by the "Проверить поток" action, and is documented in
+    // docs/BPMN_SIMULATION.md.
     expect(result.error).toContain('deterministic step limit')
   })
 
   test('VAL-BPMN-056/057: nested AND and XOR branch execution is deterministic', async ({ page }) => {
     const elements = [
-      node('start', 'startEvent'), node('outer', 'andGateway'), node('inner', 'andGateway'),
-      node('xor', 'xorGateway'), node('a', 'task', { bpmnDurationMs: 1000 }), node('b', 'task', { bpmnDurationMs: 3000 }),
-      node('c', 'task', { bpmnDurationMs: 500 }), node('join-inner', 'xorGateway'), node('join-outer', 'andGateway'), node('end', 'endEvent'),
-      flow('1', 'start', 'outer'), flow('2', 'outer', 'inner'), flow('3', 'outer', 'c'), flow('4', 'inner', 'xor'),
-      flow('5', 'xor', 'a', { condition: 'true' }), flow('6', 'xor', 'b', { condition: 'false' }),
-      flow('7', 'a', 'join-inner'), flow('8', 'b', 'join-inner'), flow('9', 'join-inner', 'join-outer'),
-      flow('10', 'c', 'join-outer'), flow('11', 'join-outer', 'end'),
+      node('start', 'startEvent'), node('outer', 'andGateway'), node('left-xor', 'xorGateway'),
+      node('right-xor', 'xorGateway'), node('a', 'task', { bpmnDurationMs: 1000 }), node('b', 'task', { bpmnDurationMs: 3000 }),
+      node('c', 'task', { bpmnDurationMs: 500 }), node('d', 'task', { bpmnDurationMs: 700 }),
+      node('join-left', 'xorGateway'), node('join-right', 'xorGateway'), node('join-outer', 'andGateway'), node('end', 'endEvent'),
+      flow('1', 'start', 'outer'), flow('2', 'outer', 'left-xor'), flow('3', 'outer', 'right-xor'),
+      flow('4', 'left-xor', 'a', { condition: 'true' }), flow('5', 'left-xor', 'b', { condition: 'false' }),
+      flow('6', 'right-xor', 'c', { condition: 'true' }), flow('7', 'right-xor', 'd', { condition: 'false' }),
+      flow('8', 'a', 'join-left'), flow('9', 'b', 'join-left'), flow('10', 'c', 'join-right'), flow('11', 'd', 'join-right'),
+      flow('12', 'join-left', 'join-outer'), flow('13', 'join-right', 'join-outer'), flow('14', 'join-outer', 'end'),
     ]
     await inject(page, elements)
+    const model = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.createBpmnModel())
+    expect(JSON.stringify(model)).toContain('join-left')
+    expect(JSON.stringify(model)).toContain('join-right')
+    expect(elements.filter((element) => element.bpmnNodeType === 'andGateway')).toHaveLength(2)
+    expect(elements.filter((element) => element.bpmnNodeType === 'xorGateway')).toHaveLength(4)
     const first = await observe(page, 10)
     const second = await observe(page, 10)
     expect(first).toEqual(second)
     expect(first.ok).toBe(true)
   })
 
-  test('VAL-BPMN-058/059: competing roles and zero/unset capacity remain finite', async ({ page }) => {
-    await inject(page, linear([
-      node('a', 'task', { bpmnDurationMs: 1000, bpmnResourceRole: 'ops', bpmnResourceCapacity: 0 }),
-      node('b', 'task', { bpmnDurationMs: 2000, bpmnResourceRole: 'qa' }),
-      node('c', 'task', { bpmnDurationMs: 1000 }),
-    ]))
+  test('VAL-BPMN-058: zero-capacity role is rejected explicitly', async ({ page }) => {
+    await inject(page, linear([node('blocked', 'task', { bpmnDurationMs: 1000, bpmnResourceRole: 'ops', bpmnResourceCapacity: 0 })]))
     const result = await observe(page, 20)
-    expect(finite(result)).toBe(true)
     expect(result.ok).toBe(false)
     expect(result.error).toContain('validation errors')
+  })
+
+  test('VAL-BPMN-059: unset role and three-role contention remain finite', async ({ page }) => {
+    await inject(page, linear([
+      node('ops-task', 'task', { bpmnDurationMs: 1000, bpmnResourceRole: 'ops' }),
+      node('qa-task', 'task', { bpmnDurationMs: 2000, bpmnResourceRole: 'qa' }),
+      node('unset-task', 'task', { bpmnDurationMs: 1000 }),
+      node('support-task', 'task', { bpmnDurationMs: 500, bpmnResourceRole: 'support' }),
+    ]))
+    const model = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.createBpmnModel())
+    expect(JSON.stringify(model)).toContain('ops')
+    expect(JSON.stringify(model)).toContain('qa')
+    expect(JSON.stringify(model)).toContain('support')
+    const result = await observe(page, 10000)
+    expect(finite(result)).toBe(true)
   })
 
   test('VAL-BPMN-060: zero and very large durations produce finite results', async ({ page }) => {
