@@ -28,6 +28,44 @@ async function configureAndSimulate(page: import('@playwright/test').Page) {
   return meanCost.innerText()
 }
 
+async function expectFullyVisible(locator: import('@playwright/test').Locator) {
+  const visibility = await locator.evaluate(async element => {
+    const rect = element.getBoundingClientRect()
+    const viewport = {
+      width: document.documentElement.clientWidth,
+      height: document.documentElement.clientHeight,
+    }
+    const intersectionWidth = Math.max(0, Math.min(rect.right, viewport.width) - Math.max(rect.left, 0))
+    const intersectionHeight = Math.max(0, Math.min(rect.bottom, viewport.height) - Math.max(rect.top, 0))
+    const intersectionArea = intersectionWidth * intersectionHeight
+    const area = rect.width * rect.height
+
+    const intersectionRatio = await new Promise<number>(resolve => {
+      const observer = new IntersectionObserver(([entry]) => {
+        observer.disconnect()
+        resolve(entry?.intersectionRatio ?? 0)
+      }, { threshold: [1] })
+      observer.observe(element)
+    })
+
+    return {
+      intersectionRatio,
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      geometryRatio: area > 0 ? intersectionArea / area : 0,
+    }
+  })
+
+  expect(visibility.intersectionRatio).toBe(1)
+  expect(visibility.geometryRatio).toBe(1)
+  expect(visibility.left).toBeGreaterThanOrEqual(0)
+  expect(visibility.top).toBeGreaterThanOrEqual(0)
+  expect(visibility.right).toBeLessThanOrEqual(390)
+  expect(visibility.bottom).toBeLessThanOrEqual(844)
+}
+
 test('simulation controls and results remain reachable on a mobile viewport', async ({ page }) => {
   await suppressOnboarding(page)
   await page.goto('/')
@@ -43,7 +81,7 @@ test('simulation controls and results remain reachable on a mobile viewport', as
     page.getByRole('button', { name: 'Запустить симуляцию' }),
     page.getByText('Средняя стоимость:'),
   ]) {
-    await expect(control).toBeInViewport()
+    await expectFullyVisible(control)
   }
 })
 
