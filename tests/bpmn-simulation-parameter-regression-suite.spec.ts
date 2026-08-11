@@ -87,8 +87,8 @@ test.describe('BPMN simulation parameter surface', () => {
   })
 
   test('CHARACTERIZATION: increasing runs converge aggregate statistics', async ({ page }) => {
-    await loadModule(page, 'basic-fixed')
-    await page.getByText('Подготовить данные', { exact: true }).click({ force: true })
+    await loadModule(page, 'batch-workload')
+    await page.getByText('Обработать заявку', { exact: true }).click({ force: true })
     const task = page.getByText('Свойства задачи').locator('xpath=..')
     await task.locator('select').first().selectOption('uniform')
     await task.getByText('Min', { exact: true }).locator('input').fill('1')
@@ -104,6 +104,10 @@ test.describe('BPMN simulation parameter surface', () => {
     expect(values.low.runs).toBe(37)
     expect(values.medium.runs).toBe(500)
     expect(values.reference.runs).toBe(10_000)
+    // Aggregate characterization: Uniform(1s, 9s) has an analytical mean of
+    // 5s. This prevents an implementation from merely echoing seed and runs.
+    expect(values.medium.meanDurationMs).toBeGreaterThanOrEqual(4_000)
+    expect(values.medium.meanDurationMs).toBeLessThanOrEqual(6_000)
     expect(Math.abs(values.medium.meanDurationMs - values.reference.meanDurationMs))
       .toBeLessThan(Math.abs(values.low.meanDurationMs - values.reference.meanDurationMs))
   })
