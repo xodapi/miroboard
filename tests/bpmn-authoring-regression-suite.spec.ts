@@ -16,6 +16,7 @@ async function openBpmnPalette(page: Page) {
 async function place(page: Page, title: string, x: number, y: number) {
   await openBpmnPalette(page)
   await page.getByTitle(title).click({ force: true })
+  await page.waitForTimeout(300)
   await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
 }
 
@@ -31,11 +32,14 @@ test.describe('BPMN authoring regression surface', () => {
       ['Шлюз AND', 'andGateway'], ['Конец', 'endEvent'],
     ] as const
     for (const [index, [title, nodeType]] of tools.entries()) {
-      await place(page, title, 150 + index * 120, 220)
-      const created = (await elements(page)).find(e => e.bpmnNodeType === nodeType)!
+      await place(page, title, 120 + index * 90, 140 + index * 100)
+      await expect.poll(async () => (await elements(page)).some(e => e.bpmnNodeType === nodeType)).toBe(true)
+      const created = (await elements(page)).find(e => e.bpmnNodeType === nodeType)
+      if (!created) throw new Error(`Tool ${title} did not create ${nodeType}`)
       expect(created.bpmnNodeType).toBe(nodeType)
       expect(created.type).toBe('sticky')
       expect(created.w).toBeGreaterThan(0)
+      expect(created.h).toBeGreaterThan(0)
       await expect(page.locator(`[data-id="${created.id}"]`)).toBeVisible()
     }
     const before = (await elements(page)).length
@@ -111,6 +115,14 @@ test.describe('BPMN authoring regression surface', () => {
     await panel.getByText('€/ч', { exact: false }).locator('input').fill('42')
     await panel.getByText('Capacity', { exact: false }).locator('input').fill('3')
     await panel.getByText('Priority', { exact: false }).locator('input').fill('7')
+    await expect.poll(async () => (await elements(page)).find(e => e.bpmnNodeType === 'task')?.bpmnDurationMinMs).toBe(12500)
+    await expect.poll(async () => (await elements(page)).find(e => e.bpmnNodeType === 'task')?.bpmnDurationModeMs).toBe(12500)
+    await expect.poll(async () => (await elements(page)).find(e => e.bpmnNodeType === 'task')?.bpmnDurationMaxMs).toBe(12500)
+    const editedTask = (await elements(page)).find(e => e.bpmnNodeType === 'task')!
+    expect(editedTask.bpmnResourceRole).toBe('Оператор')
+    expect(editedTask.bpmnCostPerHour).toBe(42)
+    expect(editedTask.bpmnResourceCapacity).toBe(3)
+    expect(editedTask.bpmnPriority).toBe(7)
     await page.getByRole('button', { name: 'Выбор' }).click()
     await page.locator('[data-id]').filter({ hasText: 'Задача' }).click()
     await expect(panel.locator('#bpmn-duration')).toHaveValue('12.5')
@@ -141,6 +153,8 @@ test.describe('BPMN authoring regression surface', () => {
     await inputs.nth(2).fill('10')
     const task = (await elements(page)).find(e => e.bpmnNodeType === 'task')!
     expect(task.bpmnDurationMinMs).toBe(20000)
+    expect(task.bpmnDurationModeMs).toBe(10000)
+    expect(task.bpmnDurationMaxMs).toBe(1000)
   })
 
   test('switching board, BPMN, and simulation modes preserves the model', async ({ page }) => {
