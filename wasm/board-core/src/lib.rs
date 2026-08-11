@@ -8,6 +8,8 @@ const MAX_BPMN_FLOWS: usize = 20_000;
 const MAX_DURATION_MS: u64 = 86_400_000 * 30;
 const MAX_RESOURCE_CAPACITY: u32 = 1_000;
 const MAX_ARRIVAL_INTERVAL_MS: u64 = 86_400_000 * 30;
+const BPMN_LOOP_GUARD_ERROR: &str =
+    "The BPMN runner exceeded its deterministic step limit of 100000 transitions. Add a terminating branch or use simulation controls.";
 use wasm_bindgen::prelude::*;
 
 const MIN_SCALE: f64 = 0.15;
@@ -1009,9 +1011,7 @@ fn run_bpmn_batch(
         }
     }
 
-    Err(JsValue::from_str(
-        "The BPMN runner exceeded its deterministic step limit. Add a terminating branch or use simulation controls.",
-    ))
+    Err(JsValue::from_str(BPMN_LOOP_GUARD_ERROR))
 }
 
 /// Executes a deterministic BPMN process. XOR gateways select literal `true`
@@ -2009,6 +2009,11 @@ mod tests {
 
         assert!(run.contains(r#""approved""#));
         assert!(!run.contains(r#""fallback""#));
+    }
+
+    #[test]
+    fn loop_guard_error_includes_documented_numeric_bound() {
+        assert!(BPMN_LOOP_GUARD_ERROR.contains("100000"));
     }
 
     #[test]
