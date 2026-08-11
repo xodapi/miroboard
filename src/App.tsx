@@ -293,6 +293,10 @@ export default function App() {
       .map((element) => ({
         id: element.id,
         ...element.bpmnFlow,
+        // The simulator models executable control flow only. Keep the
+        // inspector's message type on the board, but project it as a
+        // sequence edge at this execution boundary.
+        flowType: element.bpmnFlow?.flowType === 'message' ? 'sequence' : element.bpmnFlow?.flowType,
       }))
     // Only emit roles the user actually configured. An empty list keeps the
     // engine on the per-node `resourceCapacity` fallback, so untouched boards
@@ -1948,6 +1952,19 @@ export default function App() {
         <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC} max-md:inset-x-3 max-md:top-auto max-md:bottom-20 max-md:w-auto max-md:max-h-[46vh] max-md:overflow-y-auto`} data-ui>
           <div className="text-xs font-bold text-slate-400">Свойства sequence flow</div>
           <div className="flex flex-col gap-3">
+          <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-type">Тип потока</label>
+          <select
+            id="bpmn-flow-type"
+            data-testid="bpmn-flow-type"
+            value={selectedBpmnFlow.bpmnFlow?.flowType || 'sequence'}
+            onChange={(event) => updateElement(selectedBpmnFlow.id, {
+              bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, flowType: event.target.value as 'sequence' | 'message' },
+            })}
+            className={`w-32 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
+          >
+            <option value="sequence">sequence</option>
+            <option value="message">message</option>
+          </select>
           <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-condition">Условие</label>
           <input
             id="bpmn-flow-condition"
