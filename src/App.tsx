@@ -940,10 +940,7 @@ export default function App() {
       }
       addElement(newEl)
       setSelectedId(id)
-      // Keep the BPMN placement tool active after a node is placed. The
-      // palette is closed by the palette button, but resetting to select here
-      // can race the next palette activation and make the following placement
-      // click a no-op.
+      chooseTool('select')
       return
     }
 
