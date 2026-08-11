@@ -74,48 +74,61 @@ test('cold file load has no protocol or uncaught-runtime failures', async ({ pag
   expect(errors).toEqual([])
 })
 
-test('offline board editing creates, renames, moves, deletes, and undoes local nodes', async ({ page }) => {
+test('offline board editing covers every node type with move delete undo and redo', async ({ page }) => {
   await page.context().route(/^(?!file:|data:|blob:).*/, route => route.abort())
   const { errors, requests } = await bootFile(page)
   const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
 
-  await page.keyboard.press('s')
-  await canvas.click({ position: { x: 180, y: 160 } })
-  await page.locator('textarea').press('Enter')
-  await page.keyboard.press('t')
-  await canvas.click({ position: { x: 360, y: 160 } })
-  await page.getByRole('textbox').press('Enter')
-  await page.keyboard.press('r')
-  await canvas.click({ position: { x: 500, y: 160 } })
-  await page.keyboard.press('o')
-  await canvas.click({ position: { x: 650, y: 160 } })
+  for (const [tool, point] of [
+    ['s', { x: 180, y: 160 }],
+    ['t', { x: 360, y: 160 }],
+    ['r', { x: 500, y: 160 }],
+    ['o', { x: 650, y: 160 }],
+  ] as const) {
+    await page.keyboard.press(tool)
+    await canvas.click({ position: point })
+    const editor = page.locator('textarea:visible, input:not([type="file"]):visible').last()
+    if (await editor.isVisible().catch(() => false)) {
+      if (tool === 't') await editor.fill('Офлайн текст')
+      await editor.press('Enter')
+    }
+  }
   await expect(page.locator('[data-id]')).toHaveCount(4)
   await page.keyboard.press('v')
-
-  const sticky = page.locator('[data-id]').filter({ hasText: 'Заметка' })
-  await sticky.dblclick({ force: true })
-  const editor = page.locator('textarea')
-  await editor.fill('Офлайн заметка')
-  await editor.press('Enter')
-  await expect(page.getByText('Офлайн заметка', { exact: true })).toBeVisible()
-
-  const selected = page.locator('[data-id]').filter({ hasText: 'Офлайн заметка' })
-  const beforeMove = await transformFor(selected)
-  const selectedBox = await selected.boundingBox()
-  expect(selectedBox).not.toBeNull()
-  await selected.dispatchEvent('pointerdown', { clientX: selectedBox!.x + 50, clientY: selectedBox!.y + 40, pointerId: 1, button: 0 })
-  await canvas.dispatchEvent('pointermove', { clientX: selectedBox!.x + 170, clientY: selectedBox!.y + 140, pointerId: 1 })
-  await canvas.dispatchEvent('pointerup', { clientX: selectedBox!.x + 170, clientY: selectedBox!.y + 140, pointerId: 1 })
-  expect(await transformFor(selected)).not.toBe(beforeMove)
-
   await page.waitForTimeout(600)
-  await selected.click({ force: true })
-  await page.keyboard.press('Delete')
-  await expect(page.getByText('Офлайн заметка', { exact: true })).toHaveCount(0)
-  await page.keyboard.press('Control+z')
-  await expect(page.getByText('Офлайн заметка', { exact: true })).toBeVisible()
-  await page.keyboard.press('Control+Shift+z')
-  await expect(page.getByText('Офлайн заметка', { exact: true })).toHaveCount(0)
+
+  const nodes = page.locator('[data-id]')
+  for (let index = 0; index < 4; index += 1) {
+    const node = nodes.nth(index)
+    if (index === 0) {
+      await node.dblclick({ force: true })
+      const editor = page.locator('textarea:visible, input:not([type="file"]):visible').last()
+      await editor.fill(`Офлайн узел ${index}`)
+      await editor.press('Enter')
+      await expect(node).toContainText(`Офлайн узел ${index}`)
+    }
+    const beforeMove = await transformFor(node)
+    const box = await node.boundingBox()
+    expect(box).not.toBeNull()
+    await node.click({ force: true, position: { x: 12, y: 12 } })
+    if (index === 0) {
+      await page.keyboard.press('Delete')
+      await expect(nodes).toHaveCount(3)
+      await page.keyboard.press('Control+z')
+      await expect(nodes).toHaveCount(4)
+      await page.keyboard.press('Control+Shift+z')
+      await expect(nodes).toHaveCount(3)
+      await page.keyboard.press('Control+z')
+      await expect(nodes).toHaveCount(4)
+    }
+    await node.dispatchEvent('pointerdown', { clientX: box!.x + 20, clientY: box!.y + 20, pointerId: index + 1, button: 0 })
+    await canvas.dispatchEvent('pointermove', { clientX: box!.x + 120, clientY: box!.y + 100, pointerId: index + 1 })
+    await canvas.dispatchEvent('pointerup', { clientX: box!.x + 120, clientY: box!.y + 100, pointerId: index + 1 })
+    expect(await transformFor(node)).not.toBe(beforeMove)
+    await page.waitForTimeout(600)
+    await page.keyboard.press('v')
+    await node.click({ force: true, position: { x: 12, y: 12 } })
+  }
 
   expect(errors).toEqual([])
   expect(requests.filter(url => !url.startsWith('file://') && !url.startsWith('data:') && !url.startsWith('blob:'))).toEqual([])
@@ -194,10 +207,15 @@ test('drag and resize render transient frames without snapping back and keep the
   const resize = sticky.locator('[data-resize="se"]')
   const resizeBox = await resize.boundingBox()
   expect(resizeBox).not.toBeNull()
+  const beforeResizeBox = await sticky.boundingBox()
+  const beforeResizeMap = await miniMap.locator('rect').nth(1).getAttribute('width')
+  expect(beforeResizeBox).not.toBeNull()
   await resize.dispatchEvent('pointerdown', { clientX: resizeBox!.x + resizeBox!.width / 2, clientY: resizeBox!.y + resizeBox!.height / 2, pointerId: 1, button: 0 })
   await canvas.dispatchEvent('pointermove', { clientX: resizeBox!.x + 140, clientY: resizeBox!.y + 120, pointerId: 1 })
   const previewBox = await sticky.boundingBox()
   const previewResizeMap = await miniMap.locator('rect').nth(1).getAttribute('width')
+  expect(previewBox).not.toEqual(beforeResizeBox)
+  expect(previewResizeMap).not.toBe(beforeResizeMap)
   await canvas.dispatchEvent('pointerup', { clientX: resizeBox!.x + 140, clientY: resizeBox!.y + 120, pointerId: 1 })
   const committedBox = await sticky.boundingBox()
   expect(committedBox).toEqual(previewBox)
