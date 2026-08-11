@@ -16,16 +16,20 @@ async function palette(page: Page) {
     await page.getByRole('button', { name: 'BPMN' }).click()
   }
   const toolbar = page.locator('div.absolute.bottom-0')
-  await toolbar.getByRole('button').last().click({ force: true })
+  await toolbar.getByRole('button').last().click()
   if (!(await page.getByTitle('Старт').isVisible().catch(() => false))) {
     await page.getByText('◇ BPMN', { exact: true }).click()
   }
-  await expect(page.getByTitle('Старт')).toBeVisible()
+  await expect(bpmnPalette(page).getByTitle('Старт')).toBeVisible()
+}
+
+function bpmnPalette(page: Page) {
+  return page.locator('div.mb-2.mx-auto.w-fit.p-2.rounded-2xl')
 }
 
 async function place(page: Page, title: string, x: number, y: number) {
   await palette(page)
-  await page.getByTitle(title).click({ force: true })
+  await bpmnPalette(page).getByTitle(title).click()
   await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
 }
 
@@ -45,7 +49,7 @@ async function elementId(page: Page, text: string) {
 
 async function connect(page: Page, source: string, target: string) {
   await palette(page)
-  await page.locator('button[title="Поток"]').click({ force: true })
+  await bpmnPalette(page).getByTitle('Поток').click()
   const sourceNode = source === 'X' ? page.locator('[data-id]').nth(1) : page.locator('[data-id]').filter({ hasText: source }).first()
   const targetNode = target === 'X' ? page.locator('[data-id]').nth(1) : page.locator('[data-id]').filter({ hasText: target }).first()
   await sourceNode.click({ force: true })
@@ -158,7 +162,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
     await connect(page, 'Старт', 'X')
     await connect(page, 'X', 'Конец')
     await palette(page)
-    await page.locator('button[title="Поток"]').click({ force: true })
+    await bpmnPalette(page).getByTitle('Поток').click()
     await page.locator('[data-id]').nth(1).click({ force: true })
     await page.getByText('Конец', { exact: true }).last().click({ force: true })
     const validation = await model(page)
@@ -175,7 +179,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
     await connect(page, 'Старт', 'X')
     await connect(page, 'X', 'Конец')
     await palette(page)
-    await page.locator('button[title="Поток"]').click({ force: true })
+    await bpmnPalette(page).getByTitle('Поток').click()
     await page.locator('[data-id]').nth(1).click({ force: true })
     await page.getByText('Конец', { exact: true }).last().click({ force: true })
     const flowIds = await flowIdsBetween(page, 'X', 'Конец')
