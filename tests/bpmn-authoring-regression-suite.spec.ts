@@ -11,13 +11,18 @@ async function openBpmnPalette(page: Page) {
   await toolbar.getByRole('button').last().click({ force: true })
   await expect(page.getByText('◇ BPMN', { exact: true })).toBeVisible()
   await page.getByText('◇ BPMN', { exact: true }).click()
-  await expect(page.getByTitle('Старт')).toBeVisible()
+  await expect(bpmnPalette(page)).toBeVisible()
+  await expect(bpmnPalette(page).getByTitle('Старт')).toBeVisible()
+}
+
+function bpmnPalette(page: Page) {
+  return page.locator('div.mb-2.mx-auto.w-fit.p-2.rounded-2xl')
 }
 
 async function place(page: Page, title: string, x: number, y: number) {
   await openBpmnPalette(page)
-  await page.getByTitle(title).click({ force: true })
-  await page.waitForTimeout(300)
+  await bpmnPalette(page).getByTitle(title).dispatchEvent('click')
+  await page.waitForTimeout(100)
   await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
 }
 
@@ -40,11 +45,13 @@ test.describe('BPMN authoring regression surface', () => {
       ['Шлюз AND', 'andGateway'], ['Конец', 'endEvent'],
     ] as const
     for (const [index, [title, nodeType]] of tools.entries()) {
-      const x = 120 + index * 90
-      const y = 140 + index * 100
+      // Keep placement outside the BPMN workspace panel, which is a [data-ui]
+      // overlay and deliberately consumes pointer events.
+      const x = 300 + index * 150
+      const y = 340 + (index % 2) * 140
       await openBpmnPalette(page)
-      await page.getByTitle(title).click({ force: true })
-      await page.waitForTimeout(300)
+      await bpmnPalette(page).getByTitle(title).dispatchEvent('click')
+      await page.waitForTimeout(100)
       await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
       await page.screenshot({ path: `evidence/bpmn-toolbar-placement-iteration-${index + 1}-${title}.png`, fullPage: true })
       const appeared = (await elements(page)).some(e => e.bpmnNodeType === nodeType)
@@ -59,9 +66,9 @@ test.describe('BPMN authoring regression surface', () => {
     }
     const before = (await elements(page)).length
     await openBpmnPalette(page)
-    await page.locator('button[title="Поток"]').click({ force: true })
+    await bpmnPalette(page).getByTitle('Поток').dispatchEvent('click')
     await page.screenshot({ path: 'evidence/bpmn-toolbar-placement-iteration-6-Поток.png', fullPage: true })
-    expect(await page.getByTitle('Поток').isVisible()).toBeTruthy()
+    await expect(bpmnPalette(page).getByTitle('Поток')).toBeVisible()
     expect((await elements(page)).length).toBe(before)
   })
 
@@ -72,9 +79,9 @@ test.describe('BPMN authoring regression surface', () => {
     await page.keyboard.press('e')
     await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x: 650, y: 250 }, force: true })
     await openBpmnPalette(page)
-    await page.locator('button[title="Поток"]').click({ force: true })
-    await page.getByText('Старт', { exact: true }).click({ force: true })
-    await page.getByText('Конец', { exact: true }).last().click({ force: true })
+    await bpmnPalette(page).getByTitle('Поток').dispatchEvent('click')
+    await page.locator('[data-id]').filter({ hasText: 'Старт' }).click({ force: true })
+    await page.locator('[data-id]').filter({ hasText: 'Конец' }).click({ force: true })
     const created = await elements(page)
     const nodes = created.filter(e => e.bpmnNodeType)
     const flowData = created.find(e => e.bpmnFlow)!
