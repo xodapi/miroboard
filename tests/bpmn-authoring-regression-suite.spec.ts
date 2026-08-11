@@ -24,6 +24,17 @@ async function elements(page: Page) {
   return page.evaluate(() => window.__MIROBOARD_DEBUG__!.getElements())
 }
 
+async function debugToolState(page: Page) {
+  return page.evaluate(() => {
+    const debug = window.__MIROBOARD_DEBUG__ as (typeof window.__MIROBOARD_DEBUG__ & { tool?: string }) | undefined
+    return {
+      tool: debug?.tool ?? null,
+      debugKeys: debug ? Object.keys(debug).sort() : [],
+      elementCount: debug?.getElements().length ?? null,
+    }
+  })
+}
+
 test.describe('BPMN authoring regression surface', () => {
   test('toolbar creates all six BPMN tools with the expected rendered shapes', async ({ page }) => {
     await page.getByRole('button', { name: 'BPMN' }).click()
@@ -31,9 +42,37 @@ test.describe('BPMN authoring regression surface', () => {
       ['Старт', 'startEvent'], ['Задача', 'task'], ['Шлюз XOR', 'xorGateway'],
       ['Шлюз AND', 'andGateway'], ['Конец', 'endEvent'],
     ] as const
+    const placementFailures: string[] = []
     for (const [index, [title, nodeType]] of tools.entries()) {
-      await place(page, title, 120 + index * 90, 140 + index * 100)
-      await expect.poll(async () => (await elements(page)).some(e => e.bpmnNodeType === nodeType)).toBe(true)
+      const x = 120 + index * 90
+      const y = 140 + index * 100
+      const beforePaletteClick = await debugToolState(page)
+      console.log(`[bpmn-placement ${index + 1}/${tools.length}] before palette click title=${title} state=${JSON.stringify(beforePaletteClick)}`)
+      if (!(await page.getByTitle('Старт').isVisible().catch(() => false))) {
+        await openBpmnPalette(page)
+      } else {
+        console.log(`[bpmn-placement ${index + 1}/${tools.length}] palette already visible before title=${title}`)
+      }
+      const paletteVisibleState = await debugToolState(page)
+      console.log(`[bpmn-placement ${index + 1}/${tools.length}] palette open title=${title} state=${JSON.stringify(paletteVisibleState)}`)
+      await page.getByTitle(title).click({ force: true })
+      const afterPaletteClick = await debugToolState(page)
+      console.log(`[bpmn-placement ${index + 1}/${tools.length}] after palette click title=${title} state=${JSON.stringify(afterPaletteClick)}`)
+      await page.waitForTimeout(300)
+      const beforeCanvasClick = await debugToolState(page)
+      const beforeCount = (await elements(page)).length
+      console.log(`[bpmn-placement ${index + 1}/${tools.length}] before canvas click title=${title} coordinates=(${x},${y}) elementCount=${beforeCount} state=${JSON.stringify(beforeCanvasClick)}`)
+      await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
+      const afterCanvasClick = await debugToolState(page)
+      const afterCount = (await elements(page)).length
+      console.log(`[bpmn-placement ${index + 1}/${tools.length}] after canvas click title=${title} coordinates=(${x},${y}) elementCount=${afterCount} delta=${afterCount - beforeCount} state=${JSON.stringify(afterCanvasClick)}`)
+      await page.screenshot({ path: `evidence/bpmn-toolbar-placement-iteration-${index + 1}-${title}.png`, fullPage: true })
+      const appeared = (await elements(page)).some(e => e.bpmnNodeType === nodeType)
+      console.log(`[bpmn-placement ${index + 1}/${tools.length}] observation title=${title} expectedNodeType=${nodeType} appeared=${appeared}`)
+      if (!appeared) {
+        placementFailures.push(`${title} (${nodeType})`)
+        continue
+      }
       const created = (await elements(page)).find(e => e.bpmnNodeType === nodeType)
       if (!created) throw new Error(`Tool ${title} did not create ${nodeType}`)
       expect(created.bpmnNodeType).toBe(nodeType)
@@ -42,11 +81,18 @@ test.describe('BPMN authoring regression surface', () => {
       expect(created.h).toBeGreaterThan(0)
       await expect(page.locator(`[data-id="${created.id}"]`)).toBeVisible()
     }
+    console.log(`[bpmn-placement] completed node attempts failures=${JSON.stringify(placementFailures)}`)
     const before = (await elements(page)).length
-    await openBpmnPalette(page)
-    await page.getByTitle('Поток').click({ force: true })
+    if (!(await page.getByTitle('Старт').isVisible().catch(() => false))) {
+      await openBpmnPalette(page)
+    }
+    console.log(`[bpmn-placement 6/6] before palette click title=Поток state=${JSON.stringify(await debugToolState(page))}`)
+    await page.locator('button[title="Поток"]').click({ force: true })
+    console.log(`[bpmn-placement 6/6] after palette click title=Поток state=${JSON.stringify(await debugToolState(page))}`)
+    await page.screenshot({ path: 'evidence/bpmn-toolbar-placement-iteration-6-Поток.png', fullPage: true })
     expect(await page.getByTitle('Поток').isVisible()).toBeTruthy()
     expect((await elements(page)).length).toBe(before)
+    expect(placementFailures, 'Instrumented placement failures').toEqual([])
   })
 
   test('sequence flow connects real BPMN nodes and free arrows retain free geometry', async ({ page }) => {
