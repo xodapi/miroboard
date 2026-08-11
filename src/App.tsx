@@ -1794,7 +1794,7 @@ export default function App() {
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'eraser' ? 'bg-black text-white' : hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 20H7L3 16a1.9 1.9 0 0 1 0-2.8L14.2 2h.8l6 6v.8L9.8 20" /></svg> Ластик
           </button>
-          <button onClick={() => { setWorkspaceMode('bpmn'); setShowBpmnPalette(!showBpmnPalette); setShowMore(false); setShowEmoji(false) }}
+          <button onClick={() => { setWorkspaceMode('bpmn'); setShowBpmnPalette(true); setShowMore(false); setShowEmoji(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${showBpmnPalette ? 'bg-violet-600 text-white' : hoverBg}`}>
             ◇ BPMN
           </button>
