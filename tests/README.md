@@ -32,3 +32,10 @@ seed 42/runs 500 compare to immutable M0 artifacts. Changed seeds, run counts,
 and parameter configurations are characterization or relational assertions.
 Because these tests read `window.__MIROBOARD_DEBUG__`, they are excluded from
 the normal lane and run through `test:e2e:debug`.
+
+Resource and cost metrics coverage follows the same split in
+`bpmn-resource-metrics-regression-suite.spec.ts`: only shipped modules at seed
+42/runs 500 use immutable M0 values. Capacity, queue policy, priority, cost,
+SLA, and changed parameters are characterization or relational assertions.
+This hook-dependent suite is excluded from `test:e2e` and runs through
+`test:e2e:debug`.
