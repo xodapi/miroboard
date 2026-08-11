@@ -25,3 +25,10 @@ with immutable `baseline/` payloads. Tests labelled `CHARACTERIZATION` or
 inventing baseline artifacts. The suite is
 `bpmn-token-execution-regression-suite.spec.ts` and runs only through
 `test:e2e:debug`.
+
+Simulation parameter coverage follows the same two-oracle split in
+`bpmn-simulation-parameter-regression-suite.spec.ts`: only shipped modules at
+seed 42/runs 500 compare to immutable M0 artifacts. Changed seeds, run counts,
+and parameter configurations are characterization or relational assertions.
+Because these tests read `window.__MIROBOARD_DEBUG__`, they are excluded from
+the normal lane and run through `test:e2e:debug`.

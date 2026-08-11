@@ -48,6 +48,9 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Доска' })).toBeVisible()
   await expect.poll(() => page.evaluate(() => Boolean(window.__MIROBOARD_DEBUG__))).toBe(true)
 })
+
+test.describe('BPMN token execution regression surface', () => {
+  for (const module of modules) {
     test(`BASELINE-INVARIANCE: ${module} run_bpmn matches M0 seed 42/runs 500`, async ({ page }) => {
       await loadModule(page, module)
       const actual = (await page.evaluate(() => window.__MIROBOARD_DEBUG__!.runBpmn())) as Run
