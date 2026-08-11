@@ -61,6 +61,17 @@ test.describe('BPMN resource and cost metrics', () => {
     expect(high!.meanWaitingMs).toBeLessThan(low!.meanWaitingMs)
   })
 
+  test('CHARACTERIZATION: constrained resource is identified as the bottleneck', async ({ page }) => {
+    await loadModule(page, 'fifo-vs-priority')
+    await page.getByRole('button', { name: 'BPMN' }).click()
+    await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+    await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
+    await expect(page.getByText(/Bottleneck:/).locator('..')).toContainText('Оператор')
+    const result = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 500)) as Metrics
+    const bottleneck = result.roleUtilization.reduce((max, role) => role.utilization > max.utilization ? role : max)
+    expect(bottleneck.role).toBe('Оператор')
+  })
+
   test('RELATIONAL characterization: same seed reproduces and different seed diverges', async ({ page }) => {
     await loadModule(page, 'fifo-vs-priority')
     const values = await page.evaluate(() => {
@@ -71,11 +82,26 @@ test.describe('BPMN resource and cost metrics', () => {
     expect(values[2]).not.toEqual(values[0])
   })
 
-  test('CHARACTERIZATION: SLA target changes the reported on-time rate', async ({ page }) => {
+  test('CHARACTERIZATION: unset SLA reports null on-time rate', async ({ page }) => {
     await loadModule(page, 'sla-calendar')
     const result = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 100)) as Metrics
-    // Characterized shipped behaviour: this fixture has no configured SLA, so
-    // the engine reports null rather than inventing a default target.
+    // Characterized shipped behaviour: this fixture has no configured SLA.
     expect(result.onTimeRate).toBeNull()
+  })
+
+  test('CHARACTERIZATION: changing the UI SLA target moves on-time rate coherently', async ({ page }) => {
+    await loadModule(page, 'sla-calendar')
+    await page.getByRole('button', { name: 'BPMN' }).click()
+    await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+    const slaInput = page.getByRole('spinbutton', { name: 'SLA, сек' })
+    await slaInput.fill('1')
+    await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
+    const strict = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 100)) as Metrics
+    await slaInput.fill('60')
+    await page.getByRole('button', { name: 'Запустить симуляцию' }).click()
+    const lenient = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 100)) as Metrics
+    expect(strict.onTimeRate).toBe(0)
+    expect(lenient.onTimeRate).toBe(1)
+    expect(lenient.onTimeRate).toBeGreaterThan(strict.onTimeRate)
   })
 })
