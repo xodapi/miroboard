@@ -7,7 +7,6 @@ test.beforeEach(async ({ page }) => {
 })
 
 async function openBpmnPalette(page: Page) {
-  if (await page.getByTitle('Старт').isVisible().catch(() => false)) return
   const toolbar = page.locator('div.absolute.bottom-0')
   await toolbar.getByRole('button').last().click({ force: true })
   await expect(page.getByText('◇ BPMN', { exact: true })).toBeVisible()
