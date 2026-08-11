@@ -226,12 +226,13 @@ export default function App() {
   const [laserPos, setLaserPos] = useState<Point | null>(null)
 
   const chooseTool = useCallback((nextTool: Tool) => {
+    console.log('[BPMN diagnostic] chooseTool', { from: tool, to: nextTool })
     setTool(nextTool)
     if (nextTool !== 'bpmnSequence') {
       setBpmnFlowSourceId(null)
       setFlowPreviewPoint(null)
     }
-  }, [])
+  }, [tool])
 
   // Drag state
   const [dragInfo, setDragInfo] = useState<{
@@ -792,6 +793,7 @@ export default function App() {
     setShowBpmnPalette(false)
 
     const point = screenToWorld(e.clientX, e.clientY)
+    console.log('[BPMN diagnostic] canvas pointerdown before placement', { tool, point })
     if (e.pointerType === 'touch' && e.isPrimary === false) return
 
     // Two fingers = pan
@@ -1701,7 +1703,12 @@ export default function App() {
                   { id: 'bpmnEnd', label: 'Конец', icon: '◉' },
                   { id: 'bpmnSequence', label: 'Поток', icon: '→' },
                 ] as { id: Tool; label: string; icon: string }[]).map(item => (
-                  <button key={item.id} onClick={() => { chooseTool(item.id); setShowBpmnPalette(false); setShowMore(false) }}
+                  <button key={item.id} onClick={() => {
+                    console.log('[BPMN diagnostic] palette button clicked', { id: item.id, label: item.label, settingTool: item.id })
+                    chooseTool(item.id)
+                    setShowBpmnPalette(false)
+                    setShowMore(false)
+                  }}
                     className={`min-w-14 h-12 px-2 rounded-xl grid place-items-center text-center transition active:scale-90 ${tool === item.id ? 'bg-violet-600 text-white' : hoverBg}`}
                     title={item.label}>
                     <span className="text-xl leading-none">{item.icon}</span>
