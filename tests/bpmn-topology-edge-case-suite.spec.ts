@@ -2,6 +2,11 @@ import { test, expect, type Page } from '@playwright/test'
 
 type Node = Record<string, unknown>
 type Flow = Node & { bpmnFlow: { sourceId: string; targetId: string; flowType: string; condition?: string; isDefault?: boolean } }
+type SimulationResult = {
+  meanDurationMs: number
+  roleUtilization: Array<{ role: string; meanWaitingMs: number }>
+  priorityClasses: Array<{ priority: number; instances: number; meanWaitingMs: number }>
+}
 
 const node = (id: string, bpmnNodeType: string, extra: Node = {}): Node => ({
   id, type: 'sticky', bpmnNodeType, x: 100, y: 100, w: 120, h: 70,
@@ -105,6 +110,7 @@ test.describe('BPMN topology and configuration edge cases', () => {
     // report shown by the "Проверить поток" action, and is documented in
     // docs/BPMN_SIMULATION.md.
     expect(result.error).toContain('deterministic step limit')
+    expect(result.error).toMatch(/100[,\s]?000|100000/)
   })
 
   test('VAL-BPMN-056/057: nested AND and XOR branch execution is deterministic', async ({ page }) => {
@@ -129,6 +135,14 @@ test.describe('BPMN topology and configuration edge cases', () => {
     const second = await observe(page, 10)
     expect(first).toEqual(second)
     expect(first.ok).toBe(true)
+    const simulation = (first as { result: SimulationResult }).result
+    // An AND join cannot complete before every branch pair has contributed its
+    // work. Keep every XOR route in this lower bound, not merely the selected
+    // deterministic route, so a premature join cannot hide behind one branch.
+    const branchPairDuration = Math.max(
+      1_000 + 500, 1_000 + 700, 3_000 + 500, 3_000 + 700,
+    )
+    expect(simulation.meanDurationMs).toBeGreaterThanOrEqual(branchPairDuration)
   })
 
   test('VAL-BPMN-058: zero-capacity role is rejected explicitly', async ({ page }) => {
@@ -149,8 +163,17 @@ test.describe('BPMN topology and configuration edge cases', () => {
     expect(JSON.stringify(model)).toContain('ops')
     expect(JSON.stringify(model)).toContain('qa')
     expect(JSON.stringify(model)).toContain('support')
+    const simulationPanel = page.getByRole('heading', { name: 'Monte Carlo симуляция' }).locator('xpath=ancestor::section')
+    await page.getByRole('button', { name: 'BPMN' }).click()
+    await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+    await simulationPanel.getByLabel('Instances').fill('5')
+    await simulationPanel.getByLabel('Arrival, сек').fill('0')
+    await page.waitForTimeout(200)
     const result = await observe(page, 10000)
     expect(finite(result)).toBe(true)
+    expect(result.ok).toBe(true)
+    const simulation = (result as { result: SimulationResult }).result
+    expect(simulation.roleUtilization.some(role => role.meanWaitingMs > 0)).toBe(true)
   })
 
   test('VAL-BPMN-060: zero and very large durations produce finite results', async ({ page }) => {
@@ -172,7 +195,9 @@ test.describe('BPMN topology and configuration edge cases', () => {
   })
 
   test('VAL-BPMN-062/063: calendar and arrival-class boundary configurations are stable', async ({ page }) => {
-    await inject(page, linear([node('task', 'task', { bpmnDurationMs: 1000 })]))
+    await inject(page, linear([node('task', 'task', {
+      bpmnDurationMs: 1000, bpmnResourceRole: 'arrival-worker', bpmnResourceCapacity: 1,
+    })]))
     const values = await page.evaluate(() => {
       const hook = window.__MIROBOARD_DEBUG__!
       try { hook.simulateBpmn(42, 0); return { zeroAccepted: true } }
@@ -182,5 +207,31 @@ test.describe('BPMN topology and configuration edge cases', () => {
     expect(values.error).toContain('between 1 and 10000')
     expect(values.one).not.toEqual(values.three)
     expect(finite(values)).toBe(true)
+
+    const simulationPanel = page.getByRole('heading', { name: 'Monte Carlo симуляция' }).locator('xpath=ancestor::section')
+    await page.getByRole('button', { name: 'BPMN' }).click()
+    await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+    const classes = simulationPanel.locator('details').filter({ hasText: 'Классы прибытия' })
+    await classes.locator('summary').click()
+    for (const priority of ['1', '10']) {
+      await classes.getByRole('button', { name: 'Добавить класс' }).click()
+      const row = classes.locator('div.flex.items-center.gap-2').last()
+      await row.getByPlaceholder('Кол-во').fill('5')
+      await row.getByPlaceholder('Интервал, с').fill('0')
+      await row.getByPlaceholder('Priority').fill(priority)
+    }
+    const policies = simulationPanel.locator('details').filter({ hasText: 'Политики ресурсов' })
+    await policies.locator('summary').click()
+    const workerRole = policies.getByText('arrival-worker', { exact: true }).locator('xpath=..')
+    await workerRole.locator('select').selectOption('priority')
+    await page.waitForTimeout(200)
+    const classified = await observe(page, 1000)
+    expect(classified.ok).toBe(true)
+    const priorityClasses = (classified as { result: SimulationResult }).result.priorityClasses
+    const lowerPriority = priorityClasses.find(item => item.priority === 1)
+    const higherPriority = priorityClasses.find(item => item.priority === 10)
+    expect(lowerPriority).toBeDefined()
+    expect(higherPriority).toBeDefined()
+    expect(higherPriority!.meanWaitingMs).toBeLessThan(lowerPriority!.meanWaitingMs)
   })
 })
