@@ -122,6 +122,37 @@ export function simulate_bpmn(model_json, seed, runs) {
 }
 
 /**
+ * Runs the simulation while preserving the user's seed spelling. A leading
+ * zero is meaningful input, so it must not be normalized through BigInt.
+ * @param {string} model_json
+ * @param {string} seed
+ * @param {number} runs
+ * @returns {string}
+ */
+export function simulate_bpmn_seed_string(model_json, seed, runs) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(model_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(seed, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.simulate_bpmn_seed_string(ptr0, len0, ptr1, len1, runs);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
  * Rounds a world-coordinate to the nearest grid intersection.
  * @param {number} value
  * @param {number} grid_size

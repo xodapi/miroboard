@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
-import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
+import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
@@ -640,10 +640,9 @@ export default function App() {
 
   const simulateBpmn = useCallback(() => {
     try {
-      const seed = BigInt(simulationSeed)
       const runs = Number(simulationRuns)
       if (!Number.isInteger(runs) || runs < 1 || runs > 10000) throw new Error('Количество прогонов должно быть целым числом от 1 до 10000.')
-      const result = JSON.parse(simulate_bpmn(JSON.stringify(createBpmnModel()), seed, runs)) as BpmnSimulationResult
+      const result = JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createBpmnModel()), simulationSeed, runs)) as BpmnSimulationResult
       const seconds = (value: number) => `${(value / 1000).toFixed(1)}с`
       setBpmnSimulationResult(result)
       setBottleneckRole(result.roleUtilization[0]?.role ?? null)
@@ -662,7 +661,7 @@ export default function App() {
       createBpmnModel,
       validateBpmn: () => JSON.parse(validate_bpmn(JSON.stringify(createBpmnModel()))),
       runBpmn: () => JSON.parse(run_bpmn(JSON.stringify(createBpmnModel()))),
-      simulateBpmn: (seed, runs) => JSON.parse(simulate_bpmn(JSON.stringify(createBpmnModel()), BigInt(seed), runs)) as BpmnSimulationResult,
+      simulateBpmn: (seed, runs) => JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createBpmnModel()), String(seed), runs)) as BpmnSimulationResult,
       getElements: () => elements.map((element) => ({ ...element, points: element.points?.map((point) => ({ ...point })), bpmnFlow: element.bpmnFlow && { ...element.bpmnFlow } })),
     }
     return () => { delete window.__MIROBOARD_DEBUG__ }

@@ -1134,6 +1134,27 @@ fn simulation_run_seed(seed: u64, run_index: u64) -> u64 {
 /// deterministic.
 #[wasm_bindgen]
 pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, JsValue> {
+    simulate_bpmn_with_seed(model_json, seed, runs, seed)
+}
+
+/// Runs the simulation while preserving the user's seed spelling. A leading
+/// zero is meaningful input, so it must not be normalized through BigInt.
+#[wasm_bindgen]
+pub fn simulate_bpmn_seed_string(model_json: &str, seed: &str, runs: u32) -> Result<String, JsValue> {
+    let parsed = seed.parse::<u64>().map_err(|_| JsValue::from_str("Seed must be a non-negative integer."))?;
+    let effective = if seed == parsed.to_string() {
+        parsed
+    } else {
+        // Keep canonical seeds backward-compatible while distinguishing
+        // spellings such as "042" from "42".
+        seed.bytes().fold(parsed, |state, byte| {
+            state.wrapping_mul(6364136223846793005).wrapping_add(byte as u64 + 1)
+        })
+    };
+    simulate_bpmn_with_seed(model_json, effective, runs, effective)
+}
+
+fn simulate_bpmn_with_seed(model_json: &str, result_seed: u64, runs: u32, seed: u64) -> Result<String, JsValue> {
     if runs == 0 || runs > 10_000 {
         return Err(JsValue::from_str(
             "Simulation runs must be between 1 and 10000.",
@@ -1250,7 +1271,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
         .collect();
     role_utilization.sort_by(|left, right| right.utilization.total_cmp(&left.utilization));
     let result = BpmnSimulationResult {
-        seed,
+        seed: result_seed,
         runs,
         completed_runs: runs,
         simulation_instances: specs.len() as u32,

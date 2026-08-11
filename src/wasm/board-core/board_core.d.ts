@@ -32,6 +32,12 @@ export function run_bpmn(model_json: string): string;
 export function simulate_bpmn(model_json: string, seed: bigint, runs: number): string;
 
 /**
+ * Runs the simulation while preserving the user's seed spelling. A leading
+ * zero is meaningful input, so it must not be normalized through BigInt.
+ */
+export function simulate_bpmn_seed_string(model_json: string, seed: string, runs: number): string;
+
+/**
  * Rounds a world-coordinate to the nearest grid intersection.
  */
 export function snap_to_grid(value: number, grid_size: number): number;
@@ -50,6 +56,7 @@ export interface InitOutput {
     readonly import_bpmn_xml: (a: number, b: number) => [number, number, number, number];
     readonly run_bpmn: (a: number, b: number) => [number, number, number, number];
     readonly simulate_bpmn: (a: number, b: number, c: bigint, d: number) => [number, number, number, number];
+    readonly simulate_bpmn_seed_string: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly snap_to_grid: (a: number, b: number) => number;
     readonly validate_bpmn: (a: number, b: number) => [number, number];
     readonly clamp_scale: (a: number) => number;
