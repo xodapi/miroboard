@@ -135,7 +135,31 @@ test.describe('BPMN resource and cost metrics', () => {
 
     await setBatchLoad(page, 1, 0)
     const lowerArrivalLoad = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 500)) as Metrics
-    expect(lowerArrivalLoad.roleUtilization[0].utilization).toBeLessThan(moreCapacityRole.utilization)
+    const lowerArrivalLoadRole = lowerArrivalLoad.roleUtilization[0]
+    expect(lowerArrivalLoadRole.utilization).toBeLessThan(moreCapacityRole.utilization)
+    // With capacity held at five, fewer arriving instances reduce both busy work and utilization.
+    expect(lowerArrivalLoadRole.meanWorkloadMs).toBeLessThan(moreCapacityRole.meanWorkloadMs)
+  })
+
+  test('CHARACTERIZATION: configured role with no task work reports zero metrics', async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.setItem('board-local', JSON.stringify([
+        { id: 'start', type: 'sticky', x: 40, y: 120, w: 78, h: 78, text: 'Старт', color: '#6BCB77', fill: '#6BCB77', createdBy: 'test', bpmnNodeType: 'startEvent' },
+        { id: 'task', type: 'sticky', x: 180, y: 120, w: 176, h: 76, text: 'Работа', color: '#4D96FF', fill: '#4D96FF', createdBy: 'test', bpmnNodeType: 'task', bpmnDurationMs: 3000, bpmnResourceRole: 'Исполнитель', bpmnResourceCapacity: 1 },
+        // The role is configured through a non-task BPMN node, so it has no task workload.
+        { id: 'end', type: 'sticky', x: 440, y: 120, w: 78, h: 78, text: 'Конец', color: '#FF5D5D', fill: '#FF5D5D', createdBy: 'test', bpmnNodeType: 'endEvent', bpmnResourceRole: 'Незадействованный', bpmnResourceCapacity: 2 },
+        { id: 'f1', type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: 'test', bpmnFlow: { sourceId: 'start', targetId: 'task', flowType: 'sequence' } },
+        { id: 'f2', type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: 'test', bpmnFlow: { sourceId: 'task', targetId: 'end', flowType: 'sequence' } },
+      ]))
+    })
+    await page.reload()
+    await expect.poll(() => page.evaluate(() => window.__MIROBOARD_DEBUG__?.createBpmnModel().nodes.length ?? 0)).toBe(3)
+
+    const result = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 100)) as Metrics
+    const unusedRole = result.roleUtilization.find((role) => role.role === 'Незадействованный')
+    expect(unusedRole).toBeDefined()
+    expect(unusedRole!.utilization).toBe(0)
+    expect(unusedRole!.meanWorkloadMs).toBe(0)
   })
 
   test('RELATIONAL characterization: relieving one constrained role moves the bottleneck', async ({ page }) => {
