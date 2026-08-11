@@ -269,6 +269,10 @@ test.describe('BPMN authoring regression surface', () => {
 
   test('switching board, BPMN, and simulation modes preserves the model', async ({ page }) => {
     await place(page, 'Задача', 350, 250)
+    const taskInspector = page.locator('aside').filter({ hasText: 'Свойства задачи' })
+    await taskInspector.locator('select').selectOption('uniform')
+    await taskInspector.getByText('Min', { exact: true }).locator('input').fill('1')
+    await taskInspector.getByText('Max', { exact: true }).locator('input').fill('5')
     await page.getByRole('button', { name: 'BPMN' }).click()
     await place(page, 'Старт', 300, 500)
     await place(page, 'Конец', 800, 500)
@@ -287,6 +291,18 @@ test.describe('BPMN authoring regression surface', () => {
       const debug = window.__MIROBOARD_DEBUG__!
       return { model: debug.createBpmnModel(), simulation: debug.simulateBpmn(42, 20) }
     })
+    expect(before.simulation.completedRuns).toBeGreaterThan(0)
+    expect(before.simulation.standardDeviationMs, 'simulation must include populated duration-distribution output').toBeGreaterThan(0)
+    const flow = (await elements(page)).find(element => element.bpmnFlow?.sourceId === start.id)!
+    await page.locator(`[data-testid="bpmn-flow-${flow.id}"]`).click({ force: true })
+    const flowInspector = page.locator('aside').filter({ hasText: 'Свойства sequence flow' })
+    await expect(flowInspector).toBeVisible()
+    await flowInspector.locator('#bpmn-flow-type').selectOption('message')
+    await expect.poll(async () => (await elements(page)).find(element => element.id === flow.id)?.bpmnFlow?.flowType).toBe('message')
+    const expectedAfterFlowEdit = await page.evaluate(() => {
+      const debug = window.__MIROBOARD_DEBUG__!
+      return { model: debug.createBpmnModel(), simulation: debug.simulateBpmn(42, 20) }
+    })
     await page.getByRole('button', { name: 'BPMN' }).click()
     await page.getByRole('button', { name: 'Симуляция' }).first().click()
     await expect(page.getByText('Monte Carlo', { exact: false })).toBeVisible()
@@ -297,7 +313,8 @@ test.describe('BPMN authoring regression surface', () => {
       const debug = window.__MIROBOARD_DEBUG__!
       return { model: debug.createBpmnModel(), simulation: debug.simulateBpmn(42, 20) }
     })
-    expect(after).toEqual(before)
+    expect((await elements(page)).find(element => element.id === flow.id)?.bpmnFlow?.flowType).toBe('message')
+    expect(after).toEqual(expectedAfterFlowEdit)
   })
 })
 
