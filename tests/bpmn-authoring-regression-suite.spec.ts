@@ -19,12 +19,30 @@ async function place(page: Page, title: string, x: number, y: number) {
   await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
 }
 
+async function elements(page: Page) {
+  return page.evaluate(() => window.__MIROBOARD_DEBUG__!.getElements())
+}
+
 test.describe('BPMN authoring regression surface', () => {
   test('toolbar creates all six BPMN tools with the expected rendered shapes', async ({ page }) => {
-    await openBpmnPalette(page)
-    for (const title of ['Старт', 'Задача', 'Шлюз XOR', 'Шлюз AND', 'Конец', 'Поток']) {
-      await expect(page.getByTitle(title)).toBeVisible()
+    await page.getByRole('button', { name: 'BPMN' }).click()
+    const tools = [
+      ['Старт', 'startEvent'], ['Задача', 'task'], ['Шлюз XOR', 'xorGateway'],
+      ['Шлюз AND', 'andGateway'], ['Конец', 'endEvent'],
+    ] as const
+    for (const [index, [title, nodeType]] of tools.entries()) {
+      await place(page, title, 150 + index * 120, 220)
+      const created = (await elements(page)).find(e => e.bpmnNodeType === nodeType)!
+      expect(created.bpmnNodeType).toBe(nodeType)
+      expect(created.type).toBe('sticky')
+      expect(created.w).toBeGreaterThan(0)
+      await expect(page.locator(`[data-id="${created.id}"]`)).toBeVisible()
     }
+    const before = (await elements(page)).length
+    await openBpmnPalette(page)
+    await page.getByTitle('Поток').click({ force: true })
+    expect(await page.getByTitle('Поток').isVisible()).toBeTruthy()
+    expect((await elements(page)).length).toBe(before)
   })
 
   test('sequence flow connects real BPMN nodes and free arrows retain free geometry', async ({ page }) => {
@@ -37,6 +55,11 @@ test.describe('BPMN authoring regression surface', () => {
     await page.locator('button[title="Поток"]').click({ force: true })
     await page.getByText('Старт', { exact: true }).click({ force: true })
     await page.getByText('Конец', { exact: true }).last().click({ force: true })
+    const created = await elements(page)
+    const nodes = created.filter(e => e.bpmnNodeType)
+    const flowData = created.find(e => e.bpmnFlow)!
+    expect(flowData.bpmnFlow?.sourceId).toBe(nodes[0].id)
+    expect(flowData.bpmnFlow?.targetId).toBe(nodes[1].id)
     const flow = page.locator('[data-testid^="bpmn-flow-"]')
     await expect(flow).toHaveCount(1)
     const flowTransform = await flow.getAttribute('transform')
@@ -49,7 +72,14 @@ test.describe('BPMN authoring regression surface', () => {
     await canvas.dispatchEvent('pointerup', { clientX: 300, clientY: 500, pointerId: 2 })
     const arrows = page.locator('[data-id]')
     await expect(arrows).toHaveCount(4)
+    const freeArrow = (await elements(page)).find(e => e.type === 'arrow' && !e.bpmnFlow)!
+    expect(freeArrow.bpmnFlow).toBeUndefined()
+    expect(freeArrow.w).toBeGreaterThan(0)
+    expect(freeArrow.h).toBeGreaterThanOrEqual(0)
+    expect(freeArrow.x).toBe(100)
     await expect(page.locator('[data-testid^="bpmn-flow-"]')).toHaveCount(1)
+    expect((await page.evaluate(() => window.__MIROBOARD_DEBUG__!.validateBpmn()))).toBeDefined()
+    expect((await page.evaluate(() => window.__MIROBOARD_DEBUG__!.runBpmn()))).toBeDefined()
   })
 
   test('duration distribution reveals exactly the required parameters', async ({ page }) => {
@@ -68,6 +98,8 @@ test.describe('BPMN authoring regression surface', () => {
     await expect(page.getByText('Min', { exact: true })).toHaveCount(1)
     await expect(page.getByText('Mode', { exact: true })).toHaveCount(1)
     await expect(page.getByText('Max', { exact: true })).toHaveCount(1)
+    const labels = panelLabels(page)
+    expect(labels).toBeDefined()
   })
 
   test('task inspector and flow properties persist after reselect and mode switches', async ({ page }) => {
@@ -90,4 +122,41 @@ test.describe('BPMN authoring regression surface', () => {
     await expect(panel.locator('#bpmn-duration')).toHaveValue('12.5')
     await expect(panel.locator('input').nth(4)).toHaveValue('Оператор')
   })
+
+  test('distribution parameters retain values and reject out-of-order triangular input', async ({ page }) => {
+    await place(page, 'Задача', 350, 250)
+    const panel = page.locator('aside').filter({ hasText: 'Свойства задачи' })
+    await panel.locator('select').selectOption('triangular')
+    const inputs = panel.locator('input[type="number"]')
+    await inputs.nth(0).fill('10')
+    await inputs.nth(1).fill('20')
+    await inputs.nth(2).fill('30')
+    await panel.locator('select').selectOption('fixed')
+    await panel.locator('select').selectOption('triangular')
+    await expect(inputs.nth(0)).toHaveValue('10')
+    await expect(inputs.nth(1)).toHaveValue('20')
+    await expect(inputs.nth(2)).toHaveValue('30')
+    await inputs.nth(0).fill('40')
+    await inputs.nth(1).fill('20')
+    await inputs.nth(2).fill('10')
+    const task = (await elements(page)).find(e => e.bpmnNodeType === 'task')!
+    expect(task.bpmnDurationMinMs).toBe(20000)
+  })
+
+  test('switching board, BPMN, and simulation modes preserves the model', async ({ page }) => {
+    await place(page, 'Задача', 350, 250)
+    const before = await page.evaluate(() => JSON.stringify(window.__MIROBOARD_DEBUG__!.getElements()))
+    await page.getByRole('button', { name: 'BPMN' }).click()
+    await page.getByRole('button', { name: 'Симуляция' }).first().click()
+    await expect(page.getByText('Monte Carlo', { exact: false })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Доска' }).click({ force: true })
+    await page.getByRole('button', { name: 'BPMN' }).click()
+    const after = await page.evaluate(() => JSON.stringify(window.__MIROBOARD_DEBUG__!.getElements()))
+    expect(after).toBe(before)
+  })
 })
+
+function panelLabels(page: Page) {
+  return page.locator('aside').getByText(/Min|Mode|Max/)
+}
