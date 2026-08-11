@@ -74,7 +74,7 @@ test('cold file load has no protocol or uncaught-runtime failures', async ({ pag
   expect(errors).toEqual([])
 })
 
-test('offline board editing covers every node type with move delete undo and redo', async ({ page }) => {
+test('offline board editing covers every node type with rename, move, delete, undo and redo', async ({ page }) => {
   await page.context().route(/^(?!file:|data:|blob:).*/, route => route.abort())
   const { errors, requests } = await bootFile(page)
   const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
@@ -100,27 +100,30 @@ test('offline board editing covers every node type with move delete undo and red
   const nodes = page.locator('[data-id]')
   for (let index = 0; index < 4; index += 1) {
     const node = nodes.nth(index)
-    if (index === 0) {
-      await node.dblclick({ force: true })
-      const editor = page.locator('textarea:visible, input:not([type="file"]):visible').last()
-      await editor.fill(`Офлайн узел ${index}`)
-      await editor.press('Enter')
-      await expect(node).toContainText(`Офлайн узел ${index}`)
-    }
+    // Sticky and text labels live inside SVG foreignObjects. Shapes must expose
+    // the same double-click editing affordance from their outer node.
+    const renameTarget = index < 2 ? node.locator('foreignObject div').last() : node
+    await renameTarget.dblclick({ force: true })
+    const editor = page.locator('textarea:visible, input:not([type="file"]):visible').last()
+    await expect(editor).toBeVisible()
+    await editor.fill(`Офлайн узел ${index}`)
+    await editor.press('Enter')
+    await expect(node).toContainText(`Офлайн узел ${index}`)
+
+    await page.waitForTimeout(600)
+    await node.click({ force: true, position: { x: 12, y: 12 } })
+    await page.keyboard.press('Delete')
+    await expect(nodes).toHaveCount(3)
+    await page.keyboard.press('Control+z')
+    await expect(nodes).toHaveCount(4)
+    await page.keyboard.press('Control+Shift+z')
+    await expect(nodes).toHaveCount(3)
+    await page.keyboard.press('Control+z')
+    await expect(nodes).toHaveCount(4)
+
     const beforeMove = await transformFor(node)
     const box = await node.boundingBox()
     expect(box).not.toBeNull()
-    await node.click({ force: true, position: { x: 12, y: 12 } })
-    if (index === 0) {
-      await page.keyboard.press('Delete')
-      await expect(nodes).toHaveCount(3)
-      await page.keyboard.press('Control+z')
-      await expect(nodes).toHaveCount(4)
-      await page.keyboard.press('Control+Shift+z')
-      await expect(nodes).toHaveCount(3)
-      await page.keyboard.press('Control+z')
-      await expect(nodes).toHaveCount(4)
-    }
     await node.dispatchEvent('pointerdown', { clientX: box!.x + 20, clientY: box!.y + 20, pointerId: index + 1, button: 0 })
     await canvas.dispatchEvent('pointermove', { clientX: box!.x + 120, clientY: box!.y + 100, pointerId: index + 1 })
     await canvas.dispatchEvent('pointerup', { clientX: box!.x + 120, clientY: box!.y + 100, pointerId: index + 1 })

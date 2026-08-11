@@ -67,10 +67,7 @@ async function flowIdsBetween(page: Page, source: string, target: string) {
 async function createTerminalTaskGraph(page: Page) {
   await placeShortcut(page, 's', 360, 220)
   await placeShortcut(page, 'e', 700, 220)
-  await connect(page, 'Старт', 'Конец')
   await place(page, 'Задача', 500, 420)
-  await page.locator('[data-testid^="bpmn-flow-"]').click({ force: true })
-  await page.keyboard.press('Delete')
   await connect(page, 'Старт', 'Задача')
 }
 
@@ -130,7 +127,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
       valid: false,
       issues: [
         { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Задача') },
+        { severity: 'error', code: 'task-has-no-outgoing', message: 'A task needs an outgoing flow.', elementId: await elementId(page, 'Задача') },
       ],
     })
   })
@@ -147,7 +144,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
       valid: false,
       issues: [
         { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Задача') },
+        { severity: 'error', code: 'task-has-no-outgoing', message: 'A task needs an outgoing flow.', elementId: await elementId(page, 'Задача') },
       ],
     })
     expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
