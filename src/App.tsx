@@ -791,6 +791,11 @@ export default function App() {
     setShowMore(false)
 
     const point = screenToWorld(e.clientX, e.clientY)
+    console.log('[BPMN diagnostic] canvas pointerdown before placement', JSON.stringify({
+      tool,
+      point,
+      paletteVisible: showBpmnPalette,
+    }))
     if (e.pointerType === 'touch' && e.isPrimary === false) return
 
     // Two fingers = pan
@@ -976,7 +981,7 @@ export default function App() {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool])
+  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, showBpmnPalette])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
@@ -1691,7 +1696,14 @@ export default function App() {
 
           {showBpmnPalette && (
             <div className={`mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
-              <div className="flex gap-1.5">
+              <div className="flex gap-1.5" onClickCapture={(event) => {
+                const target = event.target as HTMLElement
+                console.log('[BPMN diagnostic] palette click capture', JSON.stringify({
+                  targetTitle: target.closest('button')?.title ?? null,
+                  paletteVisible: showBpmnPalette,
+                  tool,
+                }))
+              }}>
                 {([
                   { id: 'bpmnStart', label: 'Старт', icon: '○' },
                   { id: 'bpmnTask', label: 'Задача', icon: '▭' },
@@ -1700,8 +1712,25 @@ export default function App() {
                   { id: 'bpmnEnd', label: 'Конец', icon: '◉' },
                   { id: 'bpmnSequence', label: 'Поток', icon: '→' },
                 ] as { id: Tool; label: string; icon: string }[]).map(item => (
-                  <button key={item.id} onClick={() => {
+                  <button key={item.id} onClick={(event) => {
+                    const button = event.currentTarget
+                    const styles = window.getComputedStyle(button)
+                    const bounds = button.getBoundingClientRect()
+                    console.log('[BPMN diagnostic] palette button click start', JSON.stringify({
+                      id: item.id,
+                      label: item.label,
+                      currentTool: tool,
+                      paletteVisible: showBpmnPalette,
+                      visible: styles.display !== 'none' && styles.visibility !== 'hidden' && bounds.width > 0 && bounds.height > 0,
+                      clickable: !button.disabled && styles.pointerEvents !== 'none',
+                    }))
                     chooseTool(item.id)
+                    console.log('[BPMN diagnostic] palette button after chooseTool', JSON.stringify({
+                      id: item.id,
+                      currentTool: tool,
+                      requestedTool: item.id,
+                      note: 'React state updates commit after this handler returns',
+                    }))
                   }}
                     className={`min-w-14 h-12 px-2 rounded-xl grid place-items-center text-center transition active:scale-90 ${tool === item.id ? 'bg-violet-600 text-white' : hoverBg}`}
                     title={item.label}>

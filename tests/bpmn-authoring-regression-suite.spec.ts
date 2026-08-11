@@ -27,6 +27,13 @@ async function elements(page: Page) {
 
 test.describe('BPMN authoring regression surface', () => {
   test('toolbar creates all six BPMN tools with the expected rendered shapes', async ({ page }) => {
+    page.on('console', message => {
+      if (message.text().startsWith('[BPMN diagnostic]')) {
+        void Promise.all(message.args().map(argument => argument.jsonValue())).then(values => {
+          console.log('[BPMN diagnostic browser]', JSON.stringify(values))
+        })
+      }
+    })
     await page.getByRole('button', { name: 'BPMN' }).click()
     const tools = [
       ['Старт', 'startEvent'], ['Задача', 'task'], ['Шлюз XOR', 'xorGateway'],
