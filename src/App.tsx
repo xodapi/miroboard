@@ -1676,7 +1676,7 @@ export default function App() {
       {renderMiniMap()}
 
       {/* ===== BOTTOM TOOLBAR ===== */}
-      <div className="absolute bottom-0 left-0 right-0 z-30 pb-[calc(env(safe-area-inset-bottom)+8px)]" data-ui>
+      <div className="absolute bottom-0 left-0 right-0 z-40 pb-[calc(env(safe-area-inset-bottom)+8px)]" data-ui>
         <div className="mx-auto w-fit max-w-[calc(100%-16px)]">
 
           {/* Emoji picker */}
@@ -1694,7 +1694,7 @@ export default function App() {
           )}
 
           {showBpmnPalette && (
-            <div className={`mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
+            <div className={`relative z-10 mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
               <div className="flex gap-1.5" onClickCapture={(event) => {
                 const target = event.target as HTMLElement
                 console.log('[BPMN diagnostic] palette click capture', JSON.stringify({
@@ -1799,7 +1799,7 @@ export default function App() {
             </button>
 
             {/* More */}
-            <button onClick={() => setShowMore(!showMore)}
+            <button onClick={() => { setShowMore(value => !value); setShowBpmnPalette(false) }}
               className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${showMore ? 'bg-black text-white' : `${textSec} ${hoverBg}`}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
             </button>
