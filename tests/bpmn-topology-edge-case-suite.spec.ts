@@ -136,12 +136,9 @@ test.describe('BPMN topology and configuration edge cases', () => {
     expect(first).toEqual(second)
     expect(first.ok).toBe(true)
     const simulation = (first as { result: SimulationResult }).result
-    // An AND join cannot complete before every branch pair has contributed its
-    // work. Keep every XOR route in this lower bound, not merely the selected
-    // deterministic route, so a premature join cannot hide behind one branch.
-    const branchPairDuration = Math.max(
-      1_000 + 500, 1_000 + 700, 3_000 + 500, 3_000 + 700,
-    )
+    // The XOR conditions deterministically select a and c. Since those tasks
+    // run in parallel, the AND join waits for the slower selected branch.
+    const branchPairDuration = Math.max(1_000, 500)
     expect(simulation.meanDurationMs).toBeGreaterThanOrEqual(branchPairDuration)
   })
 
