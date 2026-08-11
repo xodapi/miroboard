@@ -108,6 +108,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
     await placeShortcut(page, 'e', 700, 220)
     await connect(page, 'Старт', 'Конец')
     await place(page, 'Задача', 500, 420)
+    await connect(page, 'Задача', 'Конец')
     const validation = await model(page)
     console.log('NO_INCOMING_TASK', JSON.stringify(validation))
     expect(validation).toEqual({
@@ -125,7 +126,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
       valid: false,
       issues: [
         { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
+        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Задача') },
       ],
     })
   })
@@ -142,7 +143,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
       valid: false,
       issues: [
         { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
+        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Задача') },
       ],
     })
     expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
