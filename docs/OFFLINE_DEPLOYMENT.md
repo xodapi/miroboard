@@ -26,13 +26,13 @@ depends on there being no runtime asset fetch.
 
 ## Capability gaps
 
-- File System Access save/open features depend on browser support. Browsers
-  without that API use the download and file-input fallbacks.
-- A `file://` page has browser-specific restrictions around native file
-  pickers and persistent storage. Save the downloaded `.mboard` document
-  explicitly and reopen it when moving between machines.
-- Collaboration, shared cursors, accounts, and remote synchronization are not
-  available in the air-gapped build. Documents must be exchanged as `.mboard`
-  files.
-- This package is tested on desktop Chromium. Other browsers may provide only
-  the fallback file workflows.
+The current M1 build does not yet implement portable `.mboard` save/open
+operations. Its persistence is limited to the browser's local IndexedDB
+recovery cache, so edits can be recovered in the same browser profile but
+cannot be exported or moved between machines through this build. File System
+Access and download/file-input workflows are planned for M3 and must not be
+assumed to be available in M1.
+
+Collaboration, shared cursors, accounts, and remote synchronization are not
+available in the air-gapped build. This package is tested on desktop Chromium;
+other browsers may have different limits for local browser storage.
