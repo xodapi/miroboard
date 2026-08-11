@@ -21,7 +21,7 @@ function bpmnPalette(page: Page) {
 
 async function place(page: Page, title: string, x: number, y: number) {
   await openBpmnPalette(page)
-  await bpmnPalette(page).getByTitle(title).dispatchEvent('click')
+  await bpmnPalette(page).getByTitle(title).click()
   await page.waitForTimeout(100)
   await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
 }
@@ -61,7 +61,7 @@ test.describe('BPMN authoring regression surface', () => {
       const x = 300 + index * 150
       const y = 340 + (index % 2) * 140
       await openBpmnPalette(page)
-      await bpmnPalette(page).getByTitle(title).dispatchEvent('click')
+      await bpmnPalette(page).getByTitle(title).click()
       await page.waitForTimeout(100)
       await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
       await page.screenshot({ path: `evidence/bpmn-toolbar-placement-iteration-${index + 1}-${title}.png`, fullPage: true })
@@ -87,7 +87,7 @@ test.describe('BPMN authoring regression surface', () => {
     }
     const before = (await elements(page)).length
     await openBpmnPalette(page)
-    await bpmnPalette(page).getByTitle('Поток').dispatchEvent('click')
+    await bpmnPalette(page).getByTitle('Поток').click()
     await page.screenshot({ path: 'evidence/bpmn-toolbar-placement-iteration-6-Поток.png', fullPage: true })
     await expect(bpmnPalette(page).getByTitle('Поток')).toBeVisible()
     expect((await elements(page)).length).toBe(before)
@@ -100,7 +100,7 @@ test.describe('BPMN authoring regression surface', () => {
     await page.keyboard.press('e')
     await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x: 650, y: 250 }, force: true })
     await openBpmnPalette(page)
-    await bpmnPalette(page).getByTitle('Поток').dispatchEvent('click')
+    await bpmnPalette(page).getByTitle('Поток').click()
     await page.locator('[data-id]').filter({ hasText: 'Старт' }).click({ force: true })
     await page.locator('[data-id]').filter({ hasText: 'Конец' }).click({ force: true })
     const created = await elements(page)
@@ -126,7 +126,7 @@ test.describe('BPMN authoring regression surface', () => {
     await page.keyboard.press('e')
     await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x: 650, y: 250 }, force: true })
     await openBpmnPalette(page)
-    await bpmnPalette(page).getByTitle('Поток').dispatchEvent('click')
+    await bpmnPalette(page).getByTitle('Поток').click()
     await page.locator('[data-id]').filter({ hasText: 'Старт' }).click({ force: true })
     await page.locator('[data-id]').filter({ hasText: 'Конец' }).click({ force: true })
     const before = await page.evaluate(() => {
@@ -214,7 +214,7 @@ test.describe('BPMN authoring regression surface', () => {
     await place(page, 'Шлюз XOR', 600, 400)
     const xor = (await elements(page)).find(element => element.bpmnNodeType === 'xorGateway')!
     await openBpmnPalette(page)
-    await bpmnPalette(page).getByTitle('Поток').dispatchEvent('click')
+    await bpmnPalette(page).getByTitle('Поток').click()
     await page.locator(`[data-id="${xor.id}"]`).click({ force: true })
     await page.locator(`[data-id="${task.id}"]`).click({ force: true })
     const createdFlow = (await elements(page)).find(element => element.bpmnFlow?.sourceId === xor.id)!
@@ -279,7 +279,7 @@ test.describe('BPMN authoring regression surface', () => {
     const end = bpmnNodes.find(element => element.bpmnNodeType === 'endEvent')!
     for (const [source, target] of [[start, task], [task, end]]) {
       await openBpmnPalette(page)
-      await bpmnPalette(page).getByTitle('Поток').dispatchEvent('click')
+      await bpmnPalette(page).getByTitle('Поток').click()
       await page.locator(`[data-id="${source.id}"]`).click({ force: true })
       await page.locator(`[data-id="${target.id}"]`).click({ force: true })
     }
