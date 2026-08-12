@@ -89,11 +89,11 @@ async function createMissingEndPathGraph(page: Page) {
   await connect(page, 'Старт', 'Задача')
 }
 
-async function createDisconnectedTerminalTaskGraph(page: Page) {
+async function createReachableTerminalTaskGraph(page: Page) {
   await placeShortcut(page, 's', 360, 220)
   await placeShortcut(page, 'e', 700, 220)
-  await connect(page, 'Старт', 'Конец')
   await place(page, 'Задача', 500, 420)
+  await connect(page, 'Старт', 'Задача')
 }
 
 async function createValidTaskGraph(page: Page) {
@@ -153,9 +153,9 @@ test.describe('validate_bpmn characterization and invariance', () => {
     })
   })
 
-  test('reports a disconnected terminal task with no outgoing flow', async ({ page }) => {
+  test('reports a reachable terminal task with no outgoing flow', async ({ page }) => {
     await palette(page)
-    await createDisconnectedTerminalTaskGraph(page)
+    await createReachableTerminalTaskGraph(page)
     const validation = await model(page)
     const taskId = await elementId(page, 'Задача')
     const issue = validation.issues.find(candidate => candidate.code === 'task-has-no-outgoing')
