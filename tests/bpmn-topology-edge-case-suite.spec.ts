@@ -106,11 +106,10 @@ test.describe('BPMN topology and configuration edge cases', () => {
       catch (error) { return { ok: false, error: String(error) } }
     })
     expect(result.ok).toBe(false)
-    // The runner guard is 100,000 transitions. This text is also the user-visible
-    // report shown by the "Проверить поток" action, and is documented in
-    // docs/BPMN_SIMULATION.md.
-    expect(result.error).toContain('deterministic step limit')
-    expect(result.error).toMatch(/100[,\s]?000|100000/)
+    // This topology has four nodes, four flows, and one instance. The runtime
+    // bound is therefore 4 × 4 × 4 × 1 = 64 transitions.
+    expect(result.error).toContain('deterministic step limit of 64 transitions')
+    expect(result.error).toContain('nodes × flows × 4 × instances')
   })
 
   test('VAL-BPMN-056/057: nested AND and XOR branch execution is deterministic', async ({ page }) => {
