@@ -316,6 +316,48 @@ test.describe('BPMN authoring regression surface', () => {
     expect((await elements(page)).find(element => element.id === flow.id)?.bpmnFlow?.flowType).toBe('message')
     expect(after).toEqual(expectedAfterFlowEdit)
   })
+
+  test('message flow remains a message in the shared model and XML export while simulation executes it as control flow', async ({ page }) => {
+    await page.getByRole('button', { name: 'BPMN' }).click()
+    await page.keyboard.press('s')
+    await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x: 250, y: 250 }, force: true })
+    await place(page, 'Задача', 450, 250)
+    await page.keyboard.press('e')
+    await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x: 650, y: 250 }, force: true })
+    const nodes = await elements(page)
+    const start = nodes.find(element => element.bpmnNodeType === 'startEvent')!
+    const task = nodes.find(element => element.bpmnNodeType === 'task')!
+    const end = nodes.find(element => element.bpmnNodeType === 'endEvent')!
+    for (const [source, target] of [[start, task], [task, end]] as const) {
+      await openBpmnPalette(page)
+      await bpmnPalette(page).getByTitle('Поток').click()
+      await page.locator(`[data-id="${source.id}"]`).click({ force: true })
+      await page.locator(`[data-id="${target.id}"]`).click({ force: true })
+    }
+    await openBpmnPalette(page)
+    await bpmnPalette(page).getByTitle('Поток').click()
+    await page.locator(`[data-id="${start.id}"]`).click({ force: true })
+    await page.locator(`[data-id="${end.id}"]`).click({ force: true })
+
+    const flow = (await elements(page)).find(element => element.bpmnFlow?.sourceId === start.id && element.bpmnFlow.targetId === end.id)!
+    await page.locator(`[data-testid="bpmn-flow-${flow.id}"]`).click({ force: true })
+    await page.locator('#bpmn-flow-type').selectOption('message')
+
+    const result = await page.evaluate(() => {
+      const debug = window.__MIROBOARD_DEBUG__!
+      return {
+        model: debug.createBpmnModel() as { flows: { id: string; flowType?: string }[] },
+        validation: debug.validateBpmn() as { issues: { elementId?: string; message: string }[] },
+        xml: debug.exportBpmnXml(),
+        simulation: debug.simulateBpmn(42, 20),
+      }
+    })
+    expect(result.model.flows.find(candidate => candidate.id === flow.id)?.flowType).toBe('message')
+    expect(result.validation.issues.some(issue => issue.elementId === flow.id)).toBe(false)
+    expect(result.xml).toContain(`<bpmn:messageFlow id="${flow.id}"`)
+    expect(result.xml).not.toContain(`<bpmn:sequenceFlow id="${flow.id}"`)
+    expect(result.simulation.completedRuns).toBeGreaterThan(0)
+  })
 })
 
 function panelLabels(page: Page) {

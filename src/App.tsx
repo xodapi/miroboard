@@ -12,7 +12,7 @@ import fifoPriorityExample from '../examples/fifo-vs-priority.json'
 
 declare global {
   interface Window {
-    __MIROBOARD_DEBUG__?: { version: string; createBpmnModel: () => unknown; validateBpmn: () => unknown; runBpmn: () => unknown; simulateBpmn: (seed: number | string | bigint, runs: number) => BpmnSimulationResult; getElements: () => BoardElement[] }
+    __MIROBOARD_DEBUG__?: { version: string; createBpmnModel: () => unknown; validateBpmn: () => unknown; exportBpmnXml: () => string; runBpmn: () => unknown; simulateBpmn: (seed: number | string | bigint, runs: number) => BpmnSimulationResult; getElements: () => BoardElement[] }
   }
 }
 
@@ -293,10 +293,6 @@ export default function App() {
       .map((element) => ({
         id: element.id,
         ...element.bpmnFlow,
-        // The simulator models executable control flow only. Keep the
-        // inspector's message type on the board, but project it as a
-        // sequence edge at this execution boundary.
-        flowType: element.bpmnFlow?.flowType === 'message' ? 'sequence' : element.bpmnFlow?.flowType,
       }))
     // Only emit roles the user actually configured. An empty list keeps the
     // engine on the per-node `resourceCapacity` fallback, so untouched boards
@@ -324,6 +320,20 @@ export default function App() {
       resourceRoles,
     }
   }, [elements, simulationTarget, calendarStart, calendarEnd, simulationInstances, arrivalInterval, arrivalClasses, rolePolicies])
+
+  const createSimulationBpmnModel = useCallback(() => {
+    const model = createBpmnModel()
+    return {
+      ...model,
+      // The simulation engine executes control flow only. Keep this
+      // normalization at its execution boundary so validation and XML export
+      // retain the persisted BPMN flow type.
+      flows: model.flows.map((flow) => ({
+        ...flow,
+        flowType: flow.flowType === 'message' ? 'sequence' : flow.flowType,
+      })),
+    }
+  }, [createBpmnModel])
 
   const bpmnIssues = useMemo(() => {
     const model = createBpmnModel()
@@ -620,7 +630,7 @@ export default function App() {
     bpmnRunTimersRef.current.forEach(window.clearTimeout)
     bpmnRunTimersRef.current = []
     try {
-      const result = JSON.parse(run_bpmn(JSON.stringify(createBpmnModel()))) as {
+      const result = JSON.parse(run_bpmn(JSON.stringify(createSimulationBpmnModel()))) as {
         completed: boolean
         tokenPath: string[]
         estimatedDurationMs: number
@@ -640,13 +650,13 @@ export default function App() {
       setBpmnRunSummary(null)
       showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-модель.', 'error')
     }
-  }, [createBpmnModel, showToast])
+  }, [createSimulationBpmnModel, showToast])
 
   const simulateBpmn = useCallback(() => {
     try {
       const runs = Number(simulationRuns)
       if (!Number.isInteger(runs) || runs < 1 || runs > 10000) throw new Error('Количество прогонов должно быть целым числом от 1 до 10000.')
-      const result = JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createBpmnModel()), simulationSeed, runs)) as BpmnSimulationResult
+      const result = JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createSimulationBpmnModel()), simulationSeed, runs)) as BpmnSimulationResult
       const seconds = (value: number) => `${(value / 1000).toFixed(1)}с`
       setBpmnSimulationResult(result)
       setBottleneckRole(result.roleUtilization[0]?.role ?? null)
@@ -656,7 +666,7 @@ export default function App() {
       setBottleneckRole(null)
       showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.', 'error')
     }
-  }, [createBpmnModel, simulationRuns, simulationSeed, showToast])
+  }, [createSimulationBpmnModel, simulationRuns, simulationSeed, showToast])
 
   useEffect(() => {
     if (!__MIROBOARD_DEBUG_HOOK__) return
@@ -664,12 +674,13 @@ export default function App() {
       version: __MIROBOARD_VERSION__,
       createBpmnModel,
       validateBpmn: () => JSON.parse(validate_bpmn(JSON.stringify(createBpmnModel()))),
-      runBpmn: () => JSON.parse(run_bpmn(JSON.stringify(createBpmnModel()))),
-      simulateBpmn: (seed, runs) => JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createBpmnModel()), String(seed), runs)) as BpmnSimulationResult,
+      exportBpmnXml: () => export_bpmn_xml(JSON.stringify(createBpmnModel())),
+      runBpmn: () => JSON.parse(run_bpmn(JSON.stringify(createSimulationBpmnModel()))),
+      simulateBpmn: (seed, runs) => JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createSimulationBpmnModel()), String(seed), runs)) as BpmnSimulationResult,
       getElements: () => elements.map((element) => ({ ...element, points: element.points?.map((point) => ({ ...point })), bpmnFlow: element.bpmnFlow && { ...element.bpmnFlow } })),
     }
     return () => { delete window.__MIROBOARD_DEBUG__ }
-  }, [createBpmnModel, elements])
+  }, [createBpmnModel, createSimulationBpmnModel, elements])
 
   const importFromBpmn = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
