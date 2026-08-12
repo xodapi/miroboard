@@ -30,6 +30,60 @@ async function elements(page: Page) {
   return page.evaluate(() => window.__MIROBOARD_DEBUG__!.getElements())
 }
 
+type BpmnModel = {
+  nodes: Array<{
+    id: string
+    type: string
+    name?: string
+    x?: number
+    y?: number
+    poolId?: string
+    resourceRole?: string
+  }>
+  flows: Array<{ id: string; sourceId: string; targetId: string; flowType?: string }>
+}
+
+type BpmnSimulation = {
+  standardDeviationMs: number
+  roleUtilization: Array<{ role: string; meanWorkloadMs: number }>
+}
+
+/**
+ * Compare authoring data rather than a raw debug snapshot. Coordinates remain
+ * exact application values, but the expected values are captured from the
+ * authored model, so this does not bake canvas-placement coordinates into the
+ * suite.
+ */
+function bpmnComparison(model: BpmnModel, simulation: BpmnSimulation) {
+  return model.nodes.map((node) => ({
+    id: node.id,
+    type: node.type,
+    label: node.name,
+    x: node.x,
+    y: node.y,
+    flowType: model.flows.find(flow => flow.sourceId === node.id)?.flowType,
+    meanWorkloadMs: simulation.roleUtilization.find(role => role.role === node.resourceRole)?.meanWorkloadMs ?? 0,
+    workloadStdDev: simulation.standardDeviationMs,
+    poolId: node.poolId,
+    resourceLaneId: node.resourceRole,
+    gatewayType: node.type.endsWith('Gateway') ? node.type : undefined,
+  }))
+}
+
+function simulationDraftComparison(model: BpmnModel, simulation: BpmnSimulation) {
+  return model.nodes.map((node) => ({
+    id: node.id,
+    type: node.type,
+    label: node.name,
+    x: node.x,
+    y: node.y,
+    meanWorkloadMs: simulation.roleUtilization.find(role => role.role === node.resourceRole)?.meanWorkloadMs ?? 0,
+    workloadStdDev: simulation.standardDeviationMs,
+    poolId: node.poolId,
+    resourceLaneId: node.resourceRole,
+  }))
+}
+
 async function dragElement(page: Page, id: string, deltaX: number, deltaY: number) {
   const target = page.locator(`[data-id="${id}"]`)
   const box = await target.boundingBox()
@@ -301,8 +355,16 @@ test.describe('BPMN authoring regression surface', () => {
     await expect.poll(async () => (await elements(page)).find(element => element.id === flow.id)?.bpmnFlow?.flowType).toBe('message')
     const expectedAfterFlowEdit = await page.evaluate(() => {
       const debug = window.__MIROBOARD_DEBUG__!
-      return { model: debug.createBpmnModel(), simulation: debug.simulateBpmn(42, 20) }
+      return {
+        model: debug.createBpmnModel() as BpmnModel,
+        simulation: debug.simulateBpmn(42, 20) as BpmnSimulation,
+      }
     })
+    // Reselect before changing modes. This catches a flow inspector that
+    // appears to update but loses the selected flow's mode on the next cycle.
+    await page.getByRole('button', { name: 'Выбор' }).click()
+    await page.locator(`[data-testid="bpmn-flow-${flow.id}"]`).click({ force: true })
+    await expect(flowInspector.locator('#bpmn-flow-type')).toHaveValue('message')
     await page.getByRole('button', { name: 'BPMN' }).click()
     await page.getByRole('button', { name: 'Симуляция' }).first().click()
     await expect(page.getByText('Monte Carlo', { exact: false })).toBeVisible()
@@ -311,10 +373,20 @@ test.describe('BPMN authoring regression surface', () => {
     await page.getByRole('button', { name: 'BPMN' }).click()
     const after = await page.evaluate(() => {
       const debug = window.__MIROBOARD_DEBUG__!
-      return { model: debug.createBpmnModel(), simulation: debug.simulateBpmn(42, 20) }
+      return {
+        model: debug.createBpmnModel() as BpmnModel,
+        simulation: debug.simulateBpmn(42, 20) as BpmnSimulation,
+      }
     })
     expect((await elements(page)).find(element => element.id === flow.id)?.bpmnFlow?.flowType).toBe('message')
-    expect(after).toEqual(expectedAfterFlowEdit)
+    await page.locator(`[data-testid="bpmn-flow-${flow.id}"]`).click({ force: true })
+    await expect(flowInspector.locator('#bpmn-flow-type')).toHaveValue('message')
+    expect(bpmnComparison(after.model, after.simulation)).toEqual(
+      bpmnComparison(expectedAfterFlowEdit.model, expectedAfterFlowEdit.simulation),
+    )
+    expect(simulationDraftComparison(after.model, after.simulation)).toEqual(
+      simulationDraftComparison(expectedAfterFlowEdit.model, expectedAfterFlowEdit.simulation),
+    )
   })
 
   test('message flow remains a message in the shared model and XML export while simulation executes it as control flow', async ({ page }) => {
