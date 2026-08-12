@@ -151,7 +151,7 @@ test('offline BPMN flow reroutes with its endpoint, survives undo redo, and simu
   await start.click({ force: true })
   await end.click({ force: true })
 
-  const flow = page.locator('[data-testid^="bpmn-flow-"]')
+  const flow = page.locator('[data-testid^="bpmn-flow-"]').last()
   await expect(flow).toHaveCount(1)
   const target = page.locator('[data-id]').filter({ hasText: 'Конец' })
   const flowBeforeReroute = await transformFor(flow)

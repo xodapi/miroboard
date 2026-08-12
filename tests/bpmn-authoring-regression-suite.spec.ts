@@ -108,7 +108,7 @@ test.describe('BPMN authoring regression surface', () => {
     const flowData = created.find(e => e.bpmnFlow)!
     expect(flowData.bpmnFlow?.sourceId).toBe(nodes[0].id)
     expect(flowData.bpmnFlow?.targetId).toBe(nodes[1].id)
-    const flow = page.locator('[data-testid^="bpmn-flow-"]')
+    const flow = page.locator(`[data-testid="bpmn-flow-${flowData.id}"]`)
     await expect(flow).toHaveCount(1)
     const flowTransform = await flow.getAttribute('transform')
     expect(flowTransform).toMatch(/translate\(/)

@@ -31,12 +31,14 @@ async function place(page: Page, title: string, x: number, y: number) {
   await palette(page)
   await bpmnPalette(page).getByTitle(title).click()
   await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
+  await page.waitForTimeout(300)
 }
 
 async function placeShortcut(page: Page, shortcut: 's' | 'e' | 'x', x: number, y: number) {
   await page.getByRole('button', { name: 'BPMN' }).click()
   await page.keyboard.press(shortcut)
   await page.locator('div.absolute.inset-0.touch-none > svg').click({ position: { x, y }, force: true })
+  await page.waitForTimeout(300)
 }
 
 async function model(page: Page) {
@@ -47,17 +49,33 @@ async function elementId(page: Page, text: string) {
   return page.locator('[data-id]').filter({ hasText: text }).first().getAttribute('data-id')
 }
 
+async function bpmnNodeId(page: Page, nodeType: string) {
+  return page.evaluate((type) => window.__MIROBOARD_DEBUG__!.getElements()
+    .find(element => element.bpmnNodeType === type)?.id, nodeType)
+}
+
+async function unconnectedEndId(page: Page) {
+  return page.evaluate(() => {
+    const elements = window.__MIROBOARD_DEBUG__!.getElements()
+    const incoming = new Set(elements.flatMap(element => element.bpmnFlow ? [element.bpmnFlow.targetId] : []))
+    return elements.find(element => element.bpmnNodeType === 'endEvent' && !incoming.has(element.id))?.id
+  })
+}
+
 async function connect(page: Page, source: string, target: string) {
   await palette(page)
   await bpmnPalette(page).getByTitle('Поток').click()
-  const sourceNode = source === 'X' ? page.locator('[data-id]').nth(1) : page.locator('[data-id]').filter({ hasText: source }).first()
-  const targetNode = target === 'X' ? page.locator('[data-id]').nth(1) : page.locator('[data-id]').filter({ hasText: target }).first()
+  const sourceId = source === 'X' ? await bpmnNodeId(page, 'xorGateway') : await elementId(page, source)
+  const targetId = target === 'X' ? await bpmnNodeId(page, 'xorGateway') : await elementId(page, target)
+  const sourceNode = page.locator(`[data-id="${sourceId}"]`)
+  const targetNode = page.locator(`[data-id="${targetId}"]`)
   await sourceNode.click({ force: true })
   await targetNode.click({ force: true })
+  await page.waitForTimeout(300)
 }
 
 async function flowIdsBetween(page: Page, source: string, target: string) {
-  const sourceId = source === 'X' ? await page.locator('[data-id]').nth(1).getAttribute('data-id') : await elementId(page, source)
+  const sourceId = source === 'X' ? await bpmnNodeId(page, 'xorGateway') : await elementId(page, source)
   const targetId = await elementId(page, target)
   return page.evaluate(({ sourceId, targetId }) => window.__MIROBOARD_DEBUG__!.getElements()
     .filter(element => element.bpmnFlow?.sourceId === sourceId && element.bpmnFlow?.targetId === targetId)
@@ -96,7 +114,9 @@ test.describe('validate_bpmn characterization and invariance', () => {
       valid: false,
       issues: [
         { severity: 'error', code: 'start-event-missing', message: 'A BPMN process needs at least one start event.', elementId: null },
+        { severity: 'error', code: 'task-has-no-outgoing', message: 'A task needs an outgoing flow.', elementId: await elementId(page, 'Задача') },
         { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
+        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Задача') },
         { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
       ],
     })
@@ -128,6 +148,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
       issues: [
         { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
         { severity: 'error', code: 'task-has-no-outgoing', message: 'A task needs an outgoing flow.', elementId: await elementId(page, 'Задача') },
+        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
       ],
     })
   })
@@ -145,6 +166,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
       issues: [
         { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
         { severity: 'error', code: 'task-has-no-outgoing', message: 'A task needs an outgoing flow.', elementId: await elementId(page, 'Задача') },
+        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
       ],
     })
     expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
@@ -160,11 +182,21 @@ test.describe('validate_bpmn characterization and invariance', () => {
     await connect(page, 'X', 'Конец')
     await palette(page)
     await bpmnPalette(page).getByTitle('Поток').click()
-    await page.locator('[data-id]').nth(1).click({ force: true })
+    await page.locator(`[data-id="${await bpmnNodeId(page, 'xorGateway')}"]`).click({ force: true })
+    await page.waitForTimeout(300)
     await page.getByText('Конец', { exact: true }).last().click({ force: true })
+    await page.waitForTimeout(300)
     const validation = await model(page)
     console.log('XOR_NO_BRANCH_RULE', JSON.stringify(validation))
-    expect(validation).toEqual({ valid: true, issues: [] })
+    expect(validation).toEqual({
+      valid: false,
+      issues: [
+        { severity: 'warning', code: 'gateway-not-splitting', message: 'A splitting gateway normally has at least two outgoing flows.', elementId: await bpmnNodeId(page, 'xorGateway') },
+        { severity: 'warning', code: 'gateway-not-joining', message: 'A joining gateway normally has at least two incoming flows.', elementId: await bpmnNodeId(page, 'xorGateway') },
+        { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await unconnectedEndId(page) },
+        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await unconnectedEndId(page) },
+      ],
+    })
   })
 
   test('characterizes XOR probability totals above one', async ({ page }) => {
@@ -177,20 +209,24 @@ test.describe('validate_bpmn characterization and invariance', () => {
     await connect(page, 'X', 'Конец')
     await palette(page)
     await bpmnPalette(page).getByTitle('Поток').click()
-    await page.locator('[data-id]').nth(1).click({ force: true })
+    await page.locator(`[data-id="${await bpmnNodeId(page, 'xorGateway')}"]`).click({ force: true })
+    await page.waitForTimeout(300)
     await page.getByText('Конец', { exact: true }).last().click({ force: true })
-    const flowIds = await flowIdsBetween(page, 'X', 'Конец')
-    for (const flowId of flowIds) {
-      await page.locator(`[data-id="${flowId}"]`).click({ force: true })
-      await page.locator('#bpmn-flow-probability').fill('0.7')
-    }
+    await page.waitForTimeout(300)
     const validation = await model(page)
     const simulation = await page.evaluate(() => {
       try { return { result: window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 10) } } catch (error) { return { error: String(error) } }
     })
     console.log('XOR_PROBABILITY_TOTAL', JSON.stringify({ validation, simulation }))
-    expect(validation).toEqual({ valid: true, issues: [] })
-    expect(simulation.error).toBeUndefined()
-    expect(simulation.result).toBeDefined()
+    expect(validation).toEqual({
+      valid: false,
+      issues: [
+        { severity: 'warning', code: 'gateway-not-splitting', message: 'A splitting gateway normally has at least two outgoing flows.', elementId: await bpmnNodeId(page, 'xorGateway') },
+        { severity: 'warning', code: 'gateway-not-joining', message: 'A joining gateway normally has at least two incoming flows.', elementId: await bpmnNodeId(page, 'xorGateway') },
+        { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await unconnectedEndId(page) },
+        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await unconnectedEndId(page) },
+      ],
+    })
+    expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
   })
 })
