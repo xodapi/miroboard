@@ -93,37 +93,44 @@ test.describe('BPMN simulation parameter surface', () => {
     })
   }
 
-  test('RELATIONAL: fixed seeds are bitwise reproducible and distinct seeds change stochastic output', async ({ page }) => {
+  test('RELATIONAL: fixed seeds converge bitwise while multiple distinct seeds change stochastic output', async ({ page }) => {
     await loadModule(page, 'batch-workload')
     await configureUniformDuration(page)
-    const [first42, second42, seed99] = await Promise.all([
+    const [first42, second42, seed99, seed7] = await Promise.all([
       sampleSimulation(page, 42, 1_000),
       sampleSimulation(page, 42, 1_000),
       sampleSimulation(page, 99, 1_000),
+      sampleSimulation(page, 7, 1_000),
     ])
 
     // A seeded PRNG must replay the complete observable result, not merely echo
-    // the requested seed. Exact equality intentionally proves bitwise convergence
-    // for token paths, unrounded timings, percentile metrics, and all other fields.
+    // the requested seed. Exact equality intentionally proves bitwise convergence:
+    // token paths, unrounded timings, percentile metrics, and every nested metric
+    // must all replay from the same deterministic random stream.
     expect(first42).toEqual(second42)
     expect(first42.tokenPath).toEqual(second42.tokenPath)
     expect(first42.simulation).toEqual(second42.simulation)
 
-    // A different seed samples a different deterministic stream. Time metrics use
-    // a ±1 ms measurement floor and probabilities use ±0.01, preventing formatting
-    // noise from counting as stochastic behaviour.
-    const timingChanged = [
-      'meanDurationMs',
-      'standardDeviationMs',
-      'p50DurationMs',
-      'p95DurationMs',
-    ].some((metric) => Math.abs(
-      Number(first42.simulation[metric]) - Number(seed99.simulation[metric]),
-    ) > TIME_TOLERANCE_MS)
-    const probabilityChanged = Math.abs(
-      (first42.simulation.onTimeRate ?? 0) - (seed99.simulation.onTimeRate ?? 0),
-    ) > PROBABILITY_TOLERANCE
-    expect(timingChanged || probabilityChanged || first42.tokenPath.join('|') !== seed99.tokenPath.join('|')).toBe(true)
+    // Different seeds sample different deterministic streams. A time delta must
+    // exceed ±1 ms and a probability delta ±0.01, so display rounding cannot
+    // masquerade as a stochastic effect. Checking two alternate seeds prevents a
+    // seed=42 versus seed=99-only special case from passing.
+    const differsBeyondTolerance = (candidate: SimulationSnapshot) => {
+      const timingChanged = [
+        'meanDurationMs',
+        'standardDeviationMs',
+        'p50DurationMs',
+        'p95DurationMs',
+      ].some((metric) => Math.abs(
+        Number(first42.simulation[metric]) - Number(candidate.simulation[metric]),
+      ) > TIME_TOLERANCE_MS)
+      const probabilityChanged = Math.abs(
+        (first42.simulation.onTimeRate ?? 0) - (candidate.simulation.onTimeRate ?? 0),
+      ) > PROBABILITY_TOLERANCE
+      return timingChanged || probabilityChanged || first42.tokenPath.join('|') !== candidate.tokenPath.join('|')
+    }
+    expect(differsBeyondTolerance(seed99)).toBe(true)
+    expect(differsBeyondTolerance(seed7)).toBe(true)
   })
 
   test('CHARACTERIZATION: leading-zero seed reaches BigInt as a string', async ({ page }) => {
@@ -150,18 +157,21 @@ test.describe('BPMN simulation parameter surface', () => {
     expect(thousand.simulation.runs).toBe(1_000)
     // A uniform 1–9 second task has non-zero variance. Ten observations are a
     // deliberately coarse sample, while 1,000 observations stabilise the mean and
-    // percentile spread. Requiring changes across at least two independent
-    // aggregates proves `runs` controls sampling behaviour, rather than output shape.
+    // percentile spread. Mean, variance (the square of the exposed standard
+    // deviation), and p95-p50 spread are independent aggregate evidence that
+    // `runs` controls sampling behaviour, rather than merely echoing metadata.
+    const variance = (result: Result) => result.standardDeviationMs ** 2
+    const percentileSpread = (result: Result) => result.p95DurationMs - result.p50DurationMs
     const aggregateDeltas = [
       Math.abs(ten.simulation.meanDurationMs - thousand.simulation.meanDurationMs),
-      Math.abs(ten.simulation.standardDeviationMs - thousand.simulation.standardDeviationMs),
-      Math.abs(ten.simulation.p50DurationMs - thousand.simulation.p50DurationMs),
-      Math.abs(ten.simulation.p95DurationMs - thousand.simulation.p95DurationMs),
+      Math.abs(variance(ten.simulation) - variance(thousand.simulation)),
+      Math.abs(percentileSpread(ten.simulation) - percentileSpread(thousand.simulation)),
     ]
+    // The explicit ±1 ms tolerance applies to completion-time measures. Variance
+    // is in ms², so its matching floor is (±1 ms)² = 1 ms².
     expect(aggregateDeltas.filter((delta) => delta > TIME_TOLERANCE_MS)).toHaveLength(aggregateDeltas.length)
     expect(thousand.simulation.standardDeviationMs).toBeGreaterThan(TIME_TOLERANCE_MS)
-    expect(thousand.simulation.p95DurationMs - thousand.simulation.p50DurationMs)
-      .toBeGreaterThan(TIME_TOLERANCE_MS)
+    expect(percentileSpread(thousand.simulation)).toBeGreaterThan(TIME_TOLERANCE_MS)
   })
 
   test('CHARACTERIZATION: duration distributions retain their characteristic spread', async ({ page }) => {
