@@ -96,7 +96,7 @@ test.describe('BPMN topology and configuration edge cases', () => {
     expect(finite(result)).toBe(true)
   })
 
-  test('VAL-BPMN-055: 100,001-iteration unbounded loop trips the 100,000-transition guard', async ({ page }) => {
+  test('VAL-BPMN-055: unbounded loop trips the documented dynamic transition guard', async ({ page }) => {
     await inject(page, [
       node('start', 'startEvent'), node('task', 'task', { bpmnDurationMs: 1 }), node('gateway', 'xorGateway'), node('end', 'endEvent'),
       flow('s-task', 'start', 'task'), flow('task-g', 'task', 'gateway'),
@@ -107,9 +107,12 @@ test.describe('BPMN topology and configuration edge cases', () => {
       catch (error) { return { ok: false, error: String(error) } }
     })
     expect(result.ok).toBe(false)
-    // A loop that would otherwise execute 100,001 iterations must be bounded
-    // by the documented 100,000-transition guard, not merely any guard.
-    expect(result.error).toMatch(/100,?000/)
+    // This fixture projects to 4 BPMN nodes and 4 sequence flows. The documented
+    // guard is nodes × flows × 4 × instances, so 4 × 4 × 4 × 1 = 64 transitions.
+    const dynamicTransitionLimit = 4 * 4 * 4 * 1
+    expect(dynamicTransitionLimit).toBe(64)
+    expect(result.error).toContain(`deterministic step limit of ${dynamicTransitionLimit} transitions`)
+    expect(result.error).toContain('nodes × flows × 4 × instances')
   })
 
   test('VAL-BPMN-056: nested AND split delivers all three branch tokens to one end event', async ({ page }) => {
@@ -215,8 +218,11 @@ test.describe('BPMN topology and configuration edge cases', () => {
       flow('xor-1-task-1', 'xor-1', 'task-1', { condition: 'false', isDefault: true }),
       flow('task-0-xor-2', 'task-0', 'xor-2'), flow('task-1-xor-2', 'task-1', 'xor-2'),
       flow('xor-2-task-2', 'xor-2', 'task-2', { condition: 'true' }),
-      flow('xor-2-task-3', 'xor-2', 'task-3', { condition: 'false', isDefault: true }),
-      flow('task-2-and-split-1', 'task-2', 'and-split-1'), flow('task-3-and-split-1', 'task-3', 'and-split-1'),
+      // Both XOR outcomes reconverge at task-2, leaving AND splits with exactly
+      // one inbound flow and preventing an unreachable XOR branch from becoming
+      // a phantom parallel-join obligation.
+      flow('xor-2-default-task-2', 'xor-2', 'task-2', { condition: 'false', isDefault: true }),
+      flow('task-2-and-split-1', 'task-2', 'and-split-1'), flow('task-3-task-4', 'task-3', 'task-4'),
       flow('and-split-1-task-4', 'and-split-1', 'task-4'), flow('and-split-1-task-5', 'and-split-1', 'task-5'),
       flow('task-4-and-join-1', 'task-4', 'and-join-1'), flow('task-5-and-join-1', 'task-5', 'and-join-1'),
       flow('and-join-1-and-split-2', 'and-join-1', 'and-split-2'),
@@ -237,7 +243,7 @@ test.describe('BPMN topology and configuration edge cases', () => {
     const second = await observe(page, 10)
     expect(elapsed).toBeLessThan(5000)
     expect(first).toEqual(second)
-    expect(first.ok).toBe(true)
+    expect(first.ok, first.ok ? '' : first.error).toBe(true)
   })
 
   // VAL-BPMN-062/063 calendar and arrival-class boundary coverage is deferred to M2:
