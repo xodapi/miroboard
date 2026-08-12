@@ -387,6 +387,12 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
     for node in &model.nodes {
         let inbound = incoming.get(node.id.as_str()).map_or(0, Vec::len);
         let outbound = outgoing.get(node.id.as_str()).map_or(0, Vec::len);
+        let sequence_outbound = outgoing
+            .get(node.id.as_str())
+            .into_iter()
+            .flatten()
+            .filter(|flow| flow.flow_type == BpmnFlowType::Sequence)
+            .count();
         match node.node_type {
             BpmnNodeType::StartEvent => {
                 if inbound > 0 {
@@ -416,6 +422,15 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
                     result.error(
                         "end-event-has-no-incoming",
                         "An end event needs an incoming flow.",
+                        Some(&node.id),
+                    );
+                }
+            }
+            BpmnNodeType::Task | BpmnNodeType::ServiceTask | BpmnNodeType::UserTask => {
+                if sequence_outbound == 0 {
+                    result.error(
+                        "task-has-no-outgoing",
+                        "A task needs an outgoing flow.",
                         Some(&node.id),
                     );
                 }
@@ -2079,6 +2094,26 @@ mod tests {
 
         assert!(result.contains("implicit-split-unsupported"));
         assert!(result.contains(r#""valid":false"#));
+    }
+
+    #[test]
+    fn rejects_tasks_without_outgoing_sequence_flow() {
+        let result = validate_bpmn(
+            r#"{
+              "nodes":[
+                {"id":"start","type":"startEvent"},
+                {"id":"task","type":"task"},
+                {"id":"end","type":"endEvent"}
+              ],
+              "flows":[
+                {"id":"f1","sourceId":"start","targetId":"task"}
+              ]
+            }"#,
+        );
+
+        assert!(result.contains(r#""code":"task-has-no-outgoing""#));
+        assert!(result.contains(r#""message":"A task needs an outgoing flow.""#));
+        assert!(result.contains(r#""elementId":"task""#));
     }
 
     #[test]
