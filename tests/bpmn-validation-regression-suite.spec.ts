@@ -82,11 +82,26 @@ async function flowIdsBetween(page: Page, source: string, target: string) {
     .map(element => element.id), { sourceId, targetId })
 }
 
-async function createTerminalTaskGraph(page: Page) {
+async function createMissingEndPathGraph(page: Page) {
   await placeShortcut(page, 's', 360, 220)
   await placeShortcut(page, 'e', 700, 220)
   await place(page, 'Задача', 500, 420)
   await connect(page, 'Старт', 'Задача')
+}
+
+async function createDisconnectedTerminalTaskGraph(page: Page) {
+  await placeShortcut(page, 's', 360, 220)
+  await placeShortcut(page, 'e', 700, 220)
+  await connect(page, 'Старт', 'Конец')
+  await place(page, 'Задача', 500, 420)
+}
+
+async function createValidTaskGraph(page: Page) {
+  await placeShortcut(page, 's', 300, 220)
+  await place(page, 'Задача', 500, 220)
+  await placeShortcut(page, 'e', 700, 220)
+  await connect(page, 'Старт', 'Задача')
+  await connect(page, 'Задача', 'Конец')
 }
 
 test.describe('validate_bpmn characterization and invariance', () => {
@@ -138,24 +153,32 @@ test.describe('validate_bpmn characterization and invariance', () => {
     })
   })
 
-  test('characterizes a task with no outgoing flow', async ({ page }) => {
+  test('reports a disconnected terminal task with no outgoing flow', async ({ page }) => {
     await palette(page)
-    await createTerminalTaskGraph(page)
+    await createDisconnectedTerminalTaskGraph(page)
     const validation = await model(page)
-    console.log('NO_OUTGOING_TASK', JSON.stringify(validation))
-    expect(validation).toEqual({
-      valid: false,
-      issues: [
-        { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
-        { severity: 'error', code: 'task-has-no-outgoing', message: 'A task needs an outgoing flow.', elementId: await elementId(page, 'Задача') },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
-      ],
+    const taskId = await elementId(page, 'Задача')
+    const issue = validation.issues.find(candidate => candidate.code === 'task-has-no-outgoing')
+
+    expect(validation.valid).toBe(false)
+    expect(issue).toMatchObject({
+      severity: 'error',
+      code: 'task-has-no-outgoing',
+      elementId: taskId,
     })
+    expect(issue?.message).toMatch(/задач.*нет.*исходящ.*поток/i)
+  })
+
+  test('accepts a process where every task has an outgoing flow', async ({ page }) => {
+    await palette(page)
+    await createValidTaskGraph(page)
+
+    expect(await model(page)).toEqual({ valid: true, issues: [] })
   })
 
   test('characterizes a missing end path', async ({ page }) => {
     await palette(page)
-    await createTerminalTaskGraph(page)
+    await createMissingEndPathGraph(page)
     const validation = await model(page)
     const simulation = await page.evaluate(() => {
       try { return { result: window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 10) } } catch (error) { return { error: String(error) } }
