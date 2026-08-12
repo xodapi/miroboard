@@ -57,7 +57,7 @@ test.describe('BPMN topology and configuration edge cases', () => {
     await inject(page, [])
     const result = await observe(page)
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('validation errors')
+    expect(result.error).toContain('ошибки проверки')
     expect(finite(result)).toBe(true)
   })
 
@@ -111,8 +111,8 @@ test.describe('BPMN topology and configuration edge cases', () => {
     // guard is nodes × flows × 4 × instances, so 4 × 4 × 4 × 1 = 64 transitions.
     const dynamicTransitionLimit = 4 * 4 * 4 * 1
     expect(dynamicTransitionLimit).toBe(64)
-    expect(result.error).toContain(`deterministic step limit of ${dynamicTransitionLimit} transitions`)
-    expect(result.error).toContain('nodes × flows × 4 × instances')
+    expect(result.error).toContain(`детерминированный лимит в ${dynamicTransitionLimit} переходов`)
+    expect(result.error).toContain('узлы × потоки × 4 × экземпляры')
   })
 
   test('VAL-BPMN-056: nested AND split delivers all three branch tokens to one end event', async ({ page }) => {

@@ -10,7 +10,7 @@ const MAX_RESOURCE_CAPACITY: u32 = 1_000;
 const MAX_ARRIVAL_INTERVAL_MS: u64 = 86_400_000 * 30;
 fn bpmn_loop_guard_error(step_limit: usize) -> String {
     format!(
-        "The BPMN runner exceeded its deterministic step limit of {} transitions (derived from nodes × flows × 4 × instances). Add a terminating branch or use simulation controls.",
+        "Исполнитель BPMN превысил детерминированный лимит в {} переходов (узлы × потоки × 4 × экземпляры). Добавьте завершающую ветвь или используйте параметры симуляции.",
         step_limit
     )
 }
@@ -713,7 +713,7 @@ fn select_flow<'a>(
 
 fn parse_and_validate_bpmn(model_json: &str) -> Result<BpmnModel, JsValue> {
     let model: BpmnModel = serde_json::from_str(model_json)
-        .map_err(|error| JsValue::from_str(&format!("Could not parse BPMN model JSON: {error}")))?;
+        .map_err(|error| JsValue::from_str(&format!("Не удалось разобрать JSON модели BPMN: {error}")))?;
     let validation = validate_bpmn_model(&model);
     let errors: Vec<&BpmnIssue> = validation
         .issues
@@ -722,7 +722,7 @@ fn parse_and_validate_bpmn(model_json: &str) -> Result<BpmnModel, JsValue> {
         .collect();
     if !errors.is_empty() {
         return Err(JsValue::from_str(
-            "Cannot run BPMN model until validation errors are resolved.",
+            "Невозможно запустить модель BPMN, пока не устранены ошибки проверки.",
         ));
     }
     Ok(model)
@@ -794,7 +794,7 @@ fn run_bpmn_batch(
         .nodes
         .iter()
         .find(|node| node.node_type == BpmnNodeType::StartEvent)
-        .ok_or_else(|| JsValue::from_str("Cannot run BPMN model without a start event."))?;
+        .ok_or_else(|| JsValue::from_str("Невозможно запустить модель BPMN без стартового события."))?;
     let role_registry: HashMap<&str, &ResourceRole> = model
         .resource_roles
         .iter()
@@ -860,7 +860,7 @@ fn run_bpmn_batch(
                 });
             }
             return Err(JsValue::from_str(
-                "A parallel gateway is waiting for tokens from unfinished branches.",
+                "Параллельный шлюз ожидает токены из незавершённых ветвей.",
             ));
         }
 
@@ -913,7 +913,7 @@ fn run_bpmn_batch(
         token_path.push(current_id.to_owned());
         let current = nodes_by_id
             .get(current_id)
-            .ok_or_else(|| JsValue::from_str("Token reached a missing BPMN node."))?;
+            .ok_or_else(|| JsValue::from_str("Токен достиг отсутствующего узла BPMN."))?;
         let sampled_duration_ms = sampled_duration_ms(current, random_state);
         let mut task_start_ms = calendar_start(model, arrived_at_ms);
         if let Some(role_name) = current
@@ -967,7 +967,7 @@ fn run_bpmn_batch(
             continue;
         }
         let flows = outgoing.get(current_id).ok_or_else(|| {
-            JsValue::from_str("The token reached a node without an outgoing sequence flow.")
+            JsValue::from_str("Токен достиг узла без исходящего потока последовательности.")
         })?;
         if current.node_type == BpmnNodeType::AndGateway
             && incoming.get(current_id).map_or(0, Vec::len) > 1
@@ -1058,7 +1058,7 @@ pub fn run_bpmn(model_json: &str) -> Result<String, JsValue> {
         role_waiting_ms: batch.role_waiting_ms,
     };
     serde_json::to_string(&result)
-        .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN run: {error}")))
+        .map_err(|error| JsValue::from_str(&format!("Не удалось сериализовать выполнение BPMN: {error}")))
 }
 
 #[derive(Debug, Serialize)]
@@ -1160,7 +1160,7 @@ pub fn simulate_bpmn(model_json: &str, seed: u64, runs: u32) -> Result<String, J
 /// zero is meaningful input, so it must not be normalized through BigInt.
 #[wasm_bindgen]
 pub fn simulate_bpmn_seed_string(model_json: &str, seed: &str, runs: u32) -> Result<String, JsValue> {
-    let parsed = seed.parse::<u64>().map_err(|_| JsValue::from_str("Seed must be a non-negative integer."))?;
+    let parsed = seed.parse::<u64>().map_err(|_| JsValue::from_str("Начальное значение должно быть неотрицательным целым числом."))?;
     let effective = if seed == parsed.to_string() {
         parsed
     } else {
@@ -1176,7 +1176,7 @@ pub fn simulate_bpmn_seed_string(model_json: &str, seed: &str, runs: u32) -> Res
 fn simulate_bpmn_with_seed(model_json: &str, result_seed: u64, runs: u32, seed: u64) -> Result<String, JsValue> {
     if runs == 0 || runs > 10_000 {
         return Err(JsValue::from_str(
-            "Simulation runs must be between 1 and 10000.",
+            "Количество запусков симуляции должно быть от 1 до 10000.",
         ));
     }
     let model = parse_and_validate_bpmn(model_json)?;
@@ -1316,7 +1316,7 @@ fn simulate_bpmn_with_seed(model_json: &str, result_seed: u64, runs: u32, seed: 
         on_time_rate,
     };
     serde_json::to_string(&result)
-        .map_err(|error| JsValue::from_str(&format!("Could not serialize BPMN simulation: {error}")))
+        .map_err(|error| JsValue::from_str(&format!("Не удалось сериализовать симуляцию BPMN: {error}")))
 }
 
 fn escape_xml(value: &str) -> String {
@@ -1380,9 +1380,9 @@ fn miro_node_attributes(node: &BpmnNode) -> String {
 
 fn miro_process_attributes(model: &BpmnModel) -> Result<String, JsValue> {
     let arrival_classes = serde_json::to_string(&model.arrival_classes)
-        .map_err(|error| JsValue::from_str(&format!("Could not serialize arrival classes: {error}")))?;
+        .map_err(|error| JsValue::from_str(&format!("Не удалось сериализовать классы поступления: {error}")))?;
     let resource_roles = serde_json::to_string(&model.resource_roles)
-        .map_err(|error| JsValue::from_str(&format!("Could not serialize resource roles: {error}")))?;
+        .map_err(|error| JsValue::from_str(&format!("Не удалось сериализовать роли ресурсов: {error}")))?;
     let mut attributes = format!(
         r#" miro:simulationInstances="{}" miro:arrivalIntervalMs="{}" miro:arrivalClasses="{}" miro:resourceRoles="{}""#,
         model.simulation_instances,
@@ -1407,7 +1407,7 @@ fn miro_process_attributes(model: &BpmnModel) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
     let model: BpmnModel = serde_json::from_str(model_json)
-        .map_err(|error| JsValue::from_str(&format!("Could not parse BPMN model JSON: {error}")))?;
+        .map_err(|error| JsValue::from_str(&format!("Не удалось разобрать JSON модели BPMN: {error}")))?;
     let validation = validate_bpmn_model(&model);
     let errors: Vec<&BpmnIssue> = validation
         .issues
@@ -1421,7 +1421,7 @@ pub fn export_bpmn_xml(model_json: &str) -> Result<String, JsValue> {
             .collect::<Vec<_>>()
             .join(" ");
         return Err(JsValue::from_str(&format!(
-            "Cannot export an invalid BPMN model: {messages}"
+            "Невозможно экспортировать некорректную модель BPMN: {messages}"
         )));
     }
 
@@ -1584,7 +1584,7 @@ fn imported_node_type(tag: &str) -> Option<BpmnNodeType> {
 
 fn local_xml_name(name: &[u8]) -> Result<&str, JsValue> {
     let raw = std::str::from_utf8(name)
-        .map_err(|error| JsValue::from_str(&format!("Invalid XML element name: {error}")))?;
+        .map_err(|error| JsValue::from_str(&format!("Некорректное имя XML-элемента: {error}")))?;
     Ok(raw.rsplit(':').next().unwrap_or(raw))
 }
 
@@ -1643,7 +1643,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                     let value = attribute
                         .decode_and_unescape_value(reader.decoder())
                         .map_err(|error| {
-                            JsValue::from_str(&format!("Invalid XML attribute: {error}"))
+                            JsValue::from_str(&format!("Некорректный XML-атрибут: {error}"))
                         })?
                         .into_owned();
                     match key {
@@ -1707,7 +1707,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                     }
                 } else if let Some(node_type) = imported_node_type(tag) {
                     let id = id.ok_or_else(|| {
-                        JsValue::from_str(&format!("BPMN {tag} is missing required id attribute."))
+                        JsValue::from_str(&format!("У элемента BPMN {tag} отсутствует обязательный атрибут id."))
                     })?;
                     let node_index = nodes.len();
                     node_index_by_id.insert(id.clone(), node_index);
@@ -1735,13 +1735,13 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
                     });
                 } else if matches!(tag, "sequenceFlow" | "messageFlow") {
                     let id = id.ok_or_else(|| {
-                        JsValue::from_str(&format!("BPMN {tag} is missing required id attribute."))
+                        JsValue::from_str(&format!("У элемента BPMN {tag} отсутствует обязательный атрибут id."))
                     })?;
                     let source_id = source_id.ok_or_else(|| {
-                        JsValue::from_str(&format!("BPMN flow '{id}' is missing sourceRef."))
+                        JsValue::from_str(&format!("У потока BPMN '{id}' отсутствует sourceRef."))
                     })?;
                     let target_id = target_id.ok_or_else(|| {
-                        JsValue::from_str(&format!("BPMN flow '{id}' is missing targetRef."))
+                        JsValue::from_str(&format!("У потока BPMN '{id}' отсутствует targetRef."))
                     })?;
                     let flow_index = flows.len();
                     flow_index_by_id.insert(id.clone(), flow_index);
@@ -1768,7 +1768,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
             Ok(Event::Text(text)) if active_condition_flow.is_some() => {
                 let decoded = text
                     .unescape()
-                    .map_err(|error| JsValue::from_str(&format!("Invalid BPMN condition text: {error}")))?;
+                    .map_err(|error| JsValue::from_str(&format!("Некорректный текст условия BPMN: {error}")))?;
                 condition_text.push_str(&decoded);
             }
             Ok(Event::End(element)) => {
@@ -1790,7 +1790,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
             Ok(Event::Eof) => break,
             Err(error) => {
                 return Err(JsValue::from_str(&format!(
-                    "Could not parse BPMN XML: {error}"
+                    "Не удалось разобрать XML BPMN: {error}"
                 )));
             }
             _ => {}
@@ -1800,7 +1800,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
 
     if nodes.is_empty() {
         return Err(JsValue::from_str(
-            "No supported BPMN nodes were found in the XML file.",
+            "В XML-файле не найдены поддерживаемые узлы BPMN.",
         ));
     }
 
@@ -1811,7 +1811,7 @@ pub fn import_bpmn_xml(xml: &str) -> Result<String, JsValue> {
     }
 
     serde_json::to_string(&BpmnModel { nodes, flows, sla_target_ms, calendar_work_start_ms, calendar_work_end_ms, simulation_instances, arrival_interval_ms, arrival_classes, resource_roles })
-        .map_err(|error| JsValue::from_str(&format!("Could not serialize imported BPMN: {error}")))
+        .map_err(|error| JsValue::from_str(&format!("Не удалось сериализовать импортированную модель BPMN: {error}")))
 }
 
 #[cfg(test)]
@@ -2039,8 +2039,8 @@ mod tests {
 
     #[test]
     fn loop_guard_error_reports_the_runtime_derived_bound() {
-        assert!(bpmn_loop_guard_error(123).contains("123 transitions"));
-        assert!(bpmn_loop_guard_error(123).contains("nodes × flows × 4 × instances"));
+        assert!(bpmn_loop_guard_error(123).contains("123 переходов"));
+        assert!(bpmn_loop_guard_error(123).contains("узлы × потоки × 4 × экземпляры"));
     }
 
     #[test]

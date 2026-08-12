@@ -135,7 +135,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
         { severity: 'warning', code: 'node-unreachable', message: 'Этот узел BPMN недостижим ни из одного стартового события.', elementId: await elementId(page, 'Конец') },
       ],
     })
-    expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
+    expect(simulation.error).toBe('Невозможно запустить модель BPMN, пока не устранены ошибки проверки.')
   })
 
   test('characterizes a task with no incoming flow', async ({ page }) => {
@@ -192,7 +192,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
         { severity: 'warning', code: 'node-unreachable', message: 'Этот узел BPMN недостижим ни из одного стартового события.', elementId: await elementId(page, 'Конец') },
       ],
     })
-    expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
+    expect(simulation.error).toBe('Невозможно запустить модель BPMN, пока не устранены ошибки проверки.')
   })
 
   test('characterizes XOR flows with no conditions or default', async ({ page }) => {
@@ -246,6 +246,6 @@ test.describe('validate_bpmn characterization and invariance', () => {
         { severity: 'error', code: 'xor-probability-sum', message: 'Сумма вероятностей потоков последовательности XOR не может превышать 1.', elementId: 'xor' },
       ],
     })
-    expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
+    expect(simulation.error).toBe('Невозможно запустить модель BPMN, пока не устранены ошибки проверки.')
   })
 })
