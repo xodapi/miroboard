@@ -128,11 +128,11 @@ test.describe('validate_bpmn characterization and invariance', () => {
     expect(validation).toEqual({
       valid: false,
       issues: [
-        { severity: 'error', code: 'start-event-missing', message: 'A BPMN process needs at least one start event.', elementId: null },
-        { severity: 'error', code: 'task-has-no-outgoing', message: 'A task needs an outgoing flow.', elementId: await elementId(page, 'Задача') },
-        { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Задача') },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
+        { severity: 'error', code: 'start-event-missing', message: 'Процесс BPMN должен содержать хотя бы одно стартовое событие.', elementId: null },
+        { severity: 'error', code: 'task-has-no-outgoing', message: 'У задачи нет исходящего потока.', elementId: await elementId(page, 'Задача') },
+        { severity: 'error', code: 'end-event-has-no-incoming', message: 'У конечного события должен быть входящий поток.', elementId: await elementId(page, 'Конец') },
+        { severity: 'warning', code: 'node-unreachable', message: 'Этот узел BPMN недостижим ни из одного стартового события.', elementId: await elementId(page, 'Задача') },
+        { severity: 'warning', code: 'node-unreachable', message: 'Этот узел BPMN недостижим ни из одного стартового события.', elementId: await elementId(page, 'Конец') },
       ],
     })
     expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
@@ -149,7 +149,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
     console.log('NO_INCOMING_TASK', JSON.stringify(validation))
     expect(validation).toEqual({
       valid: true,
-      issues: [{ severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Задача') }],
+      issues: [{ severity: 'warning', code: 'node-unreachable', message: 'Этот узел BPMN недостижим ни из одного стартового события.', elementId: await elementId(page, 'Задача') }],
     })
   })
 
@@ -187,9 +187,9 @@ test.describe('validate_bpmn characterization and invariance', () => {
     expect(validation).toEqual({
       valid: false,
       issues: [
-        { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await elementId(page, 'Конец') },
-        { severity: 'error', code: 'task-has-no-outgoing', message: 'A task needs an outgoing flow.', elementId: await elementId(page, 'Задача') },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await elementId(page, 'Конец') },
+        { severity: 'error', code: 'end-event-has-no-incoming', message: 'У конечного события должен быть входящий поток.', elementId: await elementId(page, 'Конец') },
+        { severity: 'error', code: 'task-has-no-outgoing', message: 'У задачи нет исходящего потока.', elementId: await elementId(page, 'Задача') },
+        { severity: 'warning', code: 'node-unreachable', message: 'Этот узел BPMN недостижим ни из одного стартового события.', elementId: await elementId(page, 'Конец') },
       ],
     })
     expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
@@ -214,10 +214,10 @@ test.describe('validate_bpmn characterization and invariance', () => {
     expect(validation).toEqual({
       valid: false,
       issues: [
-        { severity: 'warning', code: 'gateway-not-splitting', message: 'A splitting gateway normally has at least two outgoing flows.', elementId: await bpmnNodeId(page, 'xorGateway') },
-        { severity: 'warning', code: 'gateway-not-joining', message: 'A joining gateway normally has at least two incoming flows.', elementId: await bpmnNodeId(page, 'xorGateway') },
-        { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await unconnectedEndId(page) },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await unconnectedEndId(page) },
+        { severity: 'warning', code: 'gateway-not-splitting', message: 'У разделяющего шлюза обычно есть не менее двух исходящих потоков.', elementId: await bpmnNodeId(page, 'xorGateway') },
+        { severity: 'warning', code: 'gateway-not-joining', message: 'У объединяющего шлюза обычно есть не менее двух входящих потоков.', elementId: await bpmnNodeId(page, 'xorGateway') },
+        { severity: 'error', code: 'end-event-has-no-incoming', message: 'У конечного события должен быть входящий поток.', elementId: await unconnectedEndId(page) },
+        { severity: 'warning', code: 'node-unreachable', message: 'Этот узел BPMN недостижим ни из одного стартового события.', elementId: await unconnectedEndId(page) },
       ],
     })
   })
@@ -243,7 +243,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
     expect(validation).toEqual({
       valid: false,
       issues: [
-        { severity: 'error', code: 'xor-probability-sum', message: 'XOR sequence-flow probabilities cannot sum to more than 1.', elementId: 'xor' },
+        { severity: 'error', code: 'xor-probability-sum', message: 'Сумма вероятностей потоков последовательности XOR не может превышать 1.', elementId: 'xor' },
       ],
     })
     expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')

@@ -232,28 +232,28 @@ impl BpmnValidationResult {
 fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
     let mut result = BpmnValidationResult::new();
     if model.nodes.len() > MAX_BPMN_NODES {
-        result.error("model-too-large", "BPMN model contains too many nodes.", None);
+        result.error("model-too-large", "Модель BPMN содержит слишком много узлов.", None);
     }
     if model.flows.len() > MAX_BPMN_FLOWS {
-        result.error("model-too-large", "BPMN model contains too many flows.", None);
+        result.error("model-too-large", "Модель BPMN содержит слишком много потоков.", None);
     }
     if model.arrival_interval_ms > MAX_ARRIVAL_INTERVAL_MS {
-        result.error("arrival-interval-invalid", "Arrival interval is too large.", None);
+        result.error("arrival-interval-invalid", "Интервал поступления слишком велик.", None);
     }
     let class_instances = model.arrival_classes.iter().map(|class| class.count as u64).sum::<u64>();
     if class_instances > 1_000 || model.arrival_classes.iter().any(|class| class.count == 0 || class.interval_ms > MAX_ARRIVAL_INTERVAL_MS) {
-        result.error("arrival-classes-invalid", "Arrival classes must have 1..1000 total instances and bounded intervals.", None);
+        result.error("arrival-classes-invalid", "Классы поступления должны содержать от 1 до 1000 экземпляров и ограниченные интервалы.", None);
     }
     match (model.calendar_work_start_ms, model.calendar_work_end_ms) {
         (Some(start), Some(end)) if start < end && end <= 86_400_000 => {}
         (Some(_), Some(_)) => result.error(
             "calendar-range-invalid",
-            "Calendar work window must satisfy 0 <= start < end <= 24 hours.",
+            "Рабочее окно календаря должно удовлетворять условию 0 <= начало < конец <= 24 часов.",
             None,
         ),
         (Some(_), None) | (None, Some(_)) => result.error(
             "calendar-range-incomplete",
-            "Calendar work start and end must be provided together.",
+            "Начало и конец рабочего окна календаря должны быть указаны вместе.",
             None,
         ),
         (None, None) => {}
@@ -262,7 +262,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
     if model.simulation_instances == 0 || model.simulation_instances > 1_000 {
         result.error(
             "simulation-instances-invalid",
-            "Simulation instances must be between 1 and 1000.",
+            "Количество экземпляров симуляции должно быть от 1 до 1000.",
             None,
         );
     }
@@ -271,23 +271,23 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
 
     for node in &model.nodes {
         if node.id.trim().is_empty() {
-            result.error("node-id-empty", "BPMN node ID cannot be empty.", None);
+            result.error("node-id-empty", "Идентификатор узла BPMN не может быть пустым.", None);
         } else if !node_ids.insert(node.id.as_str()) {
             result.error(
                 "node-id-duplicate",
-                format!("Node '{}' appears more than once.", node.id),
+                format!("Узел '{}' указан более одного раза.", node.id),
                 Some(&node.id),
             );
         }
         if node.resource_capacity.is_some_and(|capacity| capacity == 0 || capacity > MAX_RESOURCE_CAPACITY) {
-            result.error("resource-capacity-invalid", "Resource capacity must be between 1 and 1000.", Some(&node.id));
+            result.error("resource-capacity-invalid", "Вместимость ресурса должна быть от 1 до 1000.", Some(&node.id));
         }
         if node.duration_ms.is_some_and(|duration| duration > MAX_DURATION_MS)
             || node.duration_min_ms.is_some_and(|duration| duration > MAX_DURATION_MS)
             || node.duration_mode_ms.is_some_and(|duration| duration > MAX_DURATION_MS)
             || node.duration_max_ms.is_some_and(|duration| duration > MAX_DURATION_MS)
         {
-            result.error("duration-too-large", "Task duration must not exceed 30 days.", Some(&node.id));
+            result.error("duration-too-large", "Длительность задачи не должна превышать 30 дней.", Some(&node.id));
         }
         if node.duration_distribution != BpmnDurationDistribution::Fixed {
             let min = node.duration_min_ms;
@@ -295,7 +295,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
             if min.is_none() || max.is_none() || min > max {
                 result.error(
                     "duration-range-invalid",
-                    "Duration distributions require minDurationMs and maxDurationMs with min less than or equal to max.",
+                    "Для распределения длительности нужны minDurationMs и maxDurationMs, где минимум не больше максимума.",
                     Some(&node.id),
                 );
             } else if node.duration_distribution == BpmnDurationDistribution::Triangular
@@ -303,7 +303,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
             {
                 result.error(
                     "duration-mode-invalid",
-                    "Triangular duration distributions require modeDurationMs inside the min/max range.",
+                    "Для треугольного распределения длительности modeDurationMs должен находиться в диапазоне min/max.",
                     Some(&node.id),
                 );
             }
@@ -311,7 +311,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
         if node.cost_per_hour.is_some_and(|cost| !cost.is_finite() || cost < 0.0) {
             result.error(
                 "cost-per-hour-invalid",
-                "Cost per hour must be a finite non-negative value.",
+                "Стоимость за час должна быть конечным неотрицательным значением.",
                 Some(&node.id),
             );
         }
@@ -322,11 +322,11 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
     let mut outgoing: HashMap<&str, Vec<&BpmnFlow>> = HashMap::new();
     for flow in &model.flows {
         if flow.id.trim().is_empty() {
-            result.error("flow-id-empty", "BPMN flow ID cannot be empty.", None);
+            result.error("flow-id-empty", "Идентификатор потока BPMN не может быть пустым.", None);
         } else if !flow_ids.insert(flow.id.as_str()) {
             result.error(
                 "flow-id-duplicate",
-                format!("Flow '{}' appears more than once.", flow.id),
+                format!("Поток '{}' указан более одного раза.", flow.id),
                 Some(&flow.id),
             );
         }
@@ -335,7 +335,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
             result.error(
                 "flow-source-missing",
                 format!(
-                    "Flow '{}' has no existing source '{}'.",
+                    "У потока '{}' нет существующего источника '{}'.",
                     flow.id, flow.source_id
                 ),
                 Some(&flow.id),
@@ -346,7 +346,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
             result.error(
                 "flow-target-missing",
                 format!(
-                    "Flow '{}' has no existing target '{}'.",
+                    "У потока '{}' нет существующей цели '{}'.",
                     flow.id, flow.target_id
                 ),
                 Some(&flow.id),
@@ -358,7 +358,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
             result.error(
                 "sequence-flow-crosses-pool",
                 format!(
-                    "Sequence flow '{}' crosses pools; use a message flow instead.",
+                    "Поток последовательности '{}' пересекает пулы, используйте вместо него поток сообщений.",
                     flow.id
                 ),
                 Some(&flow.id),
@@ -383,7 +383,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
     if starts.is_empty() {
         result.error(
             "start-event-missing",
-            "A BPMN process needs at least one start event.",
+            "Процесс BPMN должен содержать хотя бы одно стартовое событие.",
             None,
         );
     }
@@ -402,14 +402,14 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
                 if inbound > 0 {
                     result.error(
                         "start-event-has-incoming",
-                        "A start event cannot have incoming flow.",
+                        "У стартового события не может быть входящего потока.",
                         Some(&node.id),
                     );
                 }
                 if outbound == 0 {
                     result.error(
                         "start-event-has-no-outgoing",
-                        "A start event needs an outgoing flow.",
+                        "У стартового события должен быть исходящий поток.",
                         Some(&node.id),
                     );
                 }
@@ -418,14 +418,14 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
                 if outbound > 0 {
                     result.error(
                         "end-event-has-outgoing",
-                        "An end event cannot have outgoing flow.",
+                        "У конечного события не может быть исходящего потока.",
                         Some(&node.id),
                     );
                 }
                 if inbound == 0 {
                     result.error(
                         "end-event-has-no-incoming",
-                        "An end event needs an incoming flow.",
+                        "У конечного события должен быть входящий поток.",
                         Some(&node.id),
                     );
                 }
@@ -434,7 +434,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
                 if sequence_outbound == 0 {
                     result.error(
                         "task-has-no-outgoing",
-                        "A task needs an outgoing flow.",
+                        "У задачи нет исходящего потока.",
                         Some(&node.id),
                     );
                 }
@@ -443,14 +443,14 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
                 if inbound <= 1 && outbound < 2 {
                     result.warning(
                         "gateway-not-splitting",
-                        "A splitting gateway normally has at least two outgoing flows.",
+                        "У разделяющего шлюза обычно есть не менее двух исходящих потоков.",
                         Some(&node.id),
                     );
                 }
                 if outbound <= 1 && inbound < 2 {
                     result.warning(
                         "gateway-not-joining",
-                        "A joining gateway normally has at least two incoming flows.",
+                        "У объединяющего шлюза обычно есть не менее двух входящих потоков.",
                         Some(&node.id),
                     );
                 }
@@ -461,7 +461,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
         if node.node_type == BpmnNodeType::OrGateway {
             result.error(
                 "or-gateway-unsupported",
-                "Inclusive gateways are not supported by the deterministic runner. Use an XOR or AND gateway.",
+                "Включающие шлюзы не поддерживаются детерминированным исполнителем. Используйте шлюз XOR или AND.",
                 Some(&node.id),
             );
         }
@@ -473,7 +473,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
         {
             result.error(
                 "implicit-split-unsupported",
-                "Only XOR and AND gateways may have multiple outgoing sequence flows.",
+                "Только шлюзы XOR и AND могут иметь несколько исходящих потоков последовательности.",
                 Some(&node.id),
             );
         }
@@ -494,7 +494,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
             if defaults.len() > 1 {
                 result.error(
                     "xor-multiple-default-flows",
-                    "An XOR gateway can have only one default sequence flow.",
+                    "У шлюза XOR может быть только один поток последовательности по умолчанию.",
                     Some(&node.id),
                 );
             }
@@ -508,13 +508,13 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
             }) {
                 result.error(
                     "xor-probability-invalid",
-                    "XOR sequence-flow probabilities must be finite values from 0 to 1.",
+                    "Вероятности потоков последовательности XOR должны быть конечными значениями от 0 до 1.",
                     Some(&node.id),
                 );
             } else if probability_sum > 1.0 + f64::EPSILON {
                 result.error(
                     "xor-probability-sum",
-                    "XOR sequence-flow probabilities cannot sum to more than 1.",
+                    "Сумма вероятностей потоков последовательности XOR не может превышать 1.",
                     Some(&node.id),
                 );
             }
@@ -526,7 +526,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
         {
             result.warning(
                 "default-flow-non-xor",
-                "Default-flow selection is currently supported only for XOR gateways.",
+                "Выбор потока по умолчанию сейчас поддерживается только для шлюзов XOR.",
                 Some(&flow.id),
             );
         }
@@ -548,7 +548,7 @@ fn validate_bpmn_model(model: &BpmnModel) -> BpmnValidationResult {
         if !reachable.contains(node.id.as_str()) {
             result.warning(
                 "node-unreachable",
-                "This BPMN node is unreachable from every start event.",
+                "Этот узел BPMN недостижим ни из одного стартового события.",
                 Some(&node.id),
             );
         }
@@ -567,7 +567,7 @@ pub fn validate_bpmn(model_json: &str) -> String {
             let mut validation = BpmnValidationResult::new();
             validation.error(
                 "model-json-invalid",
-                format!("Could not parse BPMN model JSON: {error}"),
+                format!("Не удалось разобрать JSON модели BPMN: {error}"),
                 None,
             );
             validation
@@ -2124,7 +2124,7 @@ mod tests {
         );
 
         assert!(result.contains(r#""code":"task-has-no-outgoing""#));
-        assert!(result.contains(r#""message":"A task needs an outgoing flow.""#));
+        assert!(result.contains(r#""message":"У задачи нет исходящего потока.""#));
         assert!(result.contains(r#""elementId":"task""#));
     }
 
