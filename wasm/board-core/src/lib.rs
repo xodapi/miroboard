@@ -1185,6 +1185,13 @@ fn simulate_bpmn_with_seed(model_json: &str, result_seed: u64, runs: u32, seed: 
     let mut role_workloads: BTreeMap<String, u128> = BTreeMap::new();
     let mut role_capacities: BTreeMap<String, u32> = BTreeMap::new();
     let mut role_waiting: BTreeMap<String, u128> = BTreeMap::new();
+    // Include explicitly configured roles even when no task uses them. Roles
+    // inferred only from task execution are still inserted by batch aggregation.
+    for role in &model.resource_roles {
+        role_workloads.entry(role.name.clone()).or_default();
+        role_capacities.entry(role.name.clone()).or_insert(role.capacity);
+        role_waiting.entry(role.name.clone()).or_default();
+    }
     
     // Build the instance schedule from arrival classes, or fall back to the legacy
     // single-class mode driven by `simulationInstances` / `arrivalIntervalMs`.
@@ -2499,5 +2506,40 @@ mod tests {
             fifo["roleUtilization"][0]["meanWaitingMs"],
             priority["roleUtilization"][0]["meanWaitingMs"]
         );
+    }
+
+    #[test]
+    fn reports_configured_roles_without_assigned_task_work() {
+        let model = r#"{
+          "resourceRoles":[
+            {"name":"idle-a","capacity":2,"queuePolicy":"fifo"},
+            {"name":"idle-b","capacity":3,"queuePolicy":"priority"}
+          ],
+          "nodes":[
+            {"id":"start","type":"startEvent"},
+            {"id":"end","type":"endEvent"}
+          ],
+          "flows":[
+            {"id":"f1","sourceId":"start","targetId":"end"}
+          ]
+        }"#;
+
+        let result = simulate_bpmn(model, 42, 10).expect("model should simulate");
+        let result: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
+        let roles = result["roleUtilization"]
+            .as_array()
+            .expect("role utilization is an array");
+
+        assert_eq!(roles.len(), 2);
+        for (name, capacity) in [("idle-a", 2), ("idle-b", 3)] {
+            let role = roles
+                .iter()
+                .find(|role| role["role"] == name)
+                .expect("configured role is reported");
+            assert_eq!(role["capacity"], capacity);
+            assert_eq!(role["meanWorkloadMs"], 0);
+            assert_eq!(role["meanWaitingMs"], 0);
+            assert_eq!(role["utilization"], 0.0);
+        }
     }
 }
