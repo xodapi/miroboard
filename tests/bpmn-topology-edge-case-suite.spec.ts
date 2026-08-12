@@ -7,6 +7,7 @@ type SimulationResult = {
   roleUtilization: Array<{ role: string; meanWaitingMs: number }>
   priorityClasses: Array<{ priority: number; instances: number; meanWaitingMs: number }>
 }
+type Run = { completed: boolean; tokenPath: string[] }
 
 const node = (id: string, bpmnNodeType: string, extra: Node = {}): Node => ({
   id, type: 'sticky', bpmnNodeType, x: 100, y: 100, w: 120, h: 70,
@@ -95,7 +96,7 @@ test.describe('BPMN topology and configuration edge cases', () => {
     expect(finite(result)).toBe(true)
   })
 
-  test('VAL-BPMN-055: unbounded loop trips the documented deterministic guard', async ({ page }) => {
+  test('VAL-BPMN-055: 100,001-iteration unbounded loop trips the 100,000-transition guard', async ({ page }) => {
     await inject(page, [
       node('start', 'startEvent'), node('task', 'task', { bpmnDurationMs: 1 }), node('gateway', 'xorGateway'), node('end', 'endEvent'),
       flow('s-task', 'start', 'task'), flow('task-g', 'task', 'gateway'),
@@ -106,13 +107,30 @@ test.describe('BPMN topology and configuration edge cases', () => {
       catch (error) { return { ok: false, error: String(error) } }
     })
     expect(result.ok).toBe(false)
-    // This topology has four nodes, four flows, and one instance. The runtime
-    // bound is therefore 4 × 4 × 4 × 1 = 64 transitions.
-    expect(result.error).toContain('deterministic step limit of 64 transitions')
-    expect(result.error).toContain('nodes × flows × 4 × instances')
+    // A loop that would otherwise execute 100,001 iterations must be bounded
+    // by the documented 100,000-transition guard, not merely any guard.
+    expect(result.error).toMatch(/100,?000/)
   })
 
-  test('VAL-BPMN-056/057: nested AND and XOR branch execution is deterministic', async ({ page }) => {
+  test('VAL-BPMN-056: nested AND split delivers all three branch tokens to one end event', async ({ page }) => {
+    const elements = [
+      node('start', 'startEvent'), node('and-1', 'andGateway'), node('and-2', 'andGateway'),
+      node('branch-a', 'task', { bpmnDurationMs: 100 }), node('branch-b', 'task', { bpmnDurationMs: 200 }),
+      node('branch-c', 'task', { bpmnDurationMs: 300 }), node('join', 'andGateway'), node('end', 'endEvent'),
+      flow('start-and-1', 'start', 'and-1'), flow('and-1-and-2', 'and-1', 'and-2'),
+      flow('and-1-a', 'and-1', 'branch-a'), flow('and-2-b', 'and-2', 'branch-b'),
+      flow('and-2-c', 'and-2', 'branch-c'), flow('a-join', 'branch-a', 'join'),
+      flow('b-join', 'branch-b', 'join'), flow('c-join', 'branch-c', 'join'), flow('join-end', 'join', 'end'),
+    ]
+    await inject(page, elements)
+    const run = (await page.evaluate(() => window.__MIROBOARD_DEBUG__!.runBpmn())) as Run
+    expect(run.completed).toBe(true)
+    expect(run.tokenPath.filter(id => id === 'branch-a' || id === 'branch-b' || id === 'branch-c')).toHaveLength(3)
+    expect(run.tokenPath.filter(id => id === 'join')).toHaveLength(3)
+    expect(run.tokenPath.filter(id => id === 'end')).toHaveLength(1)
+  })
+
+  test('VAL-BPMN-057: nested AND and XOR branch execution is deterministic', async ({ page }) => {
     const elements = [
       node('start', 'startEvent'), node('outer', 'andGateway'), node('left-xor', 'xorGateway'),
       node('right-xor', 'xorGateway'), node('a', 'task', { bpmnDurationMs: 1000 }), node('b', 'task', { bpmnDurationMs: 3000 }),
@@ -181,17 +199,49 @@ test.describe('BPMN topology and configuration edge cases', () => {
     expect(finite(result)).toBe(true)
   })
 
-  test('VAL-BPMN-061: a 100-task process completes and repeats identically', async ({ page }) => {
-    const tasks = Array.from({ length: 100 }, (_, i) => node(`task-${i}`, 'task', { bpmnDurationMs: i % 5 }))
-    await inject(page, linear(tasks))
+  test('VAL-BPMN-061: a 100-node process with XOR, AND, and resource lanes completes deterministically', async ({ page }) => {
+    const tasks = Array.from({ length: 92 }, (_, i) => node(`task-${i}`, 'task', {
+      bpmnDurationMs: (i % 5) + 1,
+      bpmnResourceRole: i % 2 === 0 ? 'ops' : 'qa',
+      bpmnResourceCapacity: 2,
+    }))
+    const elements = [
+      node('start', 'startEvent'), node('xor-1', 'xorGateway'), node('xor-2', 'xorGateway'),
+      node('and-split-1', 'andGateway'), node('and-join-1', 'andGateway'),
+      node('and-split-2', 'andGateway'), node('and-join-2', 'andGateway'), node('end', 'endEvent'),
+      ...tasks,
+      flow('start-xor-1', 'start', 'xor-1'),
+      flow('xor-1-task-0', 'xor-1', 'task-0', { condition: 'true' }),
+      flow('xor-1-task-1', 'xor-1', 'task-1', { condition: 'false', isDefault: true }),
+      flow('task-0-xor-2', 'task-0', 'xor-2'), flow('task-1-xor-2', 'task-1', 'xor-2'),
+      flow('xor-2-task-2', 'xor-2', 'task-2', { condition: 'true' }),
+      flow('xor-2-task-3', 'xor-2', 'task-3', { condition: 'false', isDefault: true }),
+      flow('task-2-and-split-1', 'task-2', 'and-split-1'), flow('task-3-and-split-1', 'task-3', 'and-split-1'),
+      flow('and-split-1-task-4', 'and-split-1', 'task-4'), flow('and-split-1-task-5', 'and-split-1', 'task-5'),
+      flow('task-4-and-join-1', 'task-4', 'and-join-1'), flow('task-5-and-join-1', 'task-5', 'and-join-1'),
+      flow('and-join-1-and-split-2', 'and-join-1', 'and-split-2'),
+      flow('and-split-2-task-6', 'and-split-2', 'task-6'), flow('and-split-2-task-7', 'and-split-2', 'task-7'),
+      flow('task-6-and-join-2', 'task-6', 'and-join-2'), flow('task-7-and-join-2', 'task-7', 'and-join-2'),
+      flow('and-join-2-task-8', 'and-join-2', 'task-8'),
+      ...tasks.slice(8, -1).map((task, i) => flow(`tail-${i}`, String(task.id), String(tasks[i + 9]?.id))),
+      flow('tail-end', 'task-91', 'end'),
+    ]
+    expect(elements.filter(element => element.bpmnNodeType).length).toBe(100)
+    expect(elements.filter(element => element.bpmnNodeType === 'xorGateway')).toHaveLength(2)
+    expect(elements.filter(element => element.bpmnNodeType === 'andGateway')).toHaveLength(4)
+    expect(new Set(tasks.map(task => task.bpmnResourceRole))).toEqual(new Set(['ops', 'qa']))
+    await inject(page, elements)
     const started = Date.now()
     const first = await observe(page, 10)
     const elapsed = Date.now() - started
     const second = await observe(page, 10)
     expect(elapsed).toBeLessThan(5000)
     expect(first).toEqual(second)
+    expect(first.ok).toBe(true)
   })
 
+  // VAL-BPMN-062/063 calendar and arrival-class boundary coverage is deferred to M2:
+  // the M1 topology suite remains focused on deterministic graph execution.
   test('VAL-BPMN-062/063: calendar and arrival-class boundary configurations are stable', async ({ page }) => {
     await inject(page, linear([node('task', 'task', {
       bpmnDurationMs: 1000, bpmnResourceRole: 'arrival-worker', bpmnResourceCapacity: 1,
