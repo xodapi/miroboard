@@ -19,6 +19,14 @@ type Result = Record<string, unknown> & {
   priorityClasses: Array<{ priority: number; instances: number; meanWaitingMs: number }>
 }
 
+type SimulationSnapshot = {
+  tokenPath: string[]
+  simulation: Result
+}
+
+const TIME_TOLERANCE_MS = 1
+const PROBABILITY_TOLERANCE = 0.01
+
 async function loadModule(page: Page, name: string) {
   const fixture = JSON.parse(readFileSync(join(process.cwd(), 'examples', `${name}.json`), 'utf8')) as { title: string }
   await page.getByRole('button', { name: 'Примеры' }).click()
@@ -47,6 +55,27 @@ async function runScenario(page: Page): Promise<Result> {
   ) as Promise<Result>
 }
 
+async function configureUniformDuration(page: Page) {
+  await page.getByText('Обработать заявку', { exact: true }).click({ force: true })
+  const task = page.getByText('Свойства задачи').locator('xpath=..')
+  await task.locator('select').first().selectOption('uniform')
+  await task.getByText('Min', { exact: true }).locator('input').fill('1')
+  await task.getByText('Max', { exact: true }).locator('input').fill('9')
+  // Inspector updates React state asynchronously. The debug hook deliberately
+  // reads that state, so wait before sampling the stochastic engine.
+  await page.waitForTimeout(300)
+}
+
+async function sampleSimulation(page: Page, seed: number, runs: number): Promise<SimulationSnapshot> {
+  return page.evaluate(({ seedValue, runCount }) => {
+    const hook = window.__MIROBOARD_DEBUG__!
+    return {
+      tokenPath: hook.runBpmn().tokenPath,
+      simulation: hook.simulateBpmn(seedValue, runCount),
+    }
+  }, { seedValue: seed, runCount: runs }) as Promise<SimulationSnapshot>
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('miro-onboarding-seen', 'true'))
   await page.goto('/')
@@ -64,14 +93,37 @@ test.describe('BPMN simulation parameter surface', () => {
     })
   }
 
-  test('RELATIONAL characterization: same seed is identical and another seed diverges', async ({ page }) => {
-    await loadModule(page, 'parallel-queue')
-    const values = await page.evaluate(() => {
-      const h = window.__MIROBOARD_DEBUG__!
-      return [h.simulateBpmn('42', 500), h.simulateBpmn('42', 500), h.simulateBpmn('43', 500)]
-    })
-    expect(values[0]).toEqual(values[1])
-    expect(values[2]).not.toEqual(values[0])
+  test('RELATIONAL: fixed seeds are bitwise reproducible and distinct seeds change stochastic output', async ({ page }) => {
+    await loadModule(page, 'batch-workload')
+    await configureUniformDuration(page)
+    const [first42, second42, seed99] = await Promise.all([
+      sampleSimulation(page, 42, 1_000),
+      sampleSimulation(page, 42, 1_000),
+      sampleSimulation(page, 99, 1_000),
+    ])
+
+    // A seeded PRNG must replay the complete observable result, not merely echo
+    // the requested seed. Exact equality intentionally proves bitwise convergence
+    // for token paths, unrounded timings, percentile metrics, and all other fields.
+    expect(first42).toEqual(second42)
+    expect(first42.tokenPath).toEqual(second42.tokenPath)
+    expect(first42.simulation).toEqual(second42.simulation)
+
+    // A different seed samples a different deterministic stream. Time metrics use
+    // a ±1 ms measurement floor and probabilities use ±0.01, preventing formatting
+    // noise from counting as stochastic behaviour.
+    const timingChanged = [
+      'meanDurationMs',
+      'standardDeviationMs',
+      'p50DurationMs',
+      'p95DurationMs',
+    ].some((metric) => Math.abs(
+      Number(first42.simulation[metric]) - Number(seed99.simulation[metric]),
+    ) > TIME_TOLERANCE_MS)
+    const probabilityChanged = Math.abs(
+      (first42.simulation.onTimeRate ?? 0) - (seed99.simulation.onTimeRate ?? 0),
+    ) > PROBABILITY_TOLERANCE
+    expect(timingChanged || probabilityChanged || first42.tokenPath.join('|') !== seed99.tokenPath.join('|')).toBe(true)
   })
 
   test('CHARACTERIZATION: leading-zero seed reaches BigInt as a string', async ({ page }) => {
@@ -86,30 +138,30 @@ test.describe('BPMN simulation parameter surface', () => {
     expect(values.large.runs).toBe(5)
   })
 
-  test('CHARACTERIZATION: increasing runs converge aggregate statistics', async ({ page }) => {
+  test('RELATIONAL: runs alter aggregate distribution statistics, not only echoed metadata', async ({ page }) => {
     await loadModule(page, 'batch-workload')
-    await page.getByText('Обработать заявку', { exact: true }).click({ force: true })
-    const task = page.getByText('Свойства задачи').locator('xpath=..')
-    await task.locator('select').first().selectOption('uniform')
-    await task.getByText('Min', { exact: true }).locator('input').fill('1')
-    await task.getByText('Max', { exact: true }).locator('input').fill('9')
-    const values = await page.evaluate(() => {
-      const hook = window.__MIROBOARD_DEBUG__!
-      return {
-        low: hook.simulateBpmn(42, 37),
-        medium: hook.simulateBpmn(42, 500),
-        reference: hook.simulateBpmn(42, 10_000),
-      }
-    }) as { low: Result; medium: Result; reference: Result }
-    expect(values.low.runs).toBe(37)
-    expect(values.medium.runs).toBe(500)
-    expect(values.reference.runs).toBe(10_000)
-    // Aggregate characterization: Uniform(1s, 9s) has an analytical mean of
-    // 5s. This prevents an implementation from merely echoing seed and runs.
-    expect(values.medium.meanDurationMs).toBeGreaterThanOrEqual(4_000)
-    expect(values.medium.meanDurationMs).toBeLessThanOrEqual(6_000)
-    expect(Math.abs(values.medium.meanDurationMs - values.reference.meanDurationMs))
-      .toBeLessThan(Math.abs(values.low.meanDurationMs - values.reference.meanDurationMs))
+    await configureUniformDuration(page)
+    const [ten, thousand] = await Promise.all([
+      sampleSimulation(page, 42, 10),
+      sampleSimulation(page, 42, 1_000),
+    ])
+
+    expect(ten.simulation.runs).toBe(10)
+    expect(thousand.simulation.runs).toBe(1_000)
+    // A uniform 1–9 second task has non-zero variance. Ten observations are a
+    // deliberately coarse sample, while 1,000 observations stabilise the mean and
+    // percentile spread. Requiring changes across at least two independent
+    // aggregates proves `runs` controls sampling behaviour, rather than output shape.
+    const aggregateDeltas = [
+      Math.abs(ten.simulation.meanDurationMs - thousand.simulation.meanDurationMs),
+      Math.abs(ten.simulation.standardDeviationMs - thousand.simulation.standardDeviationMs),
+      Math.abs(ten.simulation.p50DurationMs - thousand.simulation.p50DurationMs),
+      Math.abs(ten.simulation.p95DurationMs - thousand.simulation.p95DurationMs),
+    ]
+    expect(aggregateDeltas.filter((delta) => delta > TIME_TOLERANCE_MS)).toHaveLength(aggregateDeltas.length)
+    expect(thousand.simulation.standardDeviationMs).toBeGreaterThan(TIME_TOLERANCE_MS)
+    expect(thousand.simulation.p95DurationMs - thousand.simulation.p50DurationMs)
+      .toBeGreaterThan(TIME_TOLERANCE_MS)
   })
 
   test('CHARACTERIZATION: duration distributions retain their characteristic spread', async ({ page }) => {
