@@ -137,7 +137,9 @@ test.describe('BPMN topology and configuration edge cases', () => {
     const simulation = (first as { result: SimulationResult }).result
     // The XOR conditions deterministically select a and c. Since those tasks
     // run in parallel, the AND join waits for the slower selected branch.
-    const branchPairDuration = Math.max(1_000, 500)
+    const selectedParallelBranchDurations = [1_000, 500]
+    const branchPairDuration = Math.max(...selectedParallelBranchDurations)
+    expect(branchPairDuration).toBe(1_000)
     expect(simulation.meanDurationMs).toBeGreaterThanOrEqual(branchPairDuration)
   })
 
