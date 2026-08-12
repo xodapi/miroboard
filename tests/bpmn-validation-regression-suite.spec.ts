@@ -199,20 +199,19 @@ test.describe('validate_bpmn characterization and invariance', () => {
     })
   })
 
-  test('characterizes XOR probability totals above one', async ({ page }) => {
-    await palette(page)
-    await placeShortcut(page, 's', 320, 220)
-    await placeShortcut(page, 'x', 500, 220)
-    await placeShortcut(page, 'e', 700, 160)
-    await placeShortcut(page, 'e', 700, 340)
-    await connect(page, 'Старт', 'X')
-    await connect(page, 'X', 'Конец')
-    await palette(page)
-    await bpmnPalette(page).getByTitle('Поток').click()
-    await page.locator(`[data-id="${await bpmnNodeId(page, 'xorGateway')}"]`).click({ force: true })
-    await page.waitForTimeout(300)
-    await page.getByText('Конец', { exact: true }).last().click({ force: true })
-    await page.waitForTimeout(300)
+  test('reports XOR probability totals above one for two valid branches', async ({ page }) => {
+    const elements = [
+      { id: 'start', type: 'sticky', x: 40, y: 160, w: 78, h: 78, text: 'Старт', color: '#6BCB77', fill: '#6BCB77', createdBy: 'test', bpmnNodeType: 'startEvent' },
+      { id: 'xor', type: 'sticky', x: 180, y: 160, w: 78, h: 78, text: 'X', color: '#FFB020', fill: '#FFB020', createdBy: 'test', bpmnNodeType: 'xorGateway' },
+      { id: 'end-a', type: 'sticky', x: 360, y: 80, w: 78, h: 78, text: 'Конец A', color: '#FF5D5D', fill: '#FF5D5D', createdBy: 'test', bpmnNodeType: 'endEvent' },
+      { id: 'end-b', type: 'sticky', x: 360, y: 260, w: 78, h: 78, text: 'Конец B', color: '#FF5D5D', fill: '#FF5D5D', createdBy: 'test', bpmnNodeType: 'endEvent' },
+      { id: 'start-xor', type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: 'test', bpmnFlow: { sourceId: 'start', targetId: 'xor', flowType: 'sequence' } },
+      { id: 'xor-a', type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: 'test', bpmnFlow: { sourceId: 'xor', targetId: 'end-a', flowType: 'sequence', probability: 0.7 } },
+      { id: 'xor-b', type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: 'test', bpmnFlow: { sourceId: 'xor', targetId: 'end-b', flowType: 'sequence', probability: 0.7 } },
+    ]
+    await page.addInitScript((board) => localStorage.setItem('board-local', JSON.stringify(board)), elements)
+    await page.goto('/')
+    await expect.poll(() => page.evaluate(() => window.__MIROBOARD_DEBUG__?.getElements().length)).toBe(elements.length)
     const validation = await model(page)
     const simulation = await page.evaluate(() => {
       try { return { result: window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 10) } } catch (error) { return { error: String(error) } }
@@ -221,10 +220,7 @@ test.describe('validate_bpmn characterization and invariance', () => {
     expect(validation).toEqual({
       valid: false,
       issues: [
-        { severity: 'warning', code: 'gateway-not-splitting', message: 'A splitting gateway normally has at least two outgoing flows.', elementId: await bpmnNodeId(page, 'xorGateway') },
-        { severity: 'warning', code: 'gateway-not-joining', message: 'A joining gateway normally has at least two incoming flows.', elementId: await bpmnNodeId(page, 'xorGateway') },
-        { severity: 'error', code: 'end-event-has-no-incoming', message: 'An end event needs an incoming flow.', elementId: await unconnectedEndId(page) },
-        { severity: 'warning', code: 'node-unreachable', message: 'This BPMN node is unreachable from every start event.', elementId: await unconnectedEndId(page) },
+        { severity: 'error', code: 'xor-probability-sum', message: 'XOR sequence-flow probabilities cannot sum to more than 1.', elementId: 'xor' },
       ],
     })
     expect(simulation.error).toBe('Cannot run BPMN model until validation errors are resolved.')
