@@ -12,6 +12,19 @@ type Metrics = {
   onTimeRate: number | null
 }
 
+type BpmnModel = {
+  nodes: Array<{ type: string; resourceRole?: string }>
+  resourceRoles: Array<{ name: string; capacity: number; queuePolicy: 'fifo' | 'priority' }>
+}
+
+const UTILIZATION_TOLERANCE_PERCENTAGE_POINTS = 1e-9
+
+function expectUtilizationInvariant(role: Metrics['roleUtilization'][number], simulationDurationMs: number) {
+  const expectedPercentage = (role.meanWorkloadMs / (role.capacity * simulationDurationMs)) * 100
+  const actualPercentage = role.utilization * 100
+  expect(Math.abs(actualPercentage - expectedPercentage)).toBeLessThanOrEqual(UTILIZATION_TOLERANCE_PERCENTAGE_POINTS)
+}
+
 async function loadModule(page: Page, name: string) {
   const fixture = JSON.parse(readFileSync(join(process.cwd(), 'examples', `${name}.json`), 'utf8')) as { title: string }
   await page.getByRole('button', { name: 'Примеры' }).click()
@@ -126,12 +139,14 @@ test.describe('BPMN resource and cost metrics', () => {
     const constrainedRole = constrained.roleUtilization[0]
     expect(constrainedRole.utilization).toBeGreaterThan(0)
     expect(constrainedRole.meanWorkloadMs).toBeGreaterThan(0)
+    expectUtilizationInvariant(constrainedRole, constrained.meanDurationMs)
 
     await setRolePolicy(page, 'Оператор', 5, 'fifo')
     const moreCapacity = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 500)) as Metrics
     const moreCapacityRole = moreCapacity.roleUtilization[0]
     expect(moreCapacityRole.utilization).toBeLessThan(constrainedRole.utilization)
     expect(moreCapacityRole.meanWaitingMs).toBeLessThan(constrainedRole.meanWaitingMs)
+    expectUtilizationInvariant(moreCapacityRole, moreCapacity.meanDurationMs)
 
     await setBatchLoad(page, 1, 0)
     const lowerArrivalLoad = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 500)) as Metrics
@@ -139,27 +154,38 @@ test.describe('BPMN resource and cost metrics', () => {
     expect(lowerArrivalLoadRole.utilization).toBeLessThan(moreCapacityRole.utilization)
     // With capacity held at five, fewer arriving instances reduce both busy work and utilization.
     expect(lowerArrivalLoadRole.meanWorkloadMs).toBeLessThan(moreCapacityRole.meanWorkloadMs)
+    expectUtilizationInvariant(lowerArrivalLoadRole, lowerArrivalLoad.meanDurationMs)
   })
 
-  test('CHARACTERIZATION: configured role with no task work reports zero metrics', async ({ page }) => {
+  test('CHARACTERIZATION: defined roles with no assigned tasks report zero utilization', async ({ page }) => {
     await page.evaluate(() => {
       localStorage.setItem('board-local', JSON.stringify([
-        { id: 'start', type: 'sticky', x: 40, y: 120, w: 78, h: 78, text: 'Старт', color: '#6BCB77', fill: '#6BCB77', createdBy: 'test', bpmnNodeType: 'startEvent' },
-        { id: 'task', type: 'sticky', x: 180, y: 120, w: 176, h: 76, text: 'Работа', color: '#4D96FF', fill: '#4D96FF', createdBy: 'test', bpmnNodeType: 'task', bpmnDurationMs: 3000, bpmnResourceRole: 'Исполнитель', bpmnResourceCapacity: 1 },
-        // The role is configured through a non-task BPMN node, so it has no task workload.
-        { id: 'end', type: 'sticky', x: 440, y: 120, w: 78, h: 78, text: 'Конец', color: '#FF5D5D', fill: '#FF5D5D', createdBy: 'test', bpmnNodeType: 'endEvent', bpmnResourceRole: 'Незадействованный', bpmnResourceCapacity: 2 },
-        { id: 'f1', type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: 'test', bpmnFlow: { sourceId: 'start', targetId: 'task', flowType: 'sequence' } },
-        { id: 'f2', type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: 'test', bpmnFlow: { sourceId: 'task', targetId: 'end', flowType: 'sequence' } },
+        // Two role definitions live on events, never on tasks. This distinguishes
+        // zero assigned work from a role omitted because its task path was untaken.
+        { id: 'start', type: 'sticky', x: 40, y: 120, w: 78, h: 78, text: 'Старт', color: '#6BCB77', fill: '#6BCB77', createdBy: 'test', bpmnNodeType: 'startEvent', bpmnResourceRole: 'Незадействованный A', bpmnResourceCapacity: 2 },
+        { id: 'end', type: 'sticky', x: 440, y: 120, w: 78, h: 78, text: 'Конец', color: '#FF5D5D', fill: '#FF5D5D', createdBy: 'test', bpmnNodeType: 'endEvent', bpmnResourceRole: 'Незадействованный B', bpmnResourceCapacity: 3 },
+        { id: 'f1', type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: 'test', bpmnFlow: { sourceId: 'start', targetId: 'end', flowType: 'sequence' } },
       ]))
     })
     await page.reload()
-    await expect.poll(() => page.evaluate(() => window.__MIROBOARD_DEBUG__?.createBpmnModel().nodes.length ?? 0)).toBe(3)
+    await expect.poll(() => page.evaluate(() => (window.__MIROBOARD_DEBUG__?.createBpmnModel() as BpmnModel | undefined)?.nodes.length ?? 0)).toBe(2)
+    await setRolePolicy(page, 'Незадействованный A', 2, 'fifo')
+    await setRolePolicy(page, 'Незадействованный B', 3, 'fifo')
+    await page.waitForTimeout(200)
 
+    const model = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.createBpmnModel()) as BpmnModel
+    expect(model.nodes.filter((node) => node.type === 'task' && node.resourceRole).length).toBe(0)
+    expect(model.resourceRoles).toEqual([
+      { name: 'Незадействованный A', capacity: 2, queuePolicy: 'fifo' },
+      { name: 'Незадействованный B', capacity: 3, queuePolicy: 'fifo' },
+    ])
     const result = await page.evaluate(() => window.__MIROBOARD_DEBUG__!.simulateBpmn(42, 100)) as Metrics
-    const unusedRole = result.roleUtilization.find((role) => role.role === 'Незадействованный')
-    expect(unusedRole).toBeDefined()
-    expect(unusedRole!.utilization).toBe(0)
-    expect(unusedRole!.meanWorkloadMs).toBe(0)
+    for (const roleName of ['Незадействованный A', 'Незадействованный B']) {
+      const unusedRole = result.roleUtilization.find((role) => role.role === roleName)
+      expect(unusedRole).toBeDefined()
+      expect(Math.abs(unusedRole!.utilization * 100)).toBeLessThanOrEqual(UTILIZATION_TOLERANCE_PERCENTAGE_POINTS)
+      expect(Math.abs(unusedRole!.meanWorkloadMs)).toBeLessThanOrEqual(UTILIZATION_TOLERANCE_PERCENTAGE_POINTS)
+    }
   })
 
   test('RELATIONAL characterization: relieving one constrained role moves the bottleneck', async ({ page }) => {
