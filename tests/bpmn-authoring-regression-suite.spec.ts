@@ -334,12 +334,7 @@ test.describe('BPMN authoring regression surface', () => {
       await page.locator(`[data-id="${source.id}"]`).click({ force: true })
       await page.locator(`[data-id="${target.id}"]`).click({ force: true })
     }
-    await openBpmnPalette(page)
-    await bpmnPalette(page).getByTitle('Поток').click()
-    await page.locator(`[data-id="${start.id}"]`).click({ force: true })
-    await page.locator(`[data-id="${end.id}"]`).click({ force: true })
-
-    const flow = (await elements(page)).find(element => element.bpmnFlow?.sourceId === start.id && element.bpmnFlow.targetId === end.id)!
+    const flow = (await elements(page)).find(element => element.bpmnFlow?.sourceId === start.id && element.bpmnFlow.targetId === task.id)!
     await page.locator(`[data-testid="bpmn-flow-${flow.id}"]`).click({ force: true })
     await page.locator('#bpmn-flow-type').selectOption('message')
 
