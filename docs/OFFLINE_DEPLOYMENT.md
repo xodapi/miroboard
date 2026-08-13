@@ -24,14 +24,23 @@ Consequently `dist/index.html` contains the JavaScript, CSS, and WebAssembly
 payload inline. Do not split or rewrite the artifact: the offline guarantee
 depends on there being no runtime asset fetch.
 
-## Capability gaps
+## Legacy recovery-cache adoption
 
-The current M1 build does not yet implement portable `.mboard` save/open
-operations. Its persistence is limited to the browser's local IndexedDB
-recovery cache, so edits can be recovered in the same browser profile but
-cannot be exported or moved between machines through this build. File System
-Access and download/file-input workflows are planned for M3 and must not be
-assumed to be available in M1.
+On its first startup, MiroBoard copies recoverable boards from the old
+room-id-keyed browser stores into document-id-keyed recovery caches. The old
+IndexedDB stores and `localStorage['board-<roomId>']` values are never deleted.
+The adoption index prevents a stale old copy from overwriting later edits to
+the new document cache.
+
+Chromium can enumerate old IndexedDB database names, so it can discover every
+legacy room in that browser profile. Firefox does not implement
+`indexedDB.databases()`, so it can only discover the old room named by the
+current `?board=<roomId>` URL and any legacy localStorage fallback. To recover
+another Firefox legacy room, open the old URL once with its `?board=` value,
+then reopen MiroBoard. If that URL is unavailable, use Firefox Storage
+Inspector to locate the old IndexedDB database or `board-<roomId>` localStorage
+value, retain a copy, and open the board with `?board=<roomId>` to trigger the
+non-destructive adoption.
 
 Collaboration, shared cursors, accounts, and remote synchronization are not
 available in the air-gapped build. This package is tested on desktop Chromium;

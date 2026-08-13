@@ -10,6 +10,7 @@ import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
 import { attachRecoveryCache } from './persistence/indexeddb'
+import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/legacy-adoption'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
 import { deserialise, serialise } from './format/mboard'
 import type { DocHistory, DocMeta, ProfileConfig } from './format/types'
@@ -392,7 +393,7 @@ export default function App() {
     profileConfigRef.current = profileConfig
     if (!meta.has('id')) {
       ydoc.transact(() => {
-        meta.set('id', `doc_${genId()}`)
+        meta.set('id', legacyDocumentIdFromCurrentUrl() ?? `doc_${genId()}`)
         meta.set('createdAt', new Date().toISOString())
       }, RECOVERY_ORIGIN)
     }
@@ -435,6 +436,10 @@ export default function App() {
     const attachPersistence = async () => {
       const id = meta.get('id')
       if (typeof id !== 'string') return
+      // Copy old room-keyed recovery caches before attaching this document's
+      // cache. Adoption is fail-soft and runs after first paint in this effect.
+      await adoptLegacyRooms()
+      if (disposed) return
       const result = await attachRecoveryCache(id, ydoc)
       if (disposed) {
         result.persistence?.destroy()
