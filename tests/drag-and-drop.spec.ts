@@ -41,6 +41,26 @@ test('unsupported drop is rejected without changing the board', async ({ page })
   await expect(page.locator('svg g[data-id]')).toHaveCount(0)
 })
 
+test('dirty board defers a drop until the in-app guard discards it', async ({ page }) => {
+  const canvas = page.locator('[data-testid="canvas"]')
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
+  await expect(page.getByRole('status')).toHaveText('Не сохранено')
+
+  const transfer = await dataTransfer(page, [{ name: 'incoming.mboard', contents: fixture, type: 'application/json' }])
+  await canvas.dispatchEvent('drop', { dataTransfer: transfer })
+  const guard = page.getByRole('dialog', { name: 'Несохраненные изменения' })
+  await expect(guard).toBeVisible()
+  await guard.getByRole('button', { name: 'Отмена' }).click()
+  await expect(page.locator('svg g[data-id]')).toHaveCount(7)
+  await expect(page.getByRole('status')).toHaveText('Не сохранено')
+
+  await canvas.dispatchEvent('drop', { dataTransfer: transfer })
+  await guard.getByRole('button', { name: 'Не сохранять' }).click()
+  await expect(page.locator('svg g[data-id]')).toHaveCount(5)
+  await expect(page.getByRole('status')).toHaveText('Сохранено')
+})
+
 test('file drops on app chrome are prevented from navigating', async ({ page }) => {
   const transfer = await dataTransfer(page, [{ name: 'image.png', contents: 'not a board', type: 'image/png' }])
   const url = page.url()

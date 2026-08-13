@@ -4,9 +4,9 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
 import { useFileDrop } from './hooks/useFileDrop'
-import { loadDroppedBoard as loadDroppedDocument } from './persistence/drop'
 import { DropTargetCue } from './components/DropTargetCue'
-import { openDocument, saveDocument, type FileSession } from './persistence/files'
+import { openDocument, openDroppedDocument, saveDocument, type FileSession, type OpenOutcome } from './persistence/files'
+import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
 import { deserialise, serialise } from './format/mboard'
@@ -88,6 +88,7 @@ const STICKY_COLORS = [
 ]
 const EMOJIS = ['👍', '❤️', '⭐', '🔥', '💡', '✅', '❌', '🎯', '📌', '❓', '💪', '🎉', '🚀', '💯', '⚡', '🏆', '👀', '🤔', '💬', '🧠']
 type ContextMenuAction = 'edit' | 'duplicate' | 'front' | 'back' | 'delete'
+type PendingOpen = { proceed: () => Promise<void> }
 const CONTEXT_MENU_ITEMS: { label: string; action: ContextMenuAction; danger?: boolean }[] = [
   { label: '✏️ Редактировать', action: 'edit' },
   { label: '📋 Дублировать', action: 'duplicate' },
@@ -195,6 +196,7 @@ export default function App() {
   const [showMore, setShowMore] = useState(false)
   const [fileSession, setFileSession] = useState<FileSession>({ handle: null, name: null, isUntitled: true })
   const [isDirty, setIsDirty] = useState(false)
+  const [pendingOpen, setPendingOpen] = useState<PendingOpen | null>(null)
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [flowPreviewPoint, setFlowPreviewPoint] = useState<Point | null>(null)
   const [activeBpmnTokenId, setActiveBpmnTokenId] = useState<string | null>(null)
@@ -476,7 +478,7 @@ export default function App() {
     setWorkspaceMode('bpmn')
     setShowBpmnPalette(true)
   }, [bpmnProfileActive, ydoc])
-  const saveBoard = useCallback(async (mode: 'save' | 'saveAs') => {
+  const saveBoard = useCallback(async (mode: 'save' | 'saveAs'): Promise<boolean> => {
     const metaMap = ydoc.getMap<unknown>('meta')
     const metaId = metaMap.get('id')
     const metaTitle = metaMap.get('title')
@@ -510,11 +512,13 @@ export default function App() {
       })
       dirtyTrackerRef.current?.markSaved()
       showToast('Документ сохранён', 'success')
+      return true
     } else if (outcome.kind === 'cancelled') {
       showToast('Сохранение отменено', 'info')
     } else if (outcome.kind === 'failed') {
       showToast('Не удалось сохранить документ. Проверьте доступ к файлу.', 'error')
     }
+    return false
   }, [elements, fileSession, showToast, ydoc])
   const resetDocument = useCallback(() => {
     if (isDirty && !window.confirm('Несохраненные изменения будут потеряны. Продолжить?')) return
@@ -534,19 +538,7 @@ export default function App() {
     dirtyTrackerRef.current?.markSaved()
     showToast('Создан новый документ', 'success')
   }, [isDirty, showToast, ydoc])
-  const openBoard = useCallback(async () => {
-    if (isDirty && !window.confirm('Несохраненные изменения будут потеряны. Продолжить?')) return
-    const outcome = await openDocument()
-    if (outcome.kind === 'cancelled') return
-    if (outcome.kind === 'failed') {
-      const message = outcome.failure.kind === 'too-new'
-        ? `Документ использует схему v${outcome.failure.found}, поддерживается v${outcome.failure.supported}`
-        : outcome.failure.kind === 'not-mboard'
-          ? 'Файл не является документом .mboard'
-          : outcome.failure.errors[0] ?? 'Не удалось открыть документ .mboard'
-      showToast(message, 'error')
-      return
-    }
+  const applyOpenOutcome = useCallback((outcome: Extract<OpenOutcome, { kind: 'opened' }>) => {
     const loaded = deserialise(outcome.file)
     const meta = ydoc.getMap<unknown>('meta')
     const profileConfig = ydoc.getMap<unknown>('profileConfig')
@@ -561,22 +553,40 @@ export default function App() {
     setFileSession(outcome.session)
     setSelectedId(null)
     dirtyTrackerRef.current?.markSaved()
-    if (outcome.file.meta.title !== outcome.session.name) {
-      showToast(`Открыт документ «${outcome.session.name}»`, 'success')
-    }
-  }, [isDirty, showToast, ydoc])
+    showToast(`Открыт документ «${outcome.session.name}»`, 'success')
+  }, [showToast, ydoc])
+  const showOpenFailure = useCallback((outcome: Extract<OpenOutcome, { kind: 'failed' }>) => {
+    const message = outcome.failure.kind === 'too-new'
+      ? `Документ использует схему v${outcome.failure.found}, поддерживается v${outcome.failure.supported}`
+      : outcome.failure.kind === 'not-mboard'
+        ? 'Файл не является документом .mboard'
+        : outcome.failure.errors[0] ?? 'Не удалось открыть документ .mboard'
+    showToast(message, 'error')
+  }, [showToast])
+  const requestOpen = useCallback(async (proceed: () => Promise<void>) => {
+    if (isDirty) setPendingOpen({ proceed })
+    else await proceed()
+  }, [isDirty])
+  const openBoard = useCallback(async () => {
+    await requestOpen(async () => {
+      const outcome = await openDocument()
+      if (outcome.kind === 'opened') applyOpenOutcome(outcome)
+      else if (outcome.kind === 'failed') showOpenFailure(outcome)
+    })
+  }, [applyOpenOutcome, requestOpen, showOpenFailure])
   const loadDroppedBoard = useCallback(async (transfer: DataTransfer) => {
-    await loadDroppedDocument(
-      transfer, { ydoc, elements: yElements.current }, isDirty, dirtyTrackerRef.current,
-      () => window.confirm('Несохраненные изменения будут потеряны. Продолжить?'),
-      (session, ignoredFileCount) => {
-        setFileSession(session)
-        setSelectedId(null)
-        showToast(ignoredFileCount ? `Открыт первый .mboard, ещё файлов проигнорировано: ${ignoredFileCount}` : `Открыт документ «${session.name}»`, 'success')
-      },
-      () => showToast('Поддерживаются только документы .mboard', 'error'),
-    )
-  }, [isDirty, showToast, ydoc])
+    const outcome = await openDroppedDocument(transfer)
+    if (outcome.kind === 'cancelled') return
+    if (outcome.kind === 'failed') {
+      if (outcome.failure.kind === 'not-mboard') showToast('Поддерживаются только документы .mboard', 'error')
+      else showOpenFailure(outcome)
+      return
+    }
+    await requestOpen(async () => {
+      applyOpenOutcome(outcome)
+      if (outcome.ignoredFileCount) showToast(`Открыт первый .mboard, ещё файлов проигнорировано: ${outcome.ignoredFileCount}`, 'success')
+    })
+  }, [applyOpenOutcome, requestOpen, showOpenFailure, showToast])
   const { isDropTarget, onDragEnter, onDragOver, onDragLeave, onCanvasDrop } = useFileDrop(loadDroppedBoard)
 
   // ======================== HELPERS ========================
@@ -1751,6 +1761,26 @@ export default function App() {
         <div className={`absolute right-4 top-16 z-[60] max-w-sm rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${toast.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-violet-200 bg-violet-50 text-violet-800'}`} data-ui aria-live="polite">
           <div className="flex items-start gap-3"><span>{toast.tone === 'error' ? '!' : toast.tone === 'success' ? '✓' : 'i'}</span><span>{toast.message}</span><button onClick={() => setToast(null)} className="ml-auto text-base leading-none">×</button></div>
         </div>
+      )}
+
+      {pendingOpen && (
+        <UnsavedChangesDialog
+          onCancel={() => setPendingOpen(null)}
+          onDiscard={() => {
+            const pending = pendingOpen
+            setPendingOpen(null)
+            void pending.proceed()
+          }}
+          onSave={() => {
+            const pending = pendingOpen
+            void (async () => {
+              if (await saveBoard('save')) {
+                setPendingOpen(null)
+                await pending.proceed()
+              }
+            })()
+          }}
+        />
       )}
 
       {tourStep >= 0 && (
