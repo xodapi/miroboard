@@ -4,8 +4,8 @@
   "meta": {
     "id": "doc_bpmn",
     "title": "BPMN process",
-    "createdAt": "2026-08-13T00:00:00.000Z",
-    "updatedAt": "2026-08-13T00:00:00.000Z",
+    "createdAt": "2026-08-13T00:00:00Z",
+    "updatedAt": "2026-08-13T00:00:00Z",
     "createdWith": {
       "version": "0.16.0",
       "commit": "format-fixtures"
@@ -40,7 +40,8 @@
         "bpmn": {
           "nodeType": "startEvent"
         }
-      }
+      },
+      "order": 0
     },
     {
       "id": "bpmn-1",
@@ -71,7 +72,8 @@
           "resourceCapacity": 2,
           "priority": 1
         }
-      }
+      },
+      "order": 1
     },
     {
       "id": "bpmn-2",
@@ -97,7 +99,8 @@
         "bpmn": {
           "nodeType": "xorGateway"
         }
-      }
+      },
+      "order": 2
     },
     {
       "id": "bpmn-3",
@@ -123,7 +126,8 @@
         "bpmn": {
           "nodeType": "andGateway"
         }
-      }
+      },
+      "order": 3
     },
     {
       "id": "bpmn-4",
@@ -149,7 +153,8 @@
         "bpmn": {
           "nodeType": "orGateway"
         }
-      }
+      },
+      "order": 4
     },
     {
       "id": "bpmn-5",
@@ -175,7 +180,8 @@
         "bpmn": {
           "nodeType": "endEvent"
         }
-      }
+      },
+      "order": 5
     }
   ],
   "edges": [
@@ -199,7 +205,8 @@
         "bpmn": {
           "flowType": "sequence"
         }
-      }
+      },
+      "order": 6
     },
     {
       "id": "flow-1",
@@ -224,7 +231,8 @@
           "probability": 0.7,
           "isDefault": false
         }
-      }
+      },
+      "order": 7
     },
     {
       "id": "flow-2",
@@ -247,7 +255,8 @@
           "flowType": "sequence",
           "condition": "approved"
         }
-      }
+      },
+      "order": 8
     },
     {
       "id": "flow-3",
@@ -269,7 +278,8 @@
         "bpmn": {
           "flowType": "sequence"
         }
-      }
+      },
+      "order": 9
     },
     {
       "id": "flow-4",
@@ -291,7 +301,8 @@
         "bpmn": {
           "flowType": "sequence"
         }
-      }
+      },
+      "order": 10
     }
   ],
   "profileConfig": {

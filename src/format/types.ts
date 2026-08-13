@@ -45,6 +45,8 @@ export interface NodeContent {
 
 export interface DocNode {
   id: string
+  /** Original in-memory element index, used to restore rendering order on load. */
+  order: number
   kind: string
   parentId: string | null
   frame: Frame
@@ -68,6 +70,8 @@ export interface EdgeStyle {
 
 export interface DocEdge {
   id: string
+  /** Original in-memory element index, used to restore rendering order on load. */
+  order: number
   kind: string
   source: EndpointRef
   target: EndpointRef

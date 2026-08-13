@@ -4,8 +4,8 @@
   "meta": {
     "id": "doc_mixed",
     "title": "Mixed profiles",
-    "createdAt": "2026-08-13T00:00:00.000Z",
-    "updatedAt": "2026-08-13T00:00:00.000Z",
+    "createdAt": "2026-08-13T00:00:00Z",
+    "updatedAt": "2026-08-13T00:00:00Z",
     "createdWith": {
       "version": "0.16.0",
       "commit": "format-fixtures"
@@ -41,7 +41,8 @@
         "bpmn": {
           "nodeType": "startEvent"
         }
-      }
+      },
+      "order": 0
     },
     {
       "id": "bpmn-1",
@@ -72,7 +73,8 @@
           "resourceCapacity": 2,
           "priority": 1
         }
-      }
+      },
+      "order": 1
     },
     {
       "id": "annotation",
@@ -99,7 +101,8 @@
           "branch": "research",
           "collapsed": false
         }
-      }
+      },
+      "order": 2
     }
   ],
   "edges": [
@@ -123,7 +126,8 @@
         "bpmn": {
           "flowType": "sequence"
         }
-      }
+      },
+      "order": 3
     }
   ],
   "profileConfig": {

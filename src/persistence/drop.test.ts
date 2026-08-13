@@ -10,7 +10,7 @@ vi.mock('./files', () => ({ openDroppedDocument }))
 const file: MboardFile = {
   format: 'mboard', schemaVersion: 1,
   meta: { id: 'doc_drop', title: 'Dropped', createdAt: 'a', updatedAt: 'b', createdWith: { version: 'test', commit: 'test' }, profiles: ['core'] },
-  nodes: [{ id: 'sticky', kind: 'sticky', parentId: null, frame: { x: 1, y: 2, w: null, h: null, rotation: 0 }, z: 0, style: { color: '#fff', fill: null, stroke: null }, content: {}, profileData: {} }],
+  nodes: [{ id: 'sticky', order: 0, kind: 'sticky', parentId: null, frame: { x: 1, y: 2, w: null, h: null, rotation: 0 }, z: 0, style: { color: '#fff', fill: null, stroke: null }, content: {}, profileData: {} }],
   edges: [], profileConfig: {}, history: { yjsState: null, snapshots: [], retention: { keepAllNamed: true, keepLastAuto: 20, decayBucketsHours: [], maxSnapshots: 120, maxHistoryRatio: 3 } }, assets: {},
 }
 

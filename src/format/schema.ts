@@ -80,6 +80,7 @@ function validateNode(value: unknown, index: number, errors: string[]): void {
   const node = validateObject(value, path, errors)
   if (!node) return
   validateString(requireField(node, 'id', errors), `${path}.id`, errors)
+  validateNumber(requireField(node, 'order', errors), `${path}.order`, errors)
   validateString(requireField(node, 'kind', errors), `${path}.kind`, errors)
   const parentId = requireField(node, 'parentId', errors)
   if (parentId !== null && typeof parentId !== 'string') errors.push(`${path}.parentId must be a string or null`)
@@ -118,6 +119,7 @@ function validateEdge(value: unknown, index: number, errors: string[]): void {
   const edge = validateObject(value, path, errors)
   if (!edge) return
   validateString(requireField(edge, 'id', errors), `${path}.id`, errors)
+  validateNumber(requireField(edge, 'order', errors), `${path}.order`, errors)
   validateString(requireField(edge, 'kind', errors), `${path}.kind`, errors)
   validateEndpoint(requireField(edge, 'source', errors), `${path}.source`, errors)
   validateEndpoint(requireField(edge, 'target', errors), `${path}.target`, errors)

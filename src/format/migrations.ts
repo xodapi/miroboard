@@ -15,13 +15,27 @@ const v0ToV1: Migration = {
     profileConfig: doc.profileConfig ?? {},
     assets: doc.assets ?? {},
     nodes: Array.isArray(doc.nodes)
-      ? doc.nodes.map(node => (
-        node && typeof node === 'object' && !Array.isArray(node) && !('parentId' in node)
-          ? { ...(node as Record<string, unknown>), parentId: null }
-          : node
-      ))
+      ? doc.nodes.map((node, index) => addV1NodeFields(node, index))
       : doc.nodes,
+    edges: Array.isArray(doc.edges)
+      ? doc.edges.map((edge, index) => addOrder(edge, index))
+      : doc.edges,
   }),
+}
+
+function addV1NodeFields(node: unknown, index: number): unknown {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return node
+  const migrated = node as Record<string, unknown>
+  return {
+    ...migrated,
+    ...('parentId' in migrated ? {} : { parentId: null }),
+    ...('order' in migrated ? {} : { order: index }),
+  }
+}
+
+function addOrder(element: unknown, index: number): unknown {
+  if (!element || typeof element !== 'object' || Array.isArray(element) || 'order' in element) return element
+  return { ...(element as Record<string, unknown>), order: index }
 }
 
 /** Migrations are deliberately ordered and always move toward the current version. */

@@ -100,6 +100,7 @@
       "type": "object",
       "required": [
         "id",
+        "order",
         "kind",
         "parentId",
         "frame",
@@ -111,6 +112,9 @@
       "properties": {
         "id": {
           "type": "string"
+        },
+        "order": {
+          "type": "number"
         },
         "kind": {
           "type": "string"
@@ -226,6 +230,7 @@
       "type": "object",
       "required": [
         "id",
+        "order",
         "kind",
         "source",
         "target",
@@ -235,6 +240,9 @@
       "properties": {
         "id": {
           "type": "string"
+        },
+        "order": {
+          "type": "number"
         },
         "kind": {
           "type": "string"

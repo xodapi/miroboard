@@ -4,6 +4,7 @@
     {
       "id": "flow-start-task",
       "kind": "connector",
+      "order": 3,
       "profileData": {
         "bpmn": {
           "flowType": "sequence",
@@ -28,6 +29,7 @@
     {
       "id": "flow-task-end",
       "kind": "connector",
+      "order": 4,
       "profileData": {
         "bpmn": {
           "flowType": "sequence"
@@ -91,6 +93,7 @@
       },
       "id": "end",
       "kind": "circle",
+      "order": 2,
       "parentId": null,
       "profileData": {
         "bpmn": {
@@ -115,6 +118,7 @@
       },
       "id": "start",
       "kind": "circle",
+      "order": 0,
       "parentId": null,
       "profileData": {
         "bpmn": {
@@ -141,6 +145,7 @@
       },
       "id": "task",
       "kind": "sticky",
+      "order": 1,
       "parentId": null,
       "profileData": {
         "bpmn": {

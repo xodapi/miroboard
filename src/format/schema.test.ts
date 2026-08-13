@@ -14,6 +14,7 @@ const validDocument = () => ({
   },
   nodes: [{
     id: 'node-1',
+    order: 0,
     kind: 'sticky',
     parentId: null,
     frame: { x: 10, y: 20, w: 160, h: 120, rotation: 0 },
@@ -24,6 +25,7 @@ const validDocument = () => ({
   }],
   edges: [{
     id: 'edge-1',
+    order: 1,
     kind: 'connector',
     source: { nodeId: 'node-1', anchor: 'auto' },
     target: { nodeId: 'node-1', anchor: 'auto' },

@@ -18,7 +18,7 @@ describe('BPMN flow edge mapping', () => {
 
     expect(converted).toEqual({
       edge: {
-        id: 'flow-1', kind: 'connector',
+        id: 'flow-1', order: 0, kind: 'connector',
         source: { nodeId: 'task-a', anchor: 'auto' }, target: { nodeId: 'task-b', anchor: 'auto' },
         style: { color: '#000000', stroke: 2, arrowHead: 'triangle' },
         content: { label: 'approve' },

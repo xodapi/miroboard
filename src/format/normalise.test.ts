@@ -7,8 +7,8 @@ const file = (overrides: Partial<MboardFile> = {}): MboardFile => ({
   schemaVersion: 1,
   meta: { id: 'd', title: 't', createdAt: 'a', updatedAt: 'b', createdWith: { version: 'v', commit: 'c' }, profiles: ['core'] },
   nodes: [
-    { id: 'z', kind: 'sticky', parentId: null, frame: { x: 1.123456, y: 2.987654, w: null, h: null, rotation: 0 }, z: 0, style: { color: 'x', fill: null, stroke: null }, content: {}, profileData: {} },
-    { id: 'a', kind: 'sticky', parentId: null, frame: { x: -1.55555, y: 0, w: null, h: null, rotation: 0 }, z: 0, style: { color: 'x', fill: null, stroke: null }, content: {}, profileData: {} },
+    { id: 'z', order: 0, kind: 'sticky', parentId: null, frame: { x: 1.123456, y: 2.987654, w: null, h: null, rotation: 0 }, z: 0, style: { color: 'x', fill: null, stroke: null }, content: {}, profileData: {} },
+    { id: 'a', order: 1, kind: 'sticky', parentId: null, frame: { x: -1.55555, y: 0, w: null, h: null, rotation: 0 }, z: 0, style: { color: 'x', fill: null, stroke: null }, content: {}, profileData: {} },
   ],
   edges: [],
   profileConfig: {},

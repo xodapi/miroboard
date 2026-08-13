@@ -4,8 +4,8 @@
   "meta": {
     "id": "doc_freeform",
     "title": "Freeform board",
-    "createdAt": "2026-08-13T00:00:00.000Z",
-    "updatedAt": "2026-08-13T00:00:00.000Z",
+    "createdAt": "2026-08-13T00:00:00Z",
+    "updatedAt": "2026-08-13T00:00:00Z",
     "createdWith": {
       "version": "0.16.0",
       "commit": "format-fixtures"
@@ -35,7 +35,8 @@
       "content": {
         "text": "Идея 🚀"
       },
-      "profileData": {}
+      "profileData": {},
+      "order": 0
     },
     {
       "id": "path-1",
@@ -70,7 +71,8 @@
           }
         ]
       },
-      "profileData": {}
+      "profileData": {},
+      "order": 1
     },
     {
       "id": "text-1",
@@ -92,7 +94,8 @@
       "content": {
         "text": "Свободная заметка"
       },
-      "profileData": {}
+      "profileData": {},
+      "order": 2
     },
     {
       "id": "emoji-1",
@@ -114,7 +117,8 @@
       "content": {
         "emoji": "🧭"
       },
-      "profileData": {}
+      "profileData": {},
+      "order": 3
     },
     {
       "id": "arrow-geometry",
@@ -145,7 +149,8 @@
           }
         ]
       },
-      "profileData": {}
+      "profileData": {},
+      "order": 4
     }
   ],
   "edges": [],

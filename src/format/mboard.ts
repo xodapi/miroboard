@@ -89,6 +89,7 @@ export function toDocElement(element: BoardElement): DocElement {
     return {
       edge: defined({
         id: element.id,
+        order: 0,
         kind: 'connector',
         source: { nodeId: sourceId, anchor: 'auto' },
         target: { nodeId: targetId, anchor: 'auto' },
@@ -107,6 +108,7 @@ export function toDocElement(element: BoardElement): DocElement {
   return {
     node: defined({
       id: element.id,
+      order: 0,
       kind: element.type,
       parentId: null,
       frame: { x: element.x, y: element.y, w: element.w ?? null, h: element.h ?? null, rotation: element.rotation ?? 0 },
@@ -218,8 +220,8 @@ export function serialise(input: SerialiseInput): MboardFile {
   const edges: DocEdge[] = []
   input.elements.forEach((element, index) => {
     const converted = toDocElement(element)
-    if ('node' in converted) nodes.push(mergeUnknown(converted.node, elementExtras.get(input.elements[index])) as DocNode)
-    else edges.push(mergeUnknown(converted.edge, elementExtras.get(input.elements[index])) as DocEdge)
+    if ('node' in converted) nodes.push({ ...mergeUnknown(converted.node, elementExtras.get(input.elements[index])) as DocNode, order: index })
+    else edges.push({ ...mergeUnknown(converted.edge, elementExtras.get(input.elements[index])) as DocEdge, order: index })
   })
   const rootExtras = documentExtras.get(input.meta) ?? {}
   return normalise({
@@ -236,7 +238,9 @@ export function serialise(input: SerialiseInput): MboardFile {
 }
 
 export function deserialise(file: MboardFile): DeserialiseOutput {
-  const elements = [...file.nodes.map(fromDocNode), ...file.edges.map(fromDocEdge)]
+  const elements = [...file.nodes, ...file.edges]
+    .sort((left, right) => left.order - right.order)
+    .map(element => 'frame' in element ? fromDocNode(element) : fromDocEdge(element))
   documentExtras.set(file.meta, unknownKeys(file as unknown as Record<string, unknown>, ROOT_KEYS))
   return {
     elements,
@@ -247,8 +251,8 @@ export function deserialise(file: MboardFile): DeserialiseOutput {
 }
 
 const ROOT_KEYS = new Set(['format', 'schemaVersion', 'meta', 'nodes', 'edges', 'profileConfig', 'history', 'assets'])
-const NODE_KEYS = new Set(['id', 'kind', 'parentId', 'frame', 'z', 'style', 'content', 'profileData', 'createdBy'])
-const EDGE_KEYS = new Set(['id', 'kind', 'source', 'target', 'waypoints', 'style', 'content', 'profileData'])
+const NODE_KEYS = new Set(['id', 'order', 'kind', 'parentId', 'frame', 'z', 'style', 'content', 'profileData', 'createdBy'])
+const EDGE_KEYS = new Set(['id', 'order', 'kind', 'source', 'target', 'waypoints', 'style', 'content', 'profileData'])
 
 function unknownKeys(value: Record<string, unknown>, known: Set<string>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(value).filter(([key]) => !known.has(key)))

@@ -42,6 +42,7 @@ describe('mboard adapter', () => {
     expect(toDocElement(plain)).toEqual({
       node: {
         id: 'sticky',
+        order: 0,
         kind: 'sticky',
         parentId: null,
         frame: { x: 10.25, y: -20.5, w: 160, h: 120, rotation: 0 },
@@ -124,7 +125,7 @@ describe('mboard adapter', () => {
   it('sorts edges by id as well as nodes', () => {
     const file = serialise({ elements: [plain], meta, profileConfig: {}, history })
     const edge = {
-      id: 'edge-a', kind: 'connector',
+      id: 'edge-a', order: 1, kind: 'connector',
       source: { nodeId: 'sticky', anchor: 'auto' as const },
       target: { nodeId: 'sticky', anchor: 'auto' as const },
       style: { color: '#000', stroke: null, arrowHead: 'none' as const },

@@ -97,6 +97,15 @@ reserved v1 `assets` value is canonicalised to `{}`.
 undefined values, and rounds coordinate values (including frame, points, and
 waypoints) to four decimal places. Other numeric values are not rounded.
 
+### Element array ordering
+
+Every node and edge has a required numeric `order` field that records its original
+in-memory element-array index. `serialise()` assigns this index before `normalise()`
+sorts the separate graph arrays by id for deterministic file diffs. `deserialise()`
+combines nodes and edges and sorts them by `order`, restoring rendering and BPMN
+traversal order. The v0-to-v1 migration adds a missing `order` from each v0 graph
+array index; released v1 files must always include it.
+
 ### Round-trip projection and routed edges
 
 The element round-trip property compares `fromDoc(toDoc(element))` through the
