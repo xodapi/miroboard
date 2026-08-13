@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
-import { IndexeddbPersistence } from 'y-indexeddb'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
 import { useFileDrop } from './hooks/useFileDrop'
@@ -10,6 +9,7 @@ import { openDocument, openDroppedDocument, saveDocument, type FileSession, type
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
+import { attachRecoveryCache } from './persistence/indexeddb'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
 import { deserialise, serialise } from './format/mboard'
 import type { DocHistory, DocMeta, ProfileConfig } from './format/types'
@@ -428,14 +428,27 @@ export default function App() {
     undoManager.on('stack-item-added', updateUndoState)
     undoManager.on('stack-item-popped', updateUndoState)
     undoManager.on('stack-item-updated', updateUndoState)
-    // IndexedDB persistence
-    let persistence: IndexeddbPersistence | null = null
-    try { persistence = new IndexeddbPersistence('miroboard-local', ydoc) } catch (e) { console.warn('IndexedDB failed', e) }
+    // IndexedDB is an optional crash-recovery cache. Awaiting sync ensures the
+    // initial empty state is distinguishable from a document still loading.
+    let persistence: Awaited<ReturnType<typeof attachRecoveryCache>>['persistence'] = null
+    let disposed = false
+    const attachPersistence = async () => {
+      const id = meta.get('id')
+      if (typeof id !== 'string') return
+      const result = await attachRecoveryCache(id, ydoc)
+      if (disposed) {
+        result.persistence?.destroy()
+        return
+      }
+      persistence = result.persistence
+    }
+    void attachPersistence()
     // Sync
     const updateElements = () => setElements(yarray.toArray())
     yarray.observe(updateElements)
     updateElements()
     return () => {
+      disposed = true
       dirtyTrackerRef.current?.dispose(); dirtyTrackerRef.current = null
       yarray.unobserve(updateElements)
       profileConfig.unobserve(applyProfileConfig)
