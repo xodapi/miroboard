@@ -1,0 +1,176 @@
+{
+  "assets": {},
+  "edges": [
+    {
+      "id": "flow-start-task",
+      "kind": "connector",
+      "profileData": {
+        "bpmn": {
+          "flowType": "sequence",
+          "isDefault": false,
+          "probability": 0
+        }
+      },
+      "source": {
+        "anchor": "auto",
+        "nodeId": "start"
+      },
+      "style": {
+        "arrowHead": "triangle",
+        "color": "#334155",
+        "stroke": 2
+      },
+      "target": {
+        "anchor": "auto",
+        "nodeId": "task"
+      }
+    },
+    {
+      "id": "flow-task-end",
+      "kind": "connector",
+      "profileData": {
+        "bpmn": {
+          "flowType": "sequence"
+        }
+      },
+      "source": {
+        "anchor": "auto",
+        "nodeId": "task"
+      },
+      "style": {
+        "arrowHead": "triangle",
+        "color": "#334155",
+        "stroke": 2
+      },
+      "target": {
+        "anchor": "auto",
+        "nodeId": "end"
+      }
+    }
+  ],
+  "format": "mboard",
+  "history": {
+    "retention": {
+      "decayBucketsHours": [
+        1,
+        6,
+        24,
+        168
+      ],
+      "keepAllNamed": true,
+      "keepLastAuto": 20,
+      "maxHistoryRatio": 3,
+      "maxSnapshots": 120
+    },
+    "snapshots": [],
+    "yjsState": null
+  },
+  "meta": {
+    "createdAt": "2026-08-13T00:00:00.000Z",
+    "createdWith": {
+      "commit": "format-repeated-roundtrip-stability",
+      "version": "test"
+    },
+    "id": "doc_repeated-roundtrip",
+    "profiles": [
+      "core",
+      "bpmn"
+    ],
+    "title": "Repeated round-trip fixture",
+    "updatedAt": "2026-08-13T00:00:00.000Z"
+  },
+  "nodes": [
+    {
+      "content": {},
+      "frame": {
+        "h": 78,
+        "rotation": 0,
+        "w": 78,
+        "x": 410.1235,
+        "y": 20.9877
+      },
+      "id": "end",
+      "kind": "circle",
+      "parentId": null,
+      "profileData": {
+        "bpmn": {
+          "nodeType": "endEvent"
+        }
+      },
+      "style": {
+        "color": "#FF5D5D",
+        "fill": "#FF5D5D",
+        "stroke": null
+      },
+      "z": 0
+    },
+    {
+      "content": {},
+      "frame": {
+        "h": 78,
+        "rotation": 0,
+        "w": 78,
+        "x": 10.1235,
+        "y": 20.9877
+      },
+      "id": "start",
+      "kind": "circle",
+      "parentId": null,
+      "profileData": {
+        "bpmn": {
+          "nodeType": "startEvent"
+        }
+      },
+      "style": {
+        "color": "#6BCB77",
+        "fill": "#6BCB77",
+        "stroke": null
+      },
+      "z": 0
+    },
+    {
+      "content": {
+        "text": "Проверить 👩‍👩‍👧‍👦"
+      },
+      "frame": {
+        "h": 76,
+        "rotation": 0,
+        "w": 176,
+        "x": 210.1235,
+        "y": 20.9877
+      },
+      "id": "task",
+      "kind": "sticky",
+      "parentId": null,
+      "profileData": {
+        "bpmn": {
+          "durationMs": 2000,
+          "nodeType": "task",
+          "priority": 0
+        }
+      },
+      "style": {
+        "color": "#4D96FF",
+        "fill": "#4D96FF",
+        "stroke": null
+      },
+      "z": 0
+    }
+  ],
+  "profileConfig": {
+    "bpmn": {
+      "simulation": {
+        "arrivalClasses": [],
+        "arrivalIntervalSec": "0",
+        "calendarEndHour": "",
+        "calendarStartHour": "",
+        "instances": "1",
+        "rolePolicies": {},
+        "runs": "500",
+        "seed": "042",
+        "slaTargetSec": ""
+      }
+    }
+  },
+  "schemaVersion": 1
+}
