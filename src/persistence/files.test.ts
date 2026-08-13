@@ -38,6 +38,64 @@ describe('file save paths', () => {
     expect((window as Window & { showSaveFilePicker?: ReturnType<typeof vi.fn> }).showSaveFilePicker).not.toHaveBeenCalled()
   })
 
+  it('serializes two pending saves to one handle without interleaving writes', async () => {
+    const writes: string[] = []
+    let releaseFirst!: () => void
+    let writableCount = 0
+    const handle = {
+      name: 'race.mboard',
+      createWritable: vi.fn().mockImplementation(async () => {
+        writableCount += 1
+        if (writableCount === 1) {
+          return {
+            write: vi.fn(async (contents: string) => {
+              await new Promise<void>(resolve => { releaseFirst = resolve })
+              writes.push(contents)
+            }),
+            close: vi.fn(),
+          }
+        }
+        return { write: vi.fn(async (contents: string) => { writes.push(contents) }), close: vi.fn() }
+      }),
+    }
+    ;(window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker = vi.fn()
+    const firstFile = documentFile()
+    firstFile.meta.title = 'first'
+    const secondFile = documentFile()
+    secondFile.meta.title = 'second'
+    const first = saveDocument(firstFile, { handle: handle as unknown as FileSystemFileHandle, name: handle.name, isUntitled: false }, 'save')
+    const second = saveDocument(secondFile, { handle: handle as unknown as FileSystemFileHandle, name: handle.name, isUntitled: false }, 'save')
+
+    await vi.waitFor(() => expect(writableCount).toBe(1))
+    await vi.waitFor(() => expect(releaseFirst).toBeTypeOf('function'))
+    releaseFirst()
+    await expect(first).resolves.toMatchObject({ kind: 'saved' })
+    await expect(second).resolves.toMatchObject({ kind: 'saved' })
+    expect(writes).toHaveLength(2)
+    expect(JSON.parse(writes[0]).meta.title).toBe('first')
+    expect(JSON.parse(writes[1]).meta.title).toBe('second')
+  })
+
+  it('starts a queued save only after an in-flight load completes', async () => {
+    let resolveText!: (value: string) => void
+    const handle = {
+      name: 'loading.mboard',
+      getFile: vi.fn().mockResolvedValue({ name: 'loading.mboard', text: () => new Promise<string>(resolve => { resolveText = resolve }) }),
+    }
+    const saveHandle = { name: 'saved.mboard', createWritable: vi.fn().mockResolvedValue({ write: vi.fn(), close: vi.fn() }) }
+    ;(window as Window & { showOpenFilePicker?: unknown }).showOpenFilePicker = vi.fn().mockResolvedValue([handle])
+    ;(window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker = vi.fn()
+    const loading = openDocument()
+    const saving = saveDocument(documentFile(), { handle: saveHandle as unknown as FileSystemFileHandle, name: saveHandle.name, isUntitled: false }, 'save')
+
+    await vi.waitFor(() => expect(handle.getFile).toHaveBeenCalledOnce())
+    expect(saveHandle.createWritable).not.toHaveBeenCalled()
+    resolveText(JSON.stringify(documentFile()))
+    await expect(loading).resolves.toMatchObject({ kind: 'opened' })
+    await expect(saving).resolves.toMatchObject({ kind: 'saved' })
+    expect(saveHandle.createWritable).toHaveBeenCalledOnce()
+  })
+
   it('uses the FSA picker for an untitled Save and Save As', async () => {
     const handle = { name: 'chosen.mboard', createWritable: vi.fn().mockResolvedValue({ write: vi.fn(), close: vi.fn() }) }
     const picker = vi.fn().mockResolvedValue(handle)

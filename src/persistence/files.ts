@@ -1,5 +1,6 @@
 import type { MboardFile } from '../format/types'
 import { loadMboard, type LoadFailure } from '../format/schema'
+import { createOperationQueue } from './operation-queue'
 
 export const MBOARD_EXTENSION = '.mboard'
 export const MBOARD_MIME = 'application/json'
@@ -38,6 +39,8 @@ export type OpenOutcome =
   | { kind: 'failed'; failure: LoadFailure }
 
 export type DroppedOpenOutcome = (OpenOutcome & { ignoredFileCount: number })
+
+const fileOperationQueue = createOperationQueue()
 
 export function hasFileSystemAccess(): boolean {
   return typeof window !== 'undefined' && typeof (window as SavePickerWindow).showSaveFilePicker === 'function'
@@ -114,7 +117,7 @@ type FileSystemDataTransferItem = DataTransferItem & {
  * Opens exactly the first dropped file. A matching File System Access item
  * retains its writable handle; browsers without it use the read-only File.
  */
-export async function openDroppedDocument(transfer: DataTransfer): Promise<DroppedOpenOutcome> {
+async function openDroppedDocumentUnsafe(transfer: DataTransfer): Promise<DroppedOpenOutcome> {
   const files = Array.from(transfer.files)
   const ignoredFileCount = Math.max(0, files.length - 1)
   const file = files[0]
@@ -142,6 +145,10 @@ export async function openDroppedDocument(transfer: DataTransfer): Promise<Dropp
   }
 }
 
+export function openDroppedDocument(transfer: DataTransfer): Promise<DroppedOpenOutcome> {
+  return fileOperationQueue.run(() => openDroppedDocumentUnsafe(transfer))
+}
+
 function chooseFileFallback(): Promise<File | null> {
   return new Promise(resolve => {
     const input = document.createElement('input')
@@ -163,7 +170,7 @@ function chooseFileFallback(): Promise<File | null> {
 }
 
 /** Opens and validates a `.mboard` document without mutating the current session. */
-export async function openDocument(): Promise<OpenOutcome> {
+async function openDocumentUnsafe(): Promise<OpenOutcome> {
   try {
     if (hasOpenFileSystemAccess()) {
       const [handle] = await (window as SavePickerWindow).showOpenFilePicker!(openPickerOptions())
@@ -182,11 +189,15 @@ export async function openDocument(): Promise<OpenOutcome> {
   }
 }
 
+export function openDocument(): Promise<OpenOutcome> {
+  return fileOperationQueue.run(() => openDocumentUnsafe())
+}
+
 /**
  * Saves a document using the retained File System Access handle when possible.
  * Browsers without FSA always get an explicit `.mboard` Blob download.
  */
-export async function saveDocument(
+async function saveDocumentUnsafe(
   file: MboardFile,
   session: FileSession,
   mode: 'save' | 'saveAs',
@@ -207,4 +218,12 @@ export async function saveDocument(
   } catch (error) {
     return isCancellation(error) ? { kind: 'cancelled' } : { kind: 'failed', error }
   }
+}
+
+export function saveDocument(
+  file: MboardFile,
+  session: FileSession,
+  mode: 'save' | 'saveAs',
+): Promise<SaveOutcome> {
+  return fileOperationQueue.run(() => saveDocumentUnsafe(file, session, mode))
 }

@@ -9,6 +9,16 @@ A higher version is refused without partially loading it, while negative,
 fractional, string, and null versions are invalid. This prevents coercion from
 treating `"1"` as version 1.
 
+## Concurrent file-operation policy
+
+File reads and writes are serialized through one process-local operation queue.
+Each save captures its complete JSON document before entering the queue, and a
+queued load runs to completion before a later save begins. Failed or cancelled
+operations do not block later operations. Dropped-file opens use the same queue.
+
+For example, rapid `save(A)`, `open()`, and `save(B)` requests reach storage as
+complete operations in request order, never as a mixture of A and B.
+
 Malformed JSON is invalid input. Validation is total: it returns a typed failure
 instead of throwing, so callers can leave an already-open board unchanged.
 
