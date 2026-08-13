@@ -156,6 +156,19 @@ describe('loadMboard', () => {
     })
   })
 
+  it('names the BPMN node id and required nodeType when it is absent', () => {
+    const source = validDocument()
+    source.nodes[0].profileData = { bpmn: {} } as never
+
+    expect(loadMboard(source)).toEqual({
+      ok: false,
+      failure: {
+        kind: 'invalid',
+        errors: ['nodes[0] (node-1).profileData.bpmn.nodeType is required'],
+      },
+    })
+  })
+
   it.each([
     ['source', 'missing-source'],
     ['target', 'missing-target'],

@@ -27,3 +27,23 @@ errors; it does not partially repair a document or silently discard content.
 
 These rejection rules apply uniformly to all documents, including each of the six
 legacy BPMN fixtures. Valid fixtures therefore load without structural warnings.
+
+## Adapter canonicalisation (temporary Phase 1 bridge)
+
+`src/format/mboard.ts` is the temporary bridge between the frozen in-memory
+`BoardElement` and the v1 graph document. It will be deleted in Phase 3, when the
+in-memory model adopts the document representation.
+
+- Optional `BoardElement` fields that are `undefined` are omitted. `null` is reserved
+  for required nullable structural fields such as `frame.w`, `frame.h`, `style.fill`,
+  and `style.stroke`.
+- `parentId` is always written as `null` and top-level `assets` is always `{}` in v1.
+  Containers and assets are not supported yet.
+- A `bpmnFlow` becomes an edge. `sourceId` and `targetId` are structural endpoints;
+  `flowType`, `condition`, `probability`, and `isDefault` are nested under
+  `profileData.bpmn`. Arrows and lines without `bpmnFlow` remain nodes.
+- A node is treated as BPMN only when it carries `profileData.bpmn`. Such a node must
+  contain `nodeType`; validation reports both its id and `nodeType` when it is absent.
+  All other BPMN fields are optional and stay absent when unspecified.
+- `profileData: {}` is the v1 canonical representation for non-BPMN nodes and edges.
+  In particular, a non-BPMN element must never gain `profileData.bpmn: {}`.

@@ -95,7 +95,10 @@ function validateNode(value: unknown, index: number, errors: string[]): void {
   validateObject(requireField(node, 'content', errors), `${path}.content`, errors)
   const profileData = validateObject(requireField(node, 'profileData', errors), `${path}.profileData`, errors)
   if (profileData && 'bpmn' in profileData) {
-    validateObject(profileData.bpmn, `${path}.profileData.bpmn`, errors)
+    const bpmn = validateObject(profileData.bpmn, `${path}.profileData.bpmn`, errors)
+    if (bpmn && typeof bpmn.nodeType !== 'string') {
+      errors.push(`${path} (${typeof node.id === 'string' ? node.id : '<invalid id>'}).profileData.bpmn.nodeType is required`)
+    }
   }
 }
 
