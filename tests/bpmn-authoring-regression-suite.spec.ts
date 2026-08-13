@@ -318,7 +318,7 @@ test.describe('BPMN authoring regression surface', () => {
       } catch (error) {
         return error instanceof Error ? error.message : String(error)
       }
-    })).toContain('validation errors')
+    })).toContain('ошибки проверки')
   })
 
   test('switching board, BPMN, and simulation modes preserves the model', async ({ page }) => {

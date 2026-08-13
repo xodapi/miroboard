@@ -12,15 +12,16 @@ test.beforeEach(async ({ page }) => {
 })
 
 async function palette(page: Page) {
-  if (!(await page.getByTitle('Старт').isVisible().catch(() => false))) {
+  const palette = bpmnPalette(page)
+  if (!(await palette.isVisible().catch(() => false))) {
     await page.getByRole('button', { name: 'BPMN' }).click()
-  }
-  const toolbar = page.locator('div.absolute.bottom-0')
-  await toolbar.getByRole('button').last().click()
-  if (!(await page.getByTitle('Старт').isVisible().catch(() => false))) {
+    const toolbar = page.locator('div.absolute.bottom-0')
+    await toolbar.getByRole('button').last().click()
+    await expect(page.getByText('◇ BPMN', { exact: true })).toBeVisible()
     await page.getByText('◇ BPMN', { exact: true }).click()
   }
-  await expect(bpmnPalette(page).getByTitle('Старт')).toBeVisible()
+  await expect(palette).toBeVisible()
+  await expect(palette.getByTitle('Старт')).toBeVisible()
 }
 
 function bpmnPalette(page: Page) {

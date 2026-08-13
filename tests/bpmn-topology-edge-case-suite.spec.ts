@@ -168,7 +168,7 @@ test.describe('BPMN topology and configuration edge cases', () => {
     await inject(page, linear([node('blocked', 'task', { bpmnDurationMs: 1000, bpmnResourceRole: 'ops', bpmnResourceCapacity: 0 })]))
     const result = await observe(page, 20)
     expect(result.ok).toBe(false)
-    expect(result.error).toContain('validation errors')
+    expect(result.error).toContain('ошибки проверки')
   })
 
   test('VAL-BPMN-059: unset role and three-role contention remain finite', async ({ page }) => {
@@ -258,7 +258,7 @@ test.describe('BPMN topology and configuration edge cases', () => {
       catch (error) { return { zeroAccepted: false, error: String(error), one: hook.simulateBpmn(42, 1), three: hook.simulateBpmn(42, 3) } }
     })
     expect(values.zeroAccepted).toBe(false)
-    expect(values.error).toContain('between 1 and 10000')
+    expect(values.error).toContain('от 1 до 10000')
     expect(values.one).not.toEqual(values.three)
     expect(finite(values)).toBe(true)
 
