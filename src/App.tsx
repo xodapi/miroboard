@@ -3,8 +3,10 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
+import { saveDocument, type FileSession } from './persistence/files'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
-import type { ProfileConfig } from './format/types'
+import { serialise } from './format/mboard'
+import type { DocHistory, DocMeta, ProfileConfig } from './format/types'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
 import slaCalendarExample from '../examples/sla-calendar.json'
@@ -201,6 +203,7 @@ export default function App() {
   const [showProjectHistory, setShowProjectHistory] = useState(false)
   const [showSimulationPanel, setShowSimulationPanel] = useState(false)
   const [showMore, setShowMore] = useState(false)
+  const [fileSession, setFileSession] = useState<FileSession>({ handle: null, name: null, isUntitled: true })
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [flowPreviewPoint, setFlowPreviewPoint] = useState<Point | null>(null)
   const [activeBpmnTokenId, setActiveBpmnTokenId] = useState<string | null>(null)
@@ -521,6 +524,44 @@ export default function App() {
     setWorkspaceMode('bpmn')
     setShowBpmnPalette(true)
   }, [bpmnProfileActive, ydoc])
+
+  const saveBoard = useCallback(async (mode: 'save' | 'saveAs') => {
+    const metaMap = ydoc.getMap<unknown>('meta')
+    const metaId = metaMap.get('id')
+    const metaTitle = metaMap.get('title')
+    const metaCreatedAt = metaMap.get('createdAt')
+    const now = new Date().toISOString()
+    const meta: DocMeta = {
+      id: typeof metaId === 'string' ? metaId : `doc_${genId()}`,
+      title: typeof metaTitle === 'string' ? metaTitle : 'Untitled board',
+      createdAt: typeof metaCreatedAt === 'string' ? metaCreatedAt : now,
+      updatedAt: now,
+      createdWith: { version: __MIROBOARD_VERSION__, commit: PROJECT_HISTORY[0]?.commit ?? 'local' },
+      profiles: [],
+    }
+    const history: DocHistory = {
+      yjsState: null,
+      snapshots: [],
+      retention: { keepAllNamed: true, keepLastAuto: 20, decayBucketsHours: [1, 6, 24, 168], maxSnapshots: 120, maxHistoryRatio: 3 },
+    }
+    const file = serialise({
+      elements: yElements.current?.toArray() ?? elements,
+      meta,
+      profileConfig: (profileConfigRef.current?.toJSON() ?? {}) as ProfileConfig,
+      history,
+    })
+    const outcome = await saveDocument(file, fileSession, mode)
+    if (outcome.kind === 'saved') {
+      setFileSession(outcome.session)
+      ydoc.transact(() => {
+        metaMap.set('title', file.meta.title)
+        metaMap.set('updatedAt', now)
+      })
+      showToast('Документ сохранён', 'success')
+    } else if (outcome.kind === 'failed') {
+      showToast('Не удалось сохранить документ', 'error')
+    }
+  }, [elements, fileSession, showToast, ydoc])
 
   // ======================== HELPERS ========================
 
@@ -1264,6 +1305,11 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo() }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); handleRedo() }
       if ((e.metaKey || e.ctrlKey) && e.key === 'd') { e.preventDefault(); if (selectedId) duplicateElement(selectedId) }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        void saveBoard(e.shiftKey ? 'saveAs' : 'save')
+        return
+      }
       const map: Record<string, Tool> = {
         v: 'select', h: 'pan', p: 'pen', m: 'marker', e: 'eraser',
         s: 'sticky', t: 'text', r: 'rect', o: 'circle', a: 'arrow', l: 'line'
@@ -1281,7 +1327,7 @@ export default function App() {
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
-  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool])
+  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard])
 
   // ======================== RENDER ELEMENT ========================
   const renderedElements = useMemo(() => {
@@ -2008,6 +2054,14 @@ export default function App() {
           <button onClick={() => { exportToPNG(); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg> PNG
+          </button>
+          <button onClick={() => { void saveBoard('save'); setShowMore(false) }}
+            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+            ⇩ Сохранить
+          </button>
+          <button onClick={() => { void saveBoard('saveAs'); setShowMore(false) }}
+            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+            ⇩ Сохранить как
           </button>
           <button onClick={() => { setTransform({ x: 0, y: 0, scale: 1 }); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
