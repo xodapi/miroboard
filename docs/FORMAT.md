@@ -48,6 +48,21 @@ in-memory model adopts the document representation.
 - `profileData: {}` is the v1 canonical representation for non-BPMN nodes and edges.
   In particular, a non-BPMN element must never gain `profileData.bpmn: {}`.
 
+### Unknown-data preservation
+
+Version 1 chooses the **preserve** branch for forward compatibility. Unknown keys
+at the document root, on nodes and edges, inside `profileData.bpmn`, and complete
+unknown `profileData` namespaces are retained byte-for-byte in a load → save
+cycle. The adapter overlays recognised fields on the original opaque payload, so
+an older client can update known geometry without destroying newer profile data.
+Undefined object properties are omitted by canonicalisation; explicit `null`,
+`false`, zero, empty strings, arrays, and nested objects are retained. Only the
+reserved v1 `assets` value is canonicalised to `{}`.
+
+`normalise` sorts nodes and edges by `id`, sorts every object’s keys, omits
+undefined values, and rounds coordinate values (including frame, points, and
+waypoints) to four decimal places. Other numeric values are not rounded.
+
 ## Profiles and simulation configuration
 
 `meta.profiles` is derived on every save, never trusted from React state. It is

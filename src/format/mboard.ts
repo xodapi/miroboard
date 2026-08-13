@@ -53,6 +53,9 @@ export interface DeserialiseOutput {
   history: DocHistory
 }
 
+const elementExtras = new WeakMap<object, Record<string, unknown>>()
+const documentExtras = new WeakMap<object, Record<string, unknown>>()
+
 function defined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T
 }
@@ -113,7 +116,7 @@ export function toDocElement(element: BoardElement): DocElement {
 
 export function fromDocNode(node: DocNode): BoardElement {
   const bpmn = node.profileData.bpmn ?? {}
-  return defined({
+  const element = defined({
     id: node.id,
     type: node.kind as BoardElement['type'],
     x: node.frame.x,
@@ -140,11 +143,13 @@ export function fromDocNode(node: DocNode): BoardElement {
     bpmnResourceCapacity: bpmn.resourceCapacity as number | undefined,
     bpmnPriority: bpmn.priority as number | undefined,
   }) as BoardElement
+  elementExtras.set(element, { ...unknownKeys(node as unknown as Record<string, unknown>, NODE_KEYS), profileData: profileExtras(node.profileData) })
+  return element
 }
 
 export function fromDocEdge(edge: DocEdge): BoardElement {
   const bpmn = edge.profileData.bpmn ?? {}
-  return defined({
+  const element = defined({
     id: edge.id,
     type: edge.style.arrowHead === 'triangle' ? 'arrow' : 'line',
     x: 0,
@@ -161,6 +166,8 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
       isDefault: bpmn.isDefault,
     }),
   }) as BoardElement
+  elementExtras.set(element, { ...unknownKeys(edge as unknown as Record<string, unknown>, EDGE_KEYS), profileData: profileExtras(edge.profileData) })
+  return element
 }
 
 /** Derives the active document profiles from namespaced element data. */
@@ -173,12 +180,14 @@ export function detectProfiles(nodes: DocNode[], edges: DocEdge[]): string[] {
 export function serialise(input: SerialiseInput): MboardFile {
   const nodes: DocNode[] = []
   const edges: DocEdge[] = []
-  for (const element of input.elements) {
+  input.elements.forEach((element, index) => {
     const converted = toDocElement(element)
-    if ('node' in converted) nodes.push(converted.node)
-    else edges.push(converted.edge)
-  }
+    if ('node' in converted) nodes.push(mergeUnknown(converted.node, elementExtras.get(input.elements[index])) as DocNode)
+    else edges.push(mergeUnknown(converted.edge, elementExtras.get(input.elements[index])) as DocEdge)
+  })
+  const rootExtras = documentExtras.get(input.meta) ?? {}
   return normalise({
+    ...rootExtras,
     format: 'mboard',
     schemaVersion: CURRENT_SCHEMA_VERSION,
     meta: { ...input.meta, profiles: detectProfiles(nodes, edges) },
@@ -191,22 +200,51 @@ export function serialise(input: SerialiseInput): MboardFile {
 }
 
 export function deserialise(file: MboardFile): DeserialiseOutput {
+  const elements = [...file.nodes.map(fromDocNode), ...file.edges.map(fromDocEdge)]
+  documentExtras.set(file.meta, unknownKeys(file as unknown as Record<string, unknown>, ROOT_KEYS))
   return {
-    elements: [...file.nodes.map(fromDocNode), ...file.edges.map(fromDocEdge)],
+    elements,
     meta: file.meta,
     profileConfig: file.profileConfig,
     history: file.history,
   }
 }
 
-function canonical(value: unknown): unknown {
-  if (typeof value === 'number') return Math.round(value * 10_000) / 10_000
-  if (Array.isArray(value)) return value.map(canonical)
+const ROOT_KEYS = new Set(['format', 'schemaVersion', 'meta', 'nodes', 'edges', 'profileConfig', 'history', 'assets'])
+const NODE_KEYS = new Set(['id', 'kind', 'parentId', 'frame', 'z', 'style', 'content', 'profileData', 'createdBy'])
+const EDGE_KEYS = new Set(['id', 'kind', 'source', 'target', 'waypoints', 'style', 'content', 'profileData'])
+
+function unknownKeys(value: Record<string, unknown>, known: Set<string>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !known.has(key)))
+}
+
+function mergeUnknown<T>(value: T, extras: Record<string, unknown> | undefined): T {
+  if (!extras) return value
+  const valueRecord = value as Record<string, unknown>
+  const merged = { ...extras, ...valueRecord } as Record<string, unknown>
+  if (extras.profileData && valueRecord.profileData) {
+    merged.profileData = { ...extras.profileData as Record<string, unknown>, ...valueRecord.profileData as Record<string, unknown> }
+    const oldBpmn = (extras.profileData as Record<string, unknown>).bpmn
+    const newBpmn = (valueRecord.profileData as Record<string, unknown>).bpmn
+    if (oldBpmn && newBpmn) (merged.profileData as Record<string, unknown>).bpmn = { ...oldBpmn as Record<string, unknown>, ...newBpmn as Record<string, unknown> }
+  }
+  return merged as T
+}
+function profileExtras(profileData: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(Object.entries(profileData).map(([namespace, data]) => [
+    namespace,
+    namespace === 'bpmn' ? unknownKeys(data, new Set(['nodeType', 'durationMs', 'durationDistribution', 'durationMinMs', 'durationModeMs', 'durationMaxMs', 'resourceRole', 'costPerHour', 'resourceCapacity', 'priority', 'flowType', 'condition', 'probability', 'isDefault'])) : data,
+  ]))
+}
+
+function canonical(value: unknown, key?: string): unknown {
+  if (typeof value === 'number' && ['x', 'y', 'w', 'h', 'rotation'].includes(key ?? '')) return Math.round(value * 10_000) / 10_000
+  if (Array.isArray(value)) return value.map(item => canonical(item, key))
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value)
       .filter(([, item]) => item !== undefined)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => [key, canonical(item)]))
+      .map(([childKey, item]) => [childKey, canonical(item, childKey)]))
   }
   return value
 }
