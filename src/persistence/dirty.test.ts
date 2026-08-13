@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
+import { IndexeddbPersistence } from 'y-indexeddb'
 import {
   createDirtyTracker,
   addBeforeUnloadGuard,
@@ -38,6 +39,7 @@ describe('createDirtyTracker', () => {
   it.each([
     ['recovery replay', RECOVERY_ORIGIN],
     ['history restore', HISTORY_RESTORE_ORIGIN],
+    ['IndexedDB replay', Object.create(IndexeddbPersistence.prototype)],
   ])('does not mark dirty for %s', (_label, origin) => {
     const doc = new Y.Doc()
     const onChange = vi.fn()

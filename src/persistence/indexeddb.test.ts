@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import { attachRecoveryCache, docKey, DOC_KEY_PREFIX } from './indexeddb'
+import { createDirtyTracker } from './dirty'
 
 afterEach(async () => {
   if (typeof indexedDB === 'undefined') return
@@ -35,6 +36,31 @@ describe('IndexedDB recovery cache', () => {
     restored.persistence?.destroy()
     first.destroy()
     second.destroy()
+  })
+
+  it('allows dirty tracking to start clean after IndexedDB replay', async () => {
+    const first = new Y.Doc()
+    const attached = await attachRecoveryCache('test-doc', first)
+    first.getArray('elements').push([{ id: 'persisted' }])
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    attached.persistence?.destroy()
+
+    const second = new Y.Doc()
+    const onChange = vi.fn()
+    const tracker = createDirtyTracker(second, onChange)
+    const restored = await attachRecoveryCache('test-doc', second)
+
+    expect(second.getArray('elements').toJSON()).toEqual([{ id: 'persisted' }])
+    expect(tracker.isDirty()).toBe(false)
+    expect(onChange).not.toHaveBeenCalled()
+
+    second.getArray('elements').push([{ id: 'user-edit' }])
+    expect(tracker.isDirty()).toBe(true)
+    expect(onChange).toHaveBeenCalledWith(true)
+    tracker.dispose()
+    restored.persistence?.destroy()
+    second.destroy()
+    first.destroy()
   })
 
   it('returns a non-fatal memory-only result when persistence fails', async () => {

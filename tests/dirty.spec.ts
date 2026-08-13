@@ -41,6 +41,30 @@ test('shows textual dirtiness, guards unload, and clears after saving', async ({
   })).resolves.toBe(false)
 })
 
+test('recovery replay stays clean and the next user edit becomes dirty', async ({ page }) => {
+  const boardId = `dirty-recovery-${Date.now()}`
+  await page.goto(`/?board=${boardId}`, { waitUntil: 'domcontentloaded' })
+  const status = page.getByRole('status')
+
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
+  await expect(status).toHaveText('Не сохранено')
+  // y-indexeddb batches writes for one second before persisting them.
+  await page.waitForTimeout(1_200)
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await expect(status).toHaveText('Сохранено')
+  await expect(page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  })).resolves.toBe(false)
+
+  await page.getByRole('button', { name: 'Примеры' }).click()
+  await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
+  await expect(status).toHaveText('Не сохранено')
+})
+
 test('in-app open guard can cancel, discard, or save before replacing the board', async ({ page }) => {
   const writes: string[] = []
   await page.addInitScript(documentText => {

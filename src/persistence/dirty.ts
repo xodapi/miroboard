@@ -1,4 +1,5 @@
 import * as Y from 'yjs'
+import { IndexeddbPersistence } from 'y-indexeddb'
 
 /** Marks Yjs writes that replay the local recovery cache rather than user intent. */
 export const RECOVERY_ORIGIN = Symbol('recovery')
@@ -22,7 +23,14 @@ export function createDirtyTracker(
 ): DirtyTracker {
   let dirty = false
   const handler = (_update: Uint8Array, origin: unknown) => {
-    if (origin === RECOVERY_ORIGIN || origin === HISTORY_RESTORE_ORIGIN) return
+    // y-indexeddb applies its startup replay in a transaction whose origin is
+    // the persistence instance. Treat that library-originated write like an
+    // explicit recovery transaction, while still tracking all user updates.
+    if (
+      origin === RECOVERY_ORIGIN
+      || origin === HISTORY_RESTORE_ORIGIN
+      || origin instanceof IndexeddbPersistence
+    ) return
     if (!dirty) {
       dirty = true
       onChange(true)
