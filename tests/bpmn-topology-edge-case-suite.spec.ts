@@ -97,20 +97,30 @@ test.describe('BPMN topology and configuration edge cases', () => {
   })
 
   test('VAL-BPMN-055: unbounded loop trips the documented dynamic transition guard', async ({ page }) => {
-    await inject(page, [
-      node('start', 'startEvent'), node('task', 'task', { bpmnDurationMs: 1 }), node('gateway', 'xorGateway'), node('end', 'endEvent'),
+    const fixture = {
+      nodes: [
+        node('start', 'startEvent'), node('task', 'task', { bpmnDurationMs: 1 }), node('gateway', 'xorGateway'), node('end', 'endEvent'),
+      ],
+      flows: [
       flow('s-task', 'start', 'task'), flow('task-g', 'task', 'gateway'),
       flow('g-task', 'gateway', 'task', { condition: 'true' }), flow('g-end', 'gateway', 'end', { condition: 'false' }),
-    ])
+      ],
+      instances: [{ index: 0 }],
+    }
+    await inject(page, [...fixture.nodes, ...fixture.flows])
     const result = await page.evaluate(() => {
       try { return { ok: true, run: window.__MIROBOARD_DEBUG__!.runBpmn() } }
       catch (error) { return { ok: false, error: String(error) } }
     })
     expect(result.ok).toBe(false)
-    // This fixture projects to 4 BPMN nodes and 4 sequence flows. The documented
-    // guard is nodes × flows × 4 × instances, so 4 × 4 × 4 × 1 = 64 transitions.
-    const dynamicTransitionLimit = 4 * 4 * 4 * 1
-    expect(dynamicTransitionLimit).toBe(64)
+    // docs/BPMN_SIMULATION.md defines the guard as nodes × flows × 4 × instances.
+    // Saturate the test-side calculation to mirror the Rust implementation.
+    const dynamicTransitionLimit = [
+      fixture.nodes.length,
+      Math.max(fixture.flows.length, 1),
+      4,
+      Math.max(fixture.instances.length, 1),
+    ].reduce((limit, factor) => Math.min(Number.MAX_SAFE_INTEGER, limit * factor), 1)
     expect(result.error).toContain(`детерминированный лимит в ${dynamicTransitionLimit} переходов`)
     expect(result.error).toContain('узлы × потоки × 4 × экземпляры')
   })
