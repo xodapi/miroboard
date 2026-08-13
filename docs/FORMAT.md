@@ -3,12 +3,26 @@
 ## Schema-version semantics
 
 `.mboard` documents identify themselves with `format: "mboard"` and an integer
-`schemaVersion`. Version 1 is the currently supported version. A higher version is
-refused without partially loading it, while zero, negative, fractional, string, and
-null versions are invalid. This prevents coercion from treating `"1"` as version 1.
+`schemaVersion`. Version 1 is the currently supported released format. The
+synthetic version 0 test vehicle is accepted only through the migration chain.
+A higher version is refused without partially loading it, while negative,
+fractional, string, and null versions are invalid. This prevents coercion from
+treating `"1"` as version 1.
 
 Malformed JSON is invalid input. Validation is total: it returns a typed failure
 instead of throwing, so callers can leave an already-open board unchanged.
+
+### Migration policy and the permanent v0 test vehicle
+
+Migrations are a forward-only chain, ordered by `from`; a missing link is a
+diagnosable load failure and documents are never downgraded. The permanent
+`examples/legacy/v0-synthetic.mboard` fixture represents schema version 0,
+which was never released. It exists only to exercise the migration machinery,
+is loaded on every format test-suite run, and must never be edited after
+shipping. Its `{ from: 0, to: 1 }` migration adds the v1 `profileConfig` and
+`assets` objects and fills each node's missing `parentId` with `null`.
+
+There is no stability promise before 1.0, and a firm one after 1.0.
 
 ## Structural integrity policy
 

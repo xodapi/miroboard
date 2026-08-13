@@ -89,7 +89,7 @@ describe('loadMboard', () => {
     })
   })
 
-  it.each([0, -1, '1', 1.5, null, {}])('rejects invalid schema version %j', version => {
+  it.each([-1, '1', 1.5, null, {}])('rejects invalid schema version %j', version => {
     const source = validDocument()
     source.schemaVersion = version as never
 

@@ -1,0 +1,33 @@
+{
+  "format": "mboard",
+  "schemaVersion": 0,
+  "meta": {
+    "id": "legacy-v0-synthetic",
+    "title": "Permanent v0 migration vehicle",
+    "createdAt": "2026-08-13T00:00:00.000Z",
+    "updatedAt": "2026-08-13T00:00:00.000Z",
+    "createdWith": { "version": "0.16.0-dev", "commit": "legacy-fixture" },
+    "profiles": ["core"]
+  },
+  "nodes": [{
+    "id": "legacy-note",
+    "kind": "sticky",
+    "frame": { "x": 80, "y": 80, "w": 160, "h": 120, "rotation": 0 },
+    "z": 0,
+    "style": { "color": "#FFD93D", "fill": "#FFD93D", "stroke": null },
+    "content": { "text": "v0 migration vehicle" },
+    "profileData": {}
+  }],
+  "edges": [],
+  "history": {
+    "yjsState": null,
+    "snapshots": [],
+    "retention": {
+      "keepAllNamed": true,
+      "keepLastAuto": 20,
+      "decayBucketsHours": [1, 6, 24, 168],
+      "maxSnapshots": 120,
+      "maxHistoryRatio": 3
+    }
+  }
+}

@@ -16,6 +16,7 @@ export const SELF_CONSISTENCY_DOCUMENTS = [
   'examples/priority-queue.json',
   'examples/sla-calendar.json',
   'all-element-types-board',
+  'examples/legacy/v0-synthetic.mboard',
 ] as const
 
 const history: DocHistory = {
@@ -152,6 +153,17 @@ describe('VAL-FORMAT-028 save/load self-consistency gate', () => {
       expect.arrayContaining(['path', 'sticky', 'rect', 'circle', 'line', 'text', 'emoji']),
     )
     expect(written.edges).toHaveLength(1)
+  })
+
+  it('loads the permanent legacy fixture through the migration chain on every run', () => {
+    const source = JSON.parse(readFileSync('examples/legacy/v0-synthetic.mboard', 'utf8')) as Record<string, unknown>
+    const result = loadMboard(source)
+    expect(result).toMatchObject({ ok: true, migratedFrom: 0 })
+    if (!result.ok) return
+    expect(result.file.schemaVersion).toBe(1)
+    expect(result.file.nodes.every(node => node.parentId === null)).toBe(true)
+    expect(result.file.profileConfig).toEqual({})
+    expect(result.file.assets).toEqual({})
   })
 
   it('does not emit console errors while validating app-written documents', () => {

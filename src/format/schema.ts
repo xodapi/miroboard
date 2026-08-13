@@ -1,4 +1,5 @@
 import { CURRENT_SCHEMA_VERSION, type MboardFile } from './types'
+import { runMigrations } from './migrations'
 
 export type LoadFailure =
   | { kind: 'not-mboard' }
@@ -188,7 +189,7 @@ export function loadMboard(raw: unknown): LoadResult {
     return { ok: false, failure: { kind: 'invalid', errors: ['Missing required field: schemaVersion'] } }
   }
   const version = parsed.value.schemaVersion
-  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) {
     return { ok: false, failure: { kind: 'invalid', errors: ['schemaVersion must be a positive integer'] } }
   }
   if (version > CURRENT_SCHEMA_VERSION) {
@@ -201,8 +202,14 @@ export function loadMboard(raw: unknown): LoadResult {
     }
   }
 
-  const errors = validateMboard(parsed.value)
+  let migrated: Record<string, unknown>
+  try {
+    migrated = runMigrations(parsed.value, version)
+  } catch (error) {
+    return { ok: false, failure: { kind: 'invalid', errors: [error instanceof Error ? error.message : String(error)] } }
+  }
+  const errors = validateMboard(migrated)
   return errors.length === 0
-    ? { ok: true, file: parsed.value as unknown as MboardFile }
+    ? { ok: true, file: migrated as unknown as MboardFile, ...(version < CURRENT_SCHEMA_VERSION ? { migratedFrom: version } : {}) }
     : { ok: false, failure: { kind: 'invalid', errors } }
 }
