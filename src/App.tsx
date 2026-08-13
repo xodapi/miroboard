@@ -204,6 +204,7 @@ export default function App() {
   const [bpmnSimulationSummary, setBpmnSimulationSummary] = useState<string | null>(null)
   const [bpmnSimulationResult, setBpmnSimulationResult] = useState<BpmnSimulationResult | null>(null)
   const [bottleneckRole, setBottleneckRole] = useState<string | null>(null)
+  const [simulationResultFingerprint, setSimulationResultFingerprint] = useState<string | null>(null)
   const [simulationSeed, setSimulationSeed] = useState('42')
   const [simulationRuns, setSimulationRuns] = useState('500')
   const [simulationTarget, setSimulationTarget] = useState('')
@@ -229,7 +230,7 @@ export default function App() {
       setBpmnFlowSourceId(null)
       setFlowPreviewPoint(null)
     }
-  }, [tool])
+  }, [])
   // Drag state
   const [dragInfo, setDragInfo] = useState<{
     id: string; startX: number; startY: number; elStartX: number; elStartY: number
@@ -329,6 +330,14 @@ export default function App() {
       })),
     }
   }, [createBpmnModel])
+  // A simulation result describes one immutable model/configuration snapshot.
+  // Keeping the fingerprint with the result lets rendering discard stale values
+  // immediately after an edit, without scheduling synchronous state updates from
+  // an effect.
+  const simulationFingerprint = useMemo(
+    () => JSON.stringify({ model: createSimulationBpmnModel(), seed: simulationSeed, runs: simulationRuns }),
+    [createSimulationBpmnModel, simulationSeed, simulationRuns],
+  )
   const bpmnIssues = useMemo(() => {
     const model = createBpmnModel()
     if (model.nodes.length === 0) return []
@@ -809,21 +818,17 @@ export default function App() {
       setBpmnSimulationResult(result)
       setBottleneckRole(result.roleUtilization[0]?.role ?? null)
       setBpmnSimulationSummary(`MC ${result.runs}: P50 ${seconds(result.p50DurationMs)} · P90 ${seconds(result.p90DurationMs)} · P95 ${seconds(result.p95DurationMs)}`)
+      setSimulationResultFingerprint(simulationFingerprint)
     } catch (error) {
       setBpmnSimulationSummary(null)
       setBottleneckRole(null)
+      setSimulationResultFingerprint(null)
       showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.', 'error')
     }
-  }, [createSimulationBpmnModel, simulationRuns, simulationSeed, showToast])
-
-  // Results are a transient view of this exact model and simulation draft. They
-  // are intentionally not serialised into profileConfig, so a model/config edit
-  // must remove them instead of displaying measurements from an older state.
-  useEffect(() => {
-    setBpmnSimulationResult(null)
-    setBottleneckRole(null)
-    setBpmnSimulationSummary(null)
-  }, [createSimulationBpmnModel, simulationRuns, simulationSeed])
+  }, [createSimulationBpmnModel, simulationFingerprint, simulationRuns, simulationSeed, showToast])
+  const visibleSimulationResult = simulationResultFingerprint === simulationFingerprint ? bpmnSimulationResult : null
+  const visibleSimulationSummary = simulationResultFingerprint === simulationFingerprint ? bpmnSimulationSummary : null
+  const visibleBottleneckRole = simulationResultFingerprint === simulationFingerprint ? bottleneckRole : null
 
   useEffect(() => {
     if (!__MIROBOARD_DEBUG_HOOK__) return
@@ -1380,7 +1385,7 @@ export default function App() {
       const isTokenActive = activeBpmnTokenId === el.id
       const isGateway = el.bpmnNodeType === 'xorGateway' || el.bpmnNodeType === 'andGateway' || el.bpmnNodeType === 'orGateway'
       const isEvent = el.bpmnNodeType === 'startEvent' || el.bpmnNodeType === 'endEvent'
-      const isBottleneck = el.bpmnNodeType === 'task' && bottleneckRole !== null && el.bpmnResourceRole === bottleneckRole
+      const isBottleneck = el.bpmnNodeType === 'task' && visibleBottleneckRole !== null && el.bpmnResourceRole === visibleBottleneckRole
       return (
         <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
           {el.bpmnNodeType === 'startEvent' && <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={3} />}
@@ -1732,9 +1737,9 @@ export default function App() {
                   {bpmnRunSummary}
                 </div>
               )}
-              {bpmnSimulationSummary && (
-                <div className={`h-7 max-w-[340px] truncate px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-fuchsia-950 text-fuchsia-200' : 'bg-fuchsia-50 text-fuchsia-700'}`} title={bpmnSimulationSummary}>
-                  {bpmnSimulationSummary}
+              {visibleSimulationSummary && (
+                <div className={`h-7 max-w-[340px] truncate px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-fuchsia-950 text-fuchsia-200' : 'bg-fuchsia-50 text-fuchsia-700'}`} title={visibleSimulationSummary}>
+                  {visibleSimulationSummary}
                 </div>
               )}
             </>
@@ -2358,16 +2363,16 @@ export default function App() {
             <button onClick={simulateBpmn} className="w-full mt-4 rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-4 py-2.5 text-sm font-bold text-white">
               Запустить симуляцию
             </button>
-            {bpmnSimulationResult && (
+            {visibleSimulationResult && (
               <div className={`mt-5 grid grid-cols-3 gap-2 rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-slate-50'}`}>
                 {([
-                  ['Min', bpmnSimulationResult.minDurationMs],
-                  ['Mean', bpmnSimulationResult.meanDurationMs],
-                  ['σ', bpmnSimulationResult.standardDeviationMs],
-                  ['P50', bpmnSimulationResult.p50DurationMs],
-                  ['P90', bpmnSimulationResult.p90DurationMs],
-                  ['P95', bpmnSimulationResult.p95DurationMs],
-                  ['Max', bpmnSimulationResult.maxDurationMs],
+                  ['Min', visibleSimulationResult.minDurationMs],
+                  ['Mean', visibleSimulationResult.meanDurationMs],
+                  ['σ', visibleSimulationResult.standardDeviationMs],
+                  ['P50', visibleSimulationResult.p50DurationMs],
+                  ['P90', visibleSimulationResult.p90DurationMs],
+                  ['P95', visibleSimulationResult.p95DurationMs],
+                  ['Max', visibleSimulationResult.maxDurationMs],
                 ] as const).map(([label, milliseconds]) => (
                   <div key={label} className="text-center">
                     <div className={`text-[10px] font-semibold ${textSec}`}>{label}</div>
@@ -2376,33 +2381,33 @@ export default function App() {
                 ))}
                 <div className="col-span-3 mt-1 border-t border-black/10 pt-2 text-center">
                   <span className={`text-[10px] font-semibold ${textSec}`}>Средняя стоимость: </span>
-                  <span className="text-sm font-bold">€{bpmnSimulationResult.meanCost.toFixed(2)}</span>
+                  <span className="text-sm font-bold">€{visibleSimulationResult.meanCost.toFixed(2)}</span>
                 </div>
-                {bottleneckRole && (
+                {visibleBottleneckRole && (
                   <div className="col-span-3 rounded-xl bg-orange-50 px-3 py-2 text-center text-xs text-orange-800">
-                    <b>Bottleneck:</b> роль «{bottleneckRole}» имеет наибольшую utilisation. Её задачи подсвечены на схеме.
+                    <b>Bottleneck:</b> роль «{visibleBottleneckRole}» имеет наибольшую utilisation. Её задачи подсвечены на схеме.
                   </div>
                 )}
-                {bpmnSimulationResult.onTimeRate !== undefined && (
+                {visibleSimulationResult.onTimeRate !== undefined && (
                   <div className="col-span-3 text-center text-sm font-bold">
-                    В срок: {(bpmnSimulationResult.onTimeRate * 100).toFixed(1)}% при SLA {(bpmnSimulationResult.slaTargetMs! / 1000).toFixed(1)}с
+                    В срок: {(visibleSimulationResult.onTimeRate * 100).toFixed(1)}% при SLA {(visibleSimulationResult.slaTargetMs! / 1000).toFixed(1)}с
                   </div>
                 )}
-                {bpmnSimulationResult.simulationInstances > 1 && (
+                {visibleSimulationResult.simulationInstances > 1 && (
                   <div className="col-span-3 text-center text-xs text-slate-600">
-                    Batch: {bpmnSimulationResult.simulationInstances} instances, interval {(bpmnSimulationResult.arrivalIntervalMs / 1000).toFixed(1)}с
+                    Batch: {visibleSimulationResult.simulationInstances} instances, interval {(visibleSimulationResult.arrivalIntervalMs / 1000).toFixed(1)}с
                   </div>
                 )}
-                {bpmnSimulationResult.roleUtilization.map((role) => (
+                {visibleSimulationResult.roleUtilization.map((role) => (
                   <div key={role.role} className="col-span-3 flex items-center justify-between border-t border-black/10 pt-2 text-[11px]">
                     <span className={textSec}>{role.role} · capacity {role.capacity} · work {(role.meanWorkloadMs / 1000).toFixed(1)}с · wait {(role.meanWaitingMs / 1000).toFixed(1)}с</span>
                     <span className="font-bold">{(role.utilization * 100).toFixed(0)}%</span>
                   </div>
                 ))}
-                {bpmnSimulationResult.priorityClasses.length > 0 && (
+                {visibleSimulationResult.priorityClasses.length > 0 && (
                   <div className="col-span-3 border-t border-black/10 pt-2">
                     <div className={`text-[10px] font-semibold ${textSec} mb-2`}>По приоритетам:</div>
-                    {bpmnSimulationResult.priorityClasses.map((pc) => (
+                    {visibleSimulationResult.priorityClasses.map((pc) => (
                       <div key={pc.priority} className="flex items-center justify-between text-[11px] py-1">
                         <span className={textSec}>Priority {pc.priority} · {pc.instances} inst · wait {(pc.meanWaitingMs / 1000).toFixed(1)}с</span>
                         <span className="font-bold">{(pc.meanDurationMs / 1000).toFixed(1)}с</span>
