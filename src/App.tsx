@@ -4,6 +4,7 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
 import { saveDocument, type FileSession } from './persistence/files'
+import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
 import { serialise } from './format/mboard'
 import type { DocHistory, DocMeta, ProfileConfig } from './format/types'
@@ -204,6 +205,7 @@ export default function App() {
   const [showSimulationPanel, setShowSimulationPanel] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [fileSession, setFileSession] = useState<FileSession>({ handle: null, name: null, isUntitled: true })
+  const [isDirty, setIsDirty] = useState(false)
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [flowPreviewPoint, setFlowPreviewPoint] = useState<Point | null>(null)
   const [activeBpmnTokenId, setActiveBpmnTokenId] = useState<string | null>(null)
@@ -262,6 +264,7 @@ export default function App() {
   // Yjs
   const ydoc = useMemo(() => new Y.Doc(), [])
   const yElements = useRef<Y.Array<BoardElement> | null>(null)
+  const dirtyTrackerRef = useRef<DirtyTracker | null>(null)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
   const profileConfigRef = useRef<Y.Map<unknown> | null>(null)
   const profileConfigJsonRef = useRef('')
@@ -396,12 +399,13 @@ export default function App() {
     const meta = ydoc.getMap<unknown>('meta')
     const profileConfig = ydoc.getMap<unknown>('profileConfig')
     yElements.current = yarray
+    dirtyTrackerRef.current = createDirtyTracker(ydoc, setIsDirty)
     profileConfigRef.current = profileConfig
     if (!meta.has('id')) {
       ydoc.transact(() => {
         meta.set('id', `doc_${genId()}`)
         meta.set('createdAt', new Date().toISOString())
-      })
+      }, RECOVERY_ORIGIN)
     }
 
     const applyProfileConfig = () => {
@@ -454,7 +458,7 @@ export default function App() {
       if (saved && yarray.length === 0) {
         try {
           const parsed: unknown = JSON.parse(saved)
-          if (Array.isArray(parsed)) ydoc.transact(() => parsed.forEach((el: BoardElement) => yarray.push([el])))
+          if (Array.isArray(parsed)) ydoc.transact(() => parsed.forEach((el: BoardElement) => yarray.push([el])), RECOVERY_ORIGIN)
         } catch { /* ignore */ }
       }
     }
@@ -472,6 +476,7 @@ export default function App() {
 
     return () => {
       clearInterval(si)
+      dirtyTrackerRef.current?.dispose(); dirtyTrackerRef.current = null
       yarray.unobserve(updateElements)
       profileConfig.unobserve(applyProfileConfig)
       profileConfigRef.current = null
@@ -482,6 +487,10 @@ export default function App() {
       ydoc.destroy()
     }
   }, [ydoc])
+
+  useEffect(() => {
+    return addBeforeUnloadGuard(isDirty)
+  }, [isDirty])
 
   const simulationProfile = useMemo(() => ({
     ...DEFAULT_BPMN_SIMULATION,
@@ -557,9 +566,12 @@ export default function App() {
         metaMap.set('title', file.meta.title)
         metaMap.set('updatedAt', now)
       })
+      dirtyTrackerRef.current?.markSaved()
       showToast('Документ сохранён', 'success')
+    } else if (outcome.kind === 'cancelled') {
+      showToast('Сохранение отменено', 'info')
     } else if (outcome.kind === 'failed') {
-      showToast('Не удалось сохранить документ', 'error')
+      showToast('Не удалось сохранить документ. Проверьте доступ к файлу.', 'error')
     }
   }, [elements, fileSession, showToast, ydoc])
 
@@ -1633,6 +1645,7 @@ export default function App() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
             </div>
             <span className={`text-[15px] font-bold tracking-tight ${textC}`}>MiroBoard</span>
+            <span role="status" aria-live="polite" className={`text-[11px] font-semibold ${isDirty ? 'text-amber-700' : textSec}`}>{isDirty ? 'Не сохранено' : 'Сохранено'}</span>
             <span className="select-text rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600" title="Build version: можно выделить и скопировать">{__MIROBOARD_VERSION__}</span>
             <div className="ml-1 hidden rounded-lg bg-slate-100 p-0.5 sm:flex">
               {([
@@ -1971,9 +1984,7 @@ export default function App() {
                 className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
                 title={t.label}>{t.icon}</button>
             ))}
-
             <div className={`w-px h-7 ${dk ? 'bg-slate-600' : 'bg-black/10'} mx-0.5`} />
-
             {([
               { id: 'sticky', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" fill="#FFD93D" stroke="#000" strokeOpacity="0.1" /><path d="M7 8h10M7 12h7M7 16h4" stroke="#000" strokeOpacity="0.5" strokeWidth="1.5" strokeLinecap="round" /></svg> },
               { id: 'text', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7V4h16v3M9 20h6M12 4v16" /></svg> },
@@ -1989,24 +2000,21 @@ export default function App() {
                 className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
               >{t.icon}</button>
             ))}
-
             <div className={`w-px h-7 ${dk ? 'bg-slate-600' : 'bg-black/10'} mx-0.5`} />
-
             {/* Color */}
             <button onClick={() => setShowColorPicker(!showColorPicker)}
               className={`size-11 grid place-items-center rounded-[14px] ${hoverBg} transition`}>
               <div className="size-6 rounded-full ring-2 ring-black/10 shadow-inner" style={{ backgroundColor: color, border: color === '#FFFFFF' ? `1px solid ${dk ? '#555' : '#ddd'}` : 'none' }} />
             </button>
-
             {/* More */}
             <button onClick={() => { setShowMore(value => !value); setShowBpmnPalette(false) }}
+              aria-label="Дополнительные инструменты"
               className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${showMore ? 'bg-black text-white' : `${textSec} ${hoverBg}`}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
             </button>
           </div>
         </div>
       </div>
-
       {/* ===== MORE MENU ===== */}
       {showMore && (
         <div className={`absolute bottom-[104px] left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 p-1.5 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
@@ -2069,7 +2077,6 @@ export default function App() {
           </button>
         </div>
       )}
-
       {/* ===== CONTEXT MENU ===== */}
       {contextMenu && (
         <div className="absolute z-40" style={{
@@ -2086,7 +2093,6 @@ export default function App() {
           </div>
         </div>
       )}
-
       {/* ===== STICKY COLORS ===== */}
       {selectedBpmnTask && !contextMenu && (
         <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC} max-md:inset-x-3 max-md:top-auto max-md:bottom-20 max-md:w-auto max-md:max-h-[46vh] max-md:overflow-y-auto`} data-ui>
@@ -2223,7 +2229,6 @@ export default function App() {
           ))}
         </div>
       )}
-
       {/* ===== SIMULATION MODAL ===== */}
       {showSimulationPanel && (
         <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowSimulationPanel(false)} data-ui>
@@ -2258,7 +2263,6 @@ export default function App() {
                 <input type="number" min="0" step="0.1" value={arrivalInterval} onChange={event => setArrivalInterval(event.target.value)} className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'border-slate-200'}`} />
               </label>
             </div>
-
             {/* Arrival Classes */}
             <details className={`mt-4 rounded-xl border ${dk ? 'border-slate-600' : 'border-slate-200'}`}>
               <summary className={`cursor-pointer px-3 py-2 text-sm font-semibold ${textSec} hover:bg-slate-50 rounded-xl`}>
@@ -2278,7 +2282,6 @@ export default function App() {
                 </button>
               </div>
             </details>
-
             {/* Role Policies */}
             {detectedRoles.length > 0 && (
               <details className={`mt-3 rounded-xl border ${dk ? 'border-slate-600' : 'border-slate-200'}`}>
@@ -2302,7 +2305,6 @@ export default function App() {
                 </div>
               </details>
             )}
-
             <button onClick={simulateBpmn} className="w-full mt-4 rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-4 py-2.5 text-sm font-bold text-white">
               Запустить симуляцию
             </button>
@@ -2363,7 +2365,6 @@ export default function App() {
           </section>
         </div>
       )}
-
       {/* ===== PROJECT HISTORY MODAL ===== */}
       {showProjectHistory && (
         <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowProjectHistory(false)} data-ui>
@@ -2375,7 +2376,6 @@ export default function App() {
               </div>
               <button onClick={() => setShowProjectHistory(false)} className={`size-9 rounded-xl text-lg ${hoverBg}`} aria-label="Закрыть историю">×</button>
             </div>
-
             <div className="grid gap-3 sm:grid-cols-3 mb-6">
               <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer" className={`rounded-2xl p-3 ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-50 hover:bg-slate-100'} transition`}>
                 <div className={`text-[11px] font-semibold ${textSec}`}>Репозиторий</div>
@@ -2390,7 +2390,6 @@ export default function App() {
                 <div className="mt-1 text-sm font-bold">Не измеряются достоверно</div>
               </div>
             </div>
-
             <div className={`rounded-2xl p-4 mb-5 ${dk ? 'bg-indigo-950/70' : 'bg-indigo-50'}`}>
               <h3 className="text-sm font-bold">Стек и engineering harness</h3>
               <p className={`mt-1 text-[13px] leading-5 ${textSec}`}>
@@ -2409,7 +2408,6 @@ export default function App() {
                 jj автоматически хранит локальные операции и позволяет безопасно отменять шаги, но пока не генерирует этот UI-список commits. В текущем release список обновляется вручную и поэтому отражает только опубликованные этапы. Сейчас развивается BPMN-симулятор: после длительностей, стоимости и ресурсов добавлены очереди, SLA и рабочий календарь. Следующий этап, приоритеты очереди, несколько экземпляров процесса и bottleneck-анализ.
               </p>
             </div>
-
             <h3 className="text-sm font-bold mb-3">Этапы</h3>
             <ol className="space-y-3">
               {PROJECT_HISTORY.map(({ date, commit, title, release }) => (
@@ -2426,7 +2424,6 @@ export default function App() {
           </section>
         </div>
       )}
-
       {/* ===== LEARNING MODULES MODAL ===== */}
       {showLearningModules && (
         <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-slate-900/35 backdrop-blur-sm" onClick={() => setShowLearningModules(false)} data-ui>
@@ -2448,7 +2445,6 @@ export default function App() {
           </section>
         </div>
       )}
-
       {/* ===== TEMPLATES MODAL ===== */}
       {showTemplates && (
         <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowTemplates(false)} data-ui>
@@ -2489,7 +2485,6 @@ export default function App() {
           </div>
         </div>
       )}
-
       {/* ===== ZOOM CONTROLS ===== */}
       <div className="absolute right-3 bottom-[120px] z-20 flex flex-col gap-1.5" data-ui>
         <div className={`flex flex-col rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC} overflow-hidden`}>
@@ -2511,14 +2506,12 @@ export default function App() {
           {Math.round(transform.scale * 100)}%
         </div>
       </div>
-
       {/* ===== ELEMENT COUNT ===== */}
       {elements.length > 0 && (
         <div className={`absolute top-[60px] left-3 z-10 h-6 px-2.5 rounded-full ${dk ? 'bg-slate-800/80 border-slate-600' : 'bg-white/80 border-black/5'} border backdrop-blur-sm text-[11px] font-medium ${dk ? 'text-slate-400' : 'text-black/40'} flex items-center gap-1`}>
           {elements.length} элем.
         </div>
       )}
-
       <style>{`
         * { -webkit-tap-highlight-color: transparent; }
         html, body { overscroll-behavior: none; position: fixed; overflow: hidden; width: 100%; height: 100%; }
