@@ -36,6 +36,18 @@ describe('createDirtyTracker', () => {
     expect(onChange.mock.calls).toEqual([[true], [false], [true]])
   })
 
+  it('can explicitly mark a tagged history restore as dirty', () => {
+    const doc = new Y.Doc()
+    const onChange = vi.fn()
+    const tracker = createDirtyTracker(doc, onChange)
+
+    doc.transact(() => doc.getArray('elements').push(['restored']), HISTORY_RESTORE_ORIGIN)
+    tracker.markDirty()
+
+    expect(tracker.isDirty()).toBe(true)
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(true)
+  })
+
   it.each([
     ['recovery replay', RECOVERY_ORIGIN],
     ['history restore', HISTORY_RESTORE_ORIGIN],

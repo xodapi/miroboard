@@ -8,6 +8,7 @@ export const RECOVERY_ORIGIN = Symbol('recovery')
 
 export interface DirtyTracker {
   isDirty(): boolean
+  markDirty(): void
   markSaved(): void
   dispose(): void
 }
@@ -39,6 +40,12 @@ export function createDirtyTracker(
   ydoc.on('update', handler)
   return {
     isDirty: () => dirty,
+    markDirty: () => {
+      if (!dirty) {
+        dirty = true
+        onChange(true)
+      }
+    },
     markSaved: () => {
       dirty = false
       onChange(false)

@@ -57,4 +57,35 @@ describe('history snapshots', () => {
     )
     expect(readSnapshot(doc, checkpoint)).toHaveLength(100)
   })
+
+  it('restores content only as one undoable transaction without duplicating ids', () => {
+    const doc = new Y.Doc({ gc: false })
+    const elements = doc.getArray<{ id: string; text: string }>('elements')
+    const meta = doc.getMap('meta')
+    const profileConfig = doc.getMap('profileConfig')
+    const undo = new Y.UndoManager(elements, {
+      captureTimeout: 500,
+      trackedOrigins: new Set([null, HISTORY_RESTORE_ORIGIN]),
+    })
+
+    elements.push([{ id: 'deleted', text: 'original' }, { id: 'kept', text: 'kept' }])
+    const origin = captureSnapshot(doc, 'auto')
+    elements.delete(0, elements.length)
+    elements.push([{ id: 'current', text: 'current' }])
+    meta.set('title', 'Current title')
+    profileConfig.set('bpmn', { simulation: { seed: '99' } })
+
+    undo.stopCapturing()
+    restoreSnapshot(doc, origin)
+
+    expect(elements.toArray()).toEqual([{ id: 'deleted', text: 'original' }, { id: 'kept', text: 'kept' }])
+    expect(new Set(elements.toArray().map(element => element.id)).size).toBe(elements.length)
+    expect(meta.toJSON()).toEqual({ title: 'Current title' })
+    expect(profileConfig.toJSON()).toEqual({ bpmn: { simulation: { seed: '99' } } })
+
+    undo.undo()
+    expect(elements.toArray()).toEqual([{ id: 'current', text: 'current' }])
+    undo.redo()
+    expect(elements.toArray()).toEqual([{ id: 'deleted', text: 'original' }, { id: 'kept', text: 'kept' }])
+  })
 })

@@ -9,7 +9,7 @@ import { openDocument, openDroppedDocument, saveDocument, type FileSession, type
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
-import { captureSnapshot, HISTORY_RESTORE_ORIGIN, readSnapshot } from './history/snapshots'
+import { captureSnapshot, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot } from './history/snapshots'
 import { createCaptureTriggers, type CaptureTriggers } from './history/capture-triggers'
 import { TimelinePanel, formatSnapshotTimestamp } from './history/TimelinePanel'
 import { attachRecoveryCache } from './persistence/indexeddb'
@@ -290,7 +290,6 @@ export default function App() {
     exitPreview()
   }, [exitPreview])
   const selectSnapshot = useCallback((snapshot: HistorySnapshot) => {
-    // readSnapshot creates and destroys an isolated document; it never writes to the live Y.Doc.
     const historical = readSnapshot<BoardElement>(ydoc, snapshot)
     setPreviewSnapshot(snapshot)
     setPreviewElements(historical)
@@ -303,6 +302,10 @@ export default function App() {
     chooseTool('pan')
     setShowTimeline(true)
   }, [chooseTool, ydoc])
+  const restorePreview = useCallback(() => {
+    if (!previewSnapshot) return; appendCheckpoint('auto'); undoManagerRef.current?.stopCapturing()
+    restoreSnapshot<BoardElement>(ydoc, previewSnapshot); dirtyTrackerRef.current?.markDirty(); exitPreview(); showToast('Состояние восстановлено', 'success')
+  }, [appendCheckpoint, exitPreview, previewSnapshot, showToast, ydoc])
   const markCurrentState = useCallback(() => {
     const label = window.prompt('Название состояния')
     if (label === null) return
@@ -693,7 +696,6 @@ export default function App() {
     })
   }, [applyOpenOutcome, requestOpen, showOpenFailure, showToast])
   const { isDropTarget, onDragEnter, onDragOver, onDragLeave, onCanvasDrop } = useFileDrop(loadDroppedBoard)
-
   // ======================== HELPERS ========================
 
   const screenToWorld = useCallback((sx: number, sy: number): Point => {
@@ -704,7 +706,6 @@ export default function App() {
       y: (sy - rect.top - transform.y) / transform.scale
     }
   }, [transform])
-
   const addElement = useCallback((el: BoardElement) => {
     if (previewSnapshot) return
     if (!yElements.current) return
@@ -1820,6 +1821,7 @@ export default function App() {
         <div role="status" aria-live="polite" className={`absolute left-1/2 top-[62px] z-50 -translate-x-1/2 rounded-xl border px-4 py-2 text-center text-xs font-semibold shadow-lg ${dk ? 'border-violet-400 bg-violet-950 text-violet-100' : 'border-violet-300 bg-violet-50 text-violet-900'}`} data-ui>
           Просмотр состояния от {formatSnapshotTimestamp(previewSnapshot.at)}
           {previewSnapshot.kind === 'named' && previewSnapshot.label ? `, «${previewSnapshot.label}»` : ''}. Редактирование отключено.
+          <button onClick={restorePreview} className="ml-3 rounded-md bg-violet-600 px-2 py-1 text-white hover:bg-violet-700">Восстановить это состояние</button>
           <button onClick={closeTimeline} className="ml-3 rounded-md px-2 py-1 underline underline-offset-2 hover:bg-violet-200/40">Закрыть</button>
         </div>
       )}
