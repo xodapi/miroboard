@@ -62,7 +62,7 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/format/**", "src/persistence/**", "src/history/**"],
+      include: ["src/format/**/*.ts", "src/persistence/**/*.ts", "src/history/**/*.ts"],
       thresholds: {
         lines: 90,
         functions: 90,

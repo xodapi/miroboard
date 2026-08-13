@@ -37,4 +37,18 @@ export default tseslint.config(
       globals: globals.node,
     },
   },
+  {
+    files: ['src/format/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['yjs', 'yjs/**'], message: 'format modules must not depend on Yjs.' },
+          { group: ['react', 'react/**'], message: 'format modules must remain DOM-free.' },
+          { group: ['../persistence/**', '@/persistence/**'], message: 'format modules must not import persistence.' },
+          { group: ['../history/**', '@/history/**'], message: 'format modules must not import history.' },
+          { group: ['../App', '../App.*', '@/App', '@/App.*'], message: 'format modules must not import App.' }
+        ],
+      }],
+    },
+  },
 )
