@@ -37,6 +37,8 @@ export type OpenOutcome =
   | { kind: 'cancelled' }
   | { kind: 'failed'; failure: LoadFailure }
 
+export type DroppedOpenOutcome = (OpenOutcome & { ignoredFileCount: number })
+
 export function hasFileSystemAccess(): boolean {
   return typeof window !== 'undefined' && typeof (window as SavePickerWindow).showSaveFilePicker === 'function'
 }
@@ -102,6 +104,42 @@ async function readMboard(file: File): Promise<OpenOutcome> {
   return loaded.ok
     ? { kind: 'opened', file: loaded.file, session: { handle: null, name: file.name, isUntitled: false } }
     : { kind: 'failed', failure: loaded.failure }
+}
+
+type FileSystemDataTransferItem = DataTransferItem & {
+  getAsFileSystemHandle?: () => Promise<FileSystemFileHandle | FileSystemDirectoryHandle | null>
+}
+
+/**
+ * Opens exactly the first dropped file. A matching File System Access item
+ * retains its writable handle; browsers without it use the read-only File.
+ */
+export async function openDroppedDocument(transfer: DataTransfer): Promise<DroppedOpenOutcome> {
+  const files = Array.from(transfer.files)
+  const ignoredFileCount = Math.max(0, files.length - 1)
+  const file = files[0]
+  if (!file) return { kind: 'cancelled', ignoredFileCount }
+  if (!file.name.toLowerCase().endsWith(MBOARD_EXTENSION)) {
+    return { kind: 'failed', failure: { kind: 'not-mboard' }, ignoredFileCount }
+  }
+
+  const item = transfer.items?.[0] as FileSystemDataTransferItem | undefined
+  let handle: FileSystemFileHandle | null = null
+  try {
+    const candidate = await item?.getAsFileSystemHandle?.()
+    if (candidate?.kind === 'file') handle = candidate
+  } catch {
+    // A browser may deny a dropped handle. The File remains a safe read-only fallback.
+  }
+  const loaded = await readMboard(file)
+  if (loaded.kind !== 'opened') return { ...loaded, ignoredFileCount }
+  return {
+    ...loaded,
+    ignoredFileCount,
+    session: handle
+      ? { handle, name: handle.name, isUntitled: false }
+      : loaded.session,
+  }
 }
 
 function chooseFileFallback(): Promise<File | null> {

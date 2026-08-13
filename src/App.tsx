@@ -3,6 +3,9 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
+import { useFileDrop } from './hooks/useFileDrop'
+import { loadDroppedBoard as loadDroppedDocument } from './persistence/drop'
+import { DropTargetCue } from './components/DropTargetCue'
 import { openDocument, saveDocument, type FileSession } from './persistence/files'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
@@ -562,6 +565,19 @@ export default function App() {
       showToast(`Открыт документ «${outcome.session.name}»`, 'success')
     }
   }, [isDirty, showToast, ydoc])
+  const loadDroppedBoard = useCallback(async (transfer: DataTransfer) => {
+    await loadDroppedDocument(
+      transfer, { ydoc, elements: yElements.current }, isDirty, dirtyTrackerRef.current,
+      () => window.confirm('Несохраненные изменения будут потеряны. Продолжить?'),
+      (session, ignoredFileCount) => {
+        setFileSession(session)
+        setSelectedId(null)
+        showToast(ignoredFileCount ? `Открыт первый .mboard, ещё файлов проигнорировано: ${ignoredFileCount}` : `Открыт документ «${session.name}»`, 'success')
+      },
+      () => showToast('Поддерживаются только документы .mboard', 'error'),
+    )
+  }, [isDirty, showToast, ydoc])
+  const { isDropTarget, onDragEnter, onDragOver, onDragLeave, onCanvasDrop } = useFileDrop(loadDroppedBoard)
 
   // ======================== HELPERS ========================
 
@@ -1732,7 +1748,7 @@ export default function App() {
       </div>
 
       {toast && (
-        <div className={`absolute right-4 top-16 z-[60] max-w-sm rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${toast.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-violet-200 bg-violet-50 text-violet-800'}`} data-ui>
+        <div className={`absolute right-4 top-16 z-[60] max-w-sm rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${toast.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-violet-200 bg-violet-50 text-violet-800'}`} data-ui aria-live="polite">
           <div className="flex items-start gap-3"><span>{toast.tone === 'error' ? '!' : toast.tone === 'success' ? '✓' : 'i'}</span><span>{toast.message}</span><button onClick={() => setToast(null)} className="ml-auto text-base leading-none">×</button></div>
         </div>
       )}
@@ -1764,12 +1780,15 @@ export default function App() {
       )}
 
       {/* ===== CANVAS ===== */}
-      <div ref={canvasRef} className="absolute inset-0 touch-none"
+      <div ref={canvasRef} data-testid="canvas" className="absolute inset-0 touch-none"
         onPointerDown={handlePointerDown} onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp}
         onTouchMove={handleTouchMove} onWheel={handleWheel}
+        onDragEnter={onDragEnter} onDragOver={onDragOver}
+        onDragLeave={onDragLeave} onDrop={onCanvasDrop}
         onContextMenu={e => e.preventDefault()}
         style={{ touchAction: 'none' }}>
+        {isDropTarget && <DropTargetCue />}
 
         <svg ref={svgRef} className="absolute inset-0 w-full h-full" style={{ touchAction: 'none' }}
           onDoubleClick={e => {

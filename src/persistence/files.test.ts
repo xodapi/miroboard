@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hasFileSystemAccess, openDocument, saveDocument, type FileSession } from './files'
+import { hasFileSystemAccess, openDocument, openDroppedDocument, saveDocument, type FileSession } from './files'
 import type { MboardFile } from '../format/types'
 
 const documentFile = (): MboardFile => ({
@@ -107,5 +107,39 @@ describe('file save paths', () => {
     const handle = { name: 'bad.mboard', getFile: vi.fn().mockResolvedValue({ name: 'bad.mboard', text: async () => '{}' }) }
     ;(window as Window & { showOpenFilePicker?: unknown }).showOpenFilePicker = vi.fn().mockResolvedValue([handle])
     await expect(openDocument()).resolves.toEqual({ kind: 'failed', failure: { kind: 'not-mboard' } })
+  })
+
+  it('opens the first dropped .mboard and retains an item FSA handle', async () => {
+    const handle = { kind: 'file', name: 'dropped.mboard' }
+    const file = { name: 'dropped.mboard', text: async () => JSON.stringify(documentFile()) } as File
+    const transfer = {
+      files: [file],
+      items: [{ getAsFileSystemHandle: vi.fn().mockResolvedValue(handle) }],
+    } as unknown as DataTransfer
+
+    await expect(openDroppedDocument(transfer)).resolves.toMatchObject({
+      kind: 'opened',
+      session: { handle, name: 'dropped.mboard', isUntitled: false },
+      ignoredFileCount: 0,
+    })
+  })
+
+  it('rejects a dropped non-.mboard without reading it', async () => {
+    const file = new File(['not a board'], 'image.png', { type: 'image/png' })
+    const transfer = { files: [file], items: [] } as unknown as DataTransfer
+
+    await expect(openDroppedDocument(transfer)).resolves.toEqual({
+      kind: 'failed', failure: { kind: 'not-mboard' }, ignoredFileCount: 0,
+    })
+  })
+
+  it('uses only the first file in a multi-file drop', async () => {
+    const first = { name: 'first.mboard', text: async () => JSON.stringify(documentFile()) } as File
+    const second = { name: 'second.mboard', text: async () => 'ignored' } as File
+    const transfer = { files: [first, second], items: [] } as unknown as DataTransfer
+
+    await expect(openDroppedDocument(transfer)).resolves.toMatchObject({
+      kind: 'opened', ignoredFileCount: 1, session: { name: 'first.mboard' },
+    })
   })
 })
