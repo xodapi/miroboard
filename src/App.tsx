@@ -9,8 +9,9 @@ import { openDocument, openDroppedDocument, saveDocument, type FileSession, type
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
-import { captureSnapshot, HISTORY_RESTORE_ORIGIN } from './history/snapshots'
+import { captureSnapshot, HISTORY_RESTORE_ORIGIN, readSnapshot } from './history/snapshots'
 import { createCaptureTriggers, type CaptureTriggers } from './history/capture-triggers'
+import { TimelinePanel, formatSnapshotTimestamp } from './history/TimelinePanel'
 import { attachRecoveryCache } from './persistence/indexeddb'
 import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/legacy-adoption'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
@@ -197,6 +198,9 @@ export default function App() {
     try { return localStorage.getItem('miro-onboarding-seen') ? -1 : 0 } catch { return -1 }
   })
   const [showProjectHistory, setShowProjectHistory] = useState(false)
+  const [showTimeline, setShowTimeline] = useState(false)
+  const [previewSnapshot, setPreviewSnapshot] = useState<HistorySnapshot | null>(null)
+  const [previewElements, setPreviewElements] = useState<BoardElement[] | null>(null)
   const [showSimulationPanel, setShowSimulationPanel] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [fileSession, setFileSession] = useState<FileSession>({ handle: null, name: null, isUntitled: true })
@@ -273,6 +277,32 @@ export default function App() {
     setHistorySnapshots(historySnapshotsRef.current)
     return checkpoint
   }, [ydoc])
+  const exitPreview = useCallback(() => {
+    setPreviewSnapshot(null)
+    setPreviewElements(null)
+    setSelectedId(null)
+    setEditingText(null)
+    transientFrameRef.current = null
+    setTransientFrame(null)
+  }, [])
+  const closeTimeline = useCallback(() => {
+    setShowTimeline(false)
+    exitPreview()
+  }, [exitPreview])
+  const selectSnapshot = useCallback((snapshot: HistorySnapshot) => {
+    // readSnapshot creates and destroys an isolated document; it never writes to the live Y.Doc.
+    const historical = readSnapshot<BoardElement>(ydoc, snapshot)
+    setPreviewSnapshot(snapshot)
+    setPreviewElements(historical)
+    setSelectedId(null)
+    setEditingText(null)
+    setShowMore(false)
+    setShowColorPicker(false)
+    setShowEmoji(false)
+    setShowBpmnPalette(false)
+    chooseTool('pan')
+    setShowTimeline(true)
+  }, [chooseTool, ydoc])
   const markCurrentState = useCallback(() => {
     const label = window.prompt('Название состояния')
     if (label === null) return
@@ -676,25 +706,29 @@ export default function App() {
   }, [transform])
 
   const addElement = useCallback((el: BoardElement) => {
+    if (previewSnapshot) return
     if (!yElements.current) return
     ydoc.transact(() => { yElements.current!.push([el]) })
     if ('vibrate' in navigator) navigator.vibrate(10)
-  }, [ydoc])
+  }, [previewSnapshot, ydoc])
 
   const updateElement = useCallback((id: string, updates: Partial<BoardElement>) => {
+    if (previewSnapshot) return
     if (!yElements.current) return
     commitElementUpdate(ydoc, yElements.current, id, updates)
-  }, [ydoc])
+  }, [previewSnapshot, ydoc])
 
   const deleteElement = useCallback((id: string) => {
+    if (previewSnapshot) return
     if (!yElements.current) return
     const idx = yElements.current.toArray().findIndex(e => e.id === id)
     if (idx >= 0) ydoc.transact(() => { yElements.current!.delete(idx, 1) })
     setSelectedId(null)
     setContextMenu(null)
-  }, [ydoc])
+  }, [previewSnapshot, ydoc])
 
   const bringToFront = useCallback((id: string) => {
+    if (previewSnapshot) return
     if (!yElements.current) return
     const idx = yElements.current.toArray().findIndex(e => e.id === id)
     if (idx >= 0) {
@@ -706,7 +740,7 @@ export default function App() {
         yElements.current!.push([{ ...el, zIndex }])
       })
     }
-  }, [ydoc])
+  }, [previewSnapshot, ydoc])
 
   const sendToBack = useCallback((id: string) => {
     updateElement(id, { zIndex: 0 })
@@ -742,12 +776,14 @@ export default function App() {
   const { canUndo, canRedo } = undoState
 
   const handleUndo = useCallback(() => {
+    if (previewSnapshot) return
     undoManagerRef.current?.undo()
-  }, [])
+  }, [previewSnapshot])
 
   const handleRedo = useCallback(() => {
+    if (previewSnapshot) return
     undoManagerRef.current?.redo()
-  }, [])
+  }, [previewSnapshot])
 
   const applyTemplate = useCallback((name: string) => {
     if (!yElements.current) return
@@ -1033,6 +1069,13 @@ export default function App() {
     setShowMore(false)
 
     const point = screenToWorld(e.clientX, e.clientY)
+    if (previewSnapshot) {
+      if (tool === 'pan' || (tool === 'select' && e.altKey) || e.button === 1) {
+        setIsPanning(true)
+        setPanStart({ x: e.clientX - transform.x, y: e.clientY - transform.y })
+      }
+      return
+    }
     console.log('[BPMN diagnostic] canvas pointerdown before placement', JSON.stringify({
       tool,
       point,
@@ -1189,7 +1232,6 @@ export default function App() {
       chooseTool('select')
       return
     }
-
     if (tool === 'sticky' || tool === 'text') {
       const id = genId()
       const newEl: BoardElement = {
@@ -1207,7 +1249,6 @@ export default function App() {
       chooseTool('select')
       return
     }
-
     if (tool === 'rect' || tool === 'circle' || tool === 'arrow' || tool === 'line') {
       const id = genId()
       addElement({
@@ -1218,19 +1259,16 @@ export default function App() {
       setIsDrawing(true)
       return
     }
-
     if (tool === 'pen' || tool === 'marker') {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, showBpmnPalette])
-
+  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, showBpmnPalette, previewSnapshot])
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
     const isLaser = tool === 'laser'
     if (isLaser) setLaserPos(point)
     if (tool === 'bpmnSequence' && bpmnFlowSourceId) setFlowPreviewPoint(point)
-
     // Cancel long press if moved
     if (longPressRef.current) {
       if (Math.hypot(e.clientX - longPressRef.current.x, e.clientY - longPressRef.current.y) > 8) {
@@ -1238,12 +1276,10 @@ export default function App() {
         longPressRef.current = null
       }
     }
-
     if (isPanning && panStart) {
       setTransform(t => ({ ...t, x: e.clientX - panStart.x, y: e.clientY - panStart.y }))
       return
     }
-
     // Resize
     if (resizeInfo) {
       const dx = point.x - resizeInfo.startX
@@ -1251,19 +1287,16 @@ export default function App() {
       const c = resizeInfo.corner
       let newX = resizeInfo.elX, newY = resizeInfo.elY
       let newW = resizeInfo.elW, newH = resizeInfo.elH
-
       if (c === 'se') { newW = Math.max(30, resizeInfo.elW + dx); newH = Math.max(30, resizeInfo.elH + dy) }
       else if (c === 'sw') { newX = resizeInfo.elX + dx; newW = Math.max(30, resizeInfo.elW - dx); newH = Math.max(30, resizeInfo.elH + dy) }
       else if (c === 'ne') { newY = resizeInfo.elY + dy; newW = Math.max(30, resizeInfo.elW + dx); newH = Math.max(30, resizeInfo.elH - dy) }
       else if (c === 'nw') { newX = resizeInfo.elX + dx; newY = resizeInfo.elY + dy; newW = Math.max(30, resizeInfo.elW - dx); newH = Math.max(30, resizeInfo.elH - dy) }
-
       if (snapGrid) { newX = snapVal(newX); newY = snapVal(newY); newW = snapVal(newW); newH = snapVal(newH) }
       const frame = { id: resizeInfo.id, updates: { x: newX, y: newY, w: newW, h: newH } }
       transientFrameRef.current = frame
       setTransientFrame(frame)
       return
     }
-
     // Drag
     if (dragInfo) {
       let newX = dragInfo.elStartX + (point.x - dragInfo.startX)
@@ -1274,14 +1307,11 @@ export default function App() {
       setTransientFrame(frame)
       return
     }
-
     if (!isDrawing) return
-
     if (tool === 'pen' || tool === 'marker') {
       setCurrentPath(prev => [...prev, point])
       return
     }
-
     if (selectedId && (tool === 'rect' || tool === 'circle' || tool === 'arrow' || tool === 'line')) {
       const el = elements.find(e => e.id === selectedId)
       if (el) {
@@ -1291,14 +1321,12 @@ export default function App() {
       }
     }
   }, [isPanning, panStart, isDrawing, tool, selectedId, elements, screenToWorld, updateElement, dragInfo, resizeInfo, snapGrid, bpmnFlowSourceId])
-
   const handlePointerUp = useCallback(() => {
     // Cancel long press
     if (longPressRef.current) {
       clearTimeout(longPressRef.current.timer)
       longPressRef.current = null
     }
-
     if (isDrawing && (tool === 'pen' || tool === 'marker') && currentPath.length > 1) {
       const simplified = simplifyPath(currentPath, 2)
       const xs = simplified.map(p => p.x), ys = simplified.map(p => p.y)
@@ -1324,7 +1352,6 @@ export default function App() {
     setDragInfo(null)
     setResizeInfo(null)
   }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, user.id, updateElement])
-
   // Touch pinch
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -1343,7 +1370,6 @@ export default function App() {
       setLastPinchDist(dist)
     }
   }, [lastPinchDist, screenToWorld])
-
   // Wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault()
@@ -1355,7 +1381,6 @@ export default function App() {
       return { scale: ns, x: e.clientX - point.x * ns, y: e.clientY - point.y * ns }
     })
   }, [screenToWorld])
-
   const fitToContent = useCallback(() => {
     const scoped = workspaceMode === 'board'
       ? elements.filter(element => !element.bpmnNodeType && !element.bpmnFlow)
@@ -1380,14 +1405,13 @@ export default function App() {
       y: (window.innerHeight - (maxY - minY) * scale) / 2 - minY * scale,
     })
   }, [elements, workspaceMode])
-
   useEffect(() => () => {
     bpmnRunTimersRef.current.forEach(window.clearTimeout)
   }, [])
-
   // Keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && previewSnapshot) { e.preventDefault(); closeTimeline(); return }
       if (editingText) return
       if (showSimulationPanel && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
@@ -1429,20 +1453,21 @@ export default function App() {
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
-  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard])
-
+  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
   // ======================== RENDER ELEMENT ========================
+  const isPreview = previewSnapshot !== null
+  const liveElementIds = useMemo(() => new Set(elements.map(element => element.id)), [elements])
+  const baseRenderedElements = previewElements ?? elements
   const renderedElements = useMemo(() => {
-    if (!transientFrame) return elements
-    return elements.map(element => element.id === transientFrame.id
+    if (!transientFrame || isPreview) return baseRenderedElements
+    return baseRenderedElements.map(element => element.id === transientFrame.id
       ? { ...element, ...transientFrame.updates }
       : element)
-  }, [elements, transientFrame])
-
+  }, [baseRenderedElements, isPreview, transientFrame])
   const renderElement = (el: BoardElement) => {
     const isSelected = selectedId === el.id
     const invS = 1 / transform.scale
-
+    const isChangedInPreview = isPreview && !liveElementIds.has(el.id)
     if (el.bpmnNodeType) {
       const width = el.w || 80
       const height = el.h || 80
@@ -1453,7 +1478,8 @@ export default function App() {
       const isEvent = el.bpmnNodeType === 'startEvent' || el.bpmnNodeType === 'endEvent'
       const isBottleneck = el.bpmnNodeType === 'task' && visibleBottleneckRole !== null && el.bpmnResourceRole === visibleBottleneckRole
       return (
-        <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
+        <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+          {isChangedInPreview && <rect x={-7} y={-7} width={width + 14} height={height + 14} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={12} />}
           {el.bpmnNodeType === 'startEvent' && <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={3} />}
           {el.bpmnNodeType === 'endEvent' && <>
             <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={5} />
@@ -1482,13 +1508,13 @@ export default function App() {
         </g>
       )
     }
-
     switch (el.type) {
       case 'path': {
         if (!el.points || el.points.length < 2) return null
         const d = smoothPathD(el.points)
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none">
+            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
             <path d={d} fill="none" stroke={el.color} strokeWidth={el.stroke}
               strokeLinecap="round" strokeLinejoin="round" className="pointer-events-stroke"
               style={{ paintOrder: 'stroke', ...(el.stroke && el.stroke > 6 ? { filter: `blur(${el.stroke > 10 ? 1 : 0}px)` } : {}) }} />
@@ -1499,10 +1525,10 @@ export default function App() {
           </g>
         )
       }
-
       case 'sticky':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
+          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={14} />}
             <rect width={el.w} height={el.h} fill={el.fill} rx={10}
               style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.12))' }} />
             <rect width={el.w} height={el.h} fill={el.fill} rx={10} />
@@ -1514,7 +1540,7 @@ export default function App() {
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); updateElement(el.id, { text: editValue }); setEditingText(null) } }}
                     className="w-full h-full bg-transparent outline-none resize-none text-center text-[14px]" />
                 ) : (
-                  <div onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }}>{el.text}</div>
+                  <div onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}>{el.text}</div>
                 )}
               </div>
             </foreignObject>
@@ -1529,13 +1555,13 @@ export default function App() {
             </>}
           </g>
         )
-
       case 'text':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
+          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 200) + 12} height={(el.h || 60) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
             <foreignObject width={el.w || 200} height={el.h || 60}>
               <div className="w-full h-full select-none"
-                onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }}>
+                onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}>
                 {editingText === el.id ? (
                   <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
                     onBlur={() => { updateElement(el.id, { text: editValue }); setEditingText(null) }}
@@ -1550,14 +1576,14 @@ export default function App() {
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
           </g>
         )
-
       case 'rect':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move"
-            onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }}
-            onDoubleClickCapture={() => { setEditingText(el.id); setEditValue(el.text || '') }}
-            onMouseDown={e => { if (e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
-            onMouseUp={e => { if (e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}>
+          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}
+            onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
+            onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
+            onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
+            onMouseUp={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}>
+            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={8} />}
             <rect width={el.w} height={el.h} fill={el.fill || 'transparent'} stroke={el.color}
               strokeWidth={el.stroke} rx={4}
               onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }} />
@@ -1583,14 +1609,14 @@ export default function App() {
             </>}
           </g>
         )
-
       case 'circle':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move"
-            onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }}
-            onDoubleClickCapture={() => { setEditingText(el.id); setEditValue(el.text || '') }}
-            onMouseDown={e => { if (e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
-            onMouseUp={e => { if (e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}>
+          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}
+            onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
+            onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
+            onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
+            onMouseUp={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}>
+            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={8} />}
             <ellipse cx={(el.w || 0) / 2} cy={(el.h || 0) / 2} rx={Math.abs((el.w || 0) / 2)} ry={Math.abs((el.h || 0) / 2)}
               fill={el.fill || 'transparent'} stroke={el.color} strokeWidth={el.stroke}
               onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }} />
@@ -1610,7 +1636,6 @@ export default function App() {
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
           </g>
         )
-
       case 'arrow': {
         const source = el.bpmnFlow ? renderedElements.find(node => node.id === el.bpmnFlow?.sourceId) : undefined
         const target = el.bpmnFlow ? renderedElements.find(node => node.id === el.bpmnFlow?.targetId) : undefined
@@ -1625,7 +1650,8 @@ export default function App() {
         const angle = Math.atan2(y2, x2)
         const hs = 12
         return (
-          <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className="touch-none cursor-move">
+          <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+            {isChangedInPreview && <rect x={Math.min(0, x2) - 7} y={Math.min(0, y2) - 7} width={Math.abs(x2) + 14} height={Math.abs(y2) + 14} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
             <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} />
             <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
               fill={el.color} />
@@ -1643,17 +1669,16 @@ export default function App() {
           </g>
         )
       }
-
       case 'line':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
+          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+            {isChangedInPreview && <rect x={Math.min(0, el.w || 0) - 7} y={Math.min(0, el.h || 0) - 7} width={Math.abs(el.w || 0) + 14} height={Math.abs(el.h || 0) + 14} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
             <line x1={0} y1={0} x2={el.w || 0} y2={el.h || 0} stroke={el.color} strokeWidth={el.stroke} strokeLinecap="round" />
             {isSelected && <rect x={Math.min(0, el.w || 0) - 4} y={Math.min(0, el.h || 0) - 4}
               width={Math.abs(el.w || 0) + 8} height={Math.abs(el.h || 0) + 8}
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
           </g>
         )
-
       case 'emoji':
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
@@ -1666,24 +1691,20 @@ export default function App() {
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={6} />}
           </g>
         )
-
       default: return null
     }
   }
-
   // ======================== JSX ========================
-  const dk = false
+  const dk = darkMode
   const bgMain = '#F7F8FC'
   const bgBar = 'bg-white/95'
   const borderC = 'border-slate-200'
   const textC = 'text-slate-900'
   const textSec = 'text-slate-500'
   const hoverBg = 'hover:bg-slate-100'
-
   return (
     <div className={`fixed inset-0 overflow-hidden select-none ${dk ? 'bg-slate-900 text-white' : 'bg-[#F7F7F5] text-black'}`}>
       <input ref={bpmnImportRef} type="file" accept=".bpmn,.xml,application/xml,text/xml" className="hidden" onChange={importFromBpmn} />
-
       {/* ===== HEADER ===== */}
       <div className={`absolute top-0 left-0 right-0 z-30 h-[52px] flex items-center justify-between px-3 ${dk ? 'bg-slate-900/90' : 'bg-white/90'} backdrop-blur-xl border-b ${borderC}`} data-ui>
         <div className="flex items-center gap-2">
@@ -1718,6 +1739,13 @@ export default function App() {
             >
               История
             </button>
+            <button
+              onClick={() => setShowTimeline(true)}
+              className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${showTimeline ? 'bg-violet-100 text-violet-700' : `${hoverBg} ${textSec}`}`}
+              title="Контрольные точки документа"
+            >
+              Контрольные точки
+            </button>
             <button onClick={() => setTourStep(0)} className={`grid size-7 place-items-center rounded-lg text-[12px] font-bold transition ${hoverBg} ${textSec}`} title="Краткий тур по интерфейсу">
               ?
             </button>
@@ -1727,16 +1755,15 @@ export default function App() {
           </div>
           <div className={`h-4 w-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
           {/* Undo/Redo */}
-          <button onClick={handleUndo} disabled={!canUndo}
+          <button onClick={handleUndo} disabled={!canUndo || isPreview}
             className={`size-8 grid place-items-center rounded-lg transition ${canUndo ? hoverBg + ' ' + textSec : 'opacity-25 cursor-default'}`} title="Отменить (Ctrl+Z)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 10h13a4 4 0 0 1 0 8H9M3 10l5-5M3 10l5 5" /></svg>
           </button>
-          <button onClick={handleRedo} disabled={!canRedo}
+          <button onClick={handleRedo} disabled={!canRedo || isPreview}
             className={`size-8 grid place-items-center rounded-lg transition ${canRedo ? hoverBg + ' ' + textSec : 'opacity-25 cursor-default'}`} title="Вернуть (Ctrl+Shift+Z)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10H8a4 4 0 0 0 0 8h7M21 10l-5-5M21 10l-5 5" /></svg>
           </button>
         </div>
-
         <div className="flex items-center gap-2">
           {tool === 'bpmnSequence' && (
             <div className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-violet-900 text-violet-100' : 'bg-violet-100 text-violet-700'}`}>
@@ -1784,13 +1811,18 @@ export default function App() {
           </button>
         </div>
       </div>
-
       {toast && (
         <div className={`absolute right-4 top-16 z-[60] max-w-sm rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${toast.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-violet-200 bg-violet-50 text-violet-800'}`} data-ui aria-live="polite">
           <div className="flex items-start gap-3"><span>{toast.tone === 'error' ? '!' : toast.tone === 'success' ? '✓' : 'i'}</span><span>{toast.message}</span><button onClick={() => setToast(null)} className="ml-auto text-base leading-none">×</button></div>
         </div>
       )}
-
+      {previewSnapshot && (
+        <div role="status" aria-live="polite" className={`absolute left-1/2 top-[62px] z-50 -translate-x-1/2 rounded-xl border px-4 py-2 text-center text-xs font-semibold shadow-lg ${dk ? 'border-violet-400 bg-violet-950 text-violet-100' : 'border-violet-300 bg-violet-50 text-violet-900'}`} data-ui>
+          Просмотр состояния от {formatSnapshotTimestamp(previewSnapshot.at)}
+          {previewSnapshot.kind === 'named' && previewSnapshot.label ? `, «${previewSnapshot.label}»` : ''}. Редактирование отключено.
+          <button onClick={closeTimeline} className="ml-3 rounded-md px-2 py-1 underline underline-offset-2 hover:bg-violet-200/40">Закрыть</button>
+        </div>
+      )}
       {pendingOpen && (
         <UnsavedChangesDialog
           onCancel={() => setPendingOpen(null)}
@@ -1810,7 +1842,6 @@ export default function App() {
           }}
         />
       )}
-
       {tourStep >= 0 && (
         <div className="absolute inset-0 z-[70] grid place-items-center bg-slate-900/45 p-4 backdrop-blur-sm" data-ui>
           {(() => {
@@ -1836,7 +1867,6 @@ export default function App() {
           })()}
         </div>
       )}
-
       {/* ===== CANVAS ===== */}
       <div ref={canvasRef} data-testid="canvas" className="absolute inset-0 touch-none"
         onPointerDown={handlePointerDown} onPointerMove={handlePointerMove}
@@ -1847,9 +1877,9 @@ export default function App() {
         onContextMenu={e => e.preventDefault()}
         style={{ touchAction: 'none' }}>
         {isDropTarget && <DropTargetCue />}
-
         <svg ref={svgRef} className="absolute inset-0 w-full h-full" style={{ touchAction: 'none' }}
           onDoubleClick={e => {
+            if (isPreview) return
             const node = (e.target as Element).closest<SVGGElement>('[data-id]')
             const id = node?.getAttribute('data-id')
             const element = id ? elements.find(candidate => candidate.id === id) : undefined
@@ -1880,7 +1910,6 @@ export default function App() {
           {snapGrid && <rect width="100%" height="100%" fill="url(#snap-grid)" />}
           <rect width="100%" height="100%" fill="url(#grid)" />
           <rect width="100%" height="100%" fill="url(#grid-large)" />
-
           <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
             {renderedElements.map(renderElement)}
             {bpmnFlowSourceId && flowPreviewPoint && (() => {
@@ -1889,7 +1918,6 @@ export default function App() {
               const start = { x: source.x + (source.w || 0) / 2, y: source.y + (source.h || 0) / 2 }
               return <line x1={start.x} y1={start.y} x2={flowPreviewPoint.x} y2={flowPreviewPoint.y} stroke="#7C3AED" strokeWidth={2} strokeDasharray="7 6" pointerEvents="none" />
             })()}
-
             {/* Current drawing path */}
             {isDrawing && currentPath.length > 1 && (tool === 'pen' || tool === 'marker') && (
               <path d={smoothPathD(currentPath)} fill="none"
@@ -1897,7 +1925,6 @@ export default function App() {
                 strokeWidth={tool === 'marker' ? strokeWidth * 3 : strokeWidth}
                 strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
             )}
-
             {/* Laser pointer */}
             {tool === 'laser' && laserPos && (
               <g transform={`translate(${laserPos.x},${laserPos.y})`}>
@@ -1908,10 +1935,8 @@ export default function App() {
                 <circle r={3} fill="#FF0000" />
               </g>
             )}
-
           </g>
         </svg>
-
         {workspaceMode === 'bpmn' && elements.some(element => element.bpmnNodeType) && (
           <aside className={`absolute left-3 top-[68px] z-20 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl shadow-slate-900/10 backdrop-blur transition-all ${sidebarCollapsed ? 'w-12' : 'w-52'}`} data-ui>
             <div className="mb-2 flex items-center justify-between px-1">
@@ -1932,7 +1957,6 @@ export default function App() {
             </div>}
           </aside>
         )}
-
         {/* Empty state */}
         {elements.length === 0 && !showTemplates && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingTop: '52px' }}>
@@ -1954,14 +1978,19 @@ export default function App() {
           </div>
         )}
       </div>
-
+      <TimelinePanel
+        darkMode={dk}
+        isOpen={showTimeline}
+        selectedId={previewSnapshot?.id ?? null}
+        snapshots={historySnapshots}
+        onClose={closeTimeline}
+        onSelect={selectSnapshot}
+      />
       {/* ===== MINIMAP ===== */}
       {showMiniMap && <MiniMap elements={renderedElements} transform={transform} darkMode={darkMode} setTransform={setTransform} />}
-
       {/* ===== BOTTOM TOOLBAR ===== */}
       <div className="absolute bottom-0 left-0 right-0 z-40 pb-[calc(env(safe-area-inset-bottom)+8px)]" data-ui>
         <div className="mx-auto w-fit max-w-[calc(100%-16px)]">
-
           {/* Emoji picker */}
           {showEmoji && (
             <div className={`mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
@@ -1975,7 +2004,6 @@ export default function App() {
               </div>
             </div>
           )}
-
           {showBpmnPalette && (
             <div className={`relative z-10 mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
               <div className="flex gap-1.5" onClickCapture={(event) => {
@@ -2023,7 +2051,6 @@ export default function App() {
               </div>
             </div>
           )}
-
           {/* Color picker */}
           {showColorPicker && (
             <div className={`mb-2 mx-auto w-fit flex items-center gap-1.5 p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
@@ -2041,7 +2068,6 @@ export default function App() {
               ))}
             </div>
           )}
-
           {/* Main toolbar */}
           <div className={`flex items-center gap-0.5 p-1.5 rounded-[22px] ${bgBar} backdrop-blur-2xl shadow-2xl shadow-black/20 border ${borderC}`}>
             {([
@@ -2050,7 +2076,7 @@ export default function App() {
               { id: 'pen', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><path d="M11 11l4 4" /></svg>, label: 'Перо' },
               { id: 'marker', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.34 4.93l-3.59 3.59-1.41-1.42-1.42 1.42 1.42 1.41-3.6 3.59c-.39.39-.39 1.02 0 1.41L10.34 19c.39.39 1.02.39 1.41 0l3.6-3.59 1.41 1.42 1.42-1.42-1.42-1.41 3.59-3.59c.39-.39.39-1.02 0-1.41L15.75 4.93c-.39-.39-1.02-.39-1.41 0z" /></svg>, label: 'Маркер' },
             ] as { id: Tool; icon: React.ReactNode; label: string }[]).map(t => (
-              <button key={t.id} onClick={() => { chooseTool(t.id); setShowEmoji(false) }}
+              <button key={t.id} onClick={() => { chooseTool(t.id); setShowEmoji(false) }} disabled={isPreview && t.id !== 'pan'}
                 className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
                 title={t.label}>{t.icon}</button>
             ))}
@@ -2066,7 +2092,7 @@ export default function App() {
               <button key={t.id} onClick={() => {
                 if (t.id === 'emoji') { setShowEmoji(!showEmoji); chooseTool('emoji') }
                 else { chooseTool(t.id); setShowEmoji(false) }
-              }}
+              }} disabled={isPreview}
                 className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
               >{t.icon}</button>
             ))}
@@ -2077,7 +2103,7 @@ export default function App() {
               <div className="size-6 rounded-full ring-2 ring-black/10 shadow-inner" style={{ backgroundColor: color, border: color === '#FFFFFF' ? `1px solid ${dk ? '#555' : '#ddd'}` : 'none' }} />
             </button>
             {/* More */}
-            <button onClick={() => { setShowMore(value => !value); setShowBpmnPalette(false) }}
+            <button onClick={() => { setShowMore(value => !value); setShowBpmnPalette(false) }} disabled={isPreview}
               aria-label="Дополнительные инструменты"
               className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${showMore ? 'bg-black text-white' : `${textSec} ${hoverBg}`}`}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
