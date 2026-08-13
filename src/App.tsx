@@ -571,7 +571,7 @@ export default function App() {
       ydoc.transact(() => {
         metaMap.set('title', file.meta.title)
         metaMap.set('updatedAt', now)
-      })
+      }, RECOVERY_ORIGIN)
       dirtyTrackerRef.current?.markSaved()
       showToast('Документ сохранён', 'success')
       return true
