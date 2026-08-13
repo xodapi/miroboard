@@ -1,0 +1,345 @@
+{
+  "format": "mboard",
+  "schemaVersion": 1,
+  "meta": {
+    "id": "doc_bpmn",
+    "title": "BPMN process",
+    "createdAt": "2026-08-13T00:00:00.000Z",
+    "updatedAt": "2026-08-13T00:00:00.000Z",
+    "createdWith": {
+      "version": "0.16.0",
+      "commit": "format-fixtures"
+    },
+    "profiles": [
+      "core",
+      "bpmn"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "bpmn-0",
+      "kind": "circle",
+      "parentId": null,
+      "frame": {
+        "x": 0,
+        "y": 100,
+        "w": 160,
+        "h": 100,
+        "rotation": 0
+      },
+      "z": 0,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "text": "startEvent"
+      },
+      "profileData": {
+        "bpmn": {
+          "nodeType": "startEvent"
+        }
+      }
+    },
+    {
+      "id": "bpmn-1",
+      "kind": "rect",
+      "parentId": null,
+      "frame": {
+        "x": 180,
+        "y": 100,
+        "w": 160,
+        "h": 100,
+        "rotation": 0
+      },
+      "z": 1,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "text": "task"
+      },
+      "profileData": {
+        "bpmn": {
+          "nodeType": "task",
+          "durationMs": 5000,
+          "resourceRole": "operator",
+          "costPerHour": 25,
+          "resourceCapacity": 2,
+          "priority": 1
+        }
+      }
+    },
+    {
+      "id": "bpmn-2",
+      "kind": "rect",
+      "parentId": null,
+      "frame": {
+        "x": 360,
+        "y": 100,
+        "w": 160,
+        "h": 100,
+        "rotation": 0
+      },
+      "z": 2,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "text": "xorGateway"
+      },
+      "profileData": {
+        "bpmn": {
+          "nodeType": "xorGateway"
+        }
+      }
+    },
+    {
+      "id": "bpmn-3",
+      "kind": "rect",
+      "parentId": null,
+      "frame": {
+        "x": 540,
+        "y": 100,
+        "w": 160,
+        "h": 100,
+        "rotation": 0
+      },
+      "z": 3,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "text": "andGateway"
+      },
+      "profileData": {
+        "bpmn": {
+          "nodeType": "andGateway"
+        }
+      }
+    },
+    {
+      "id": "bpmn-4",
+      "kind": "rect",
+      "parentId": null,
+      "frame": {
+        "x": 720,
+        "y": 100,
+        "w": 160,
+        "h": 100,
+        "rotation": 0
+      },
+      "z": 4,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "text": "orGateway"
+      },
+      "profileData": {
+        "bpmn": {
+          "nodeType": "orGateway"
+        }
+      }
+    },
+    {
+      "id": "bpmn-5",
+      "kind": "circle",
+      "parentId": null,
+      "frame": {
+        "x": 900,
+        "y": 100,
+        "w": 160,
+        "h": 100,
+        "rotation": 0
+      },
+      "z": 5,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "text": "endEvent"
+      },
+      "profileData": {
+        "bpmn": {
+          "nodeType": "endEvent"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "flow-0",
+      "kind": "connector",
+      "source": {
+        "nodeId": "bpmn-0",
+        "anchor": "auto"
+      },
+      "target": {
+        "nodeId": "bpmn-1",
+        "anchor": "auto"
+      },
+      "style": {
+        "color": "#374151",
+        "stroke": 2,
+        "arrowHead": "triangle"
+      },
+      "profileData": {
+        "bpmn": {
+          "flowType": "sequence"
+        }
+      }
+    },
+    {
+      "id": "flow-1",
+      "kind": "connector",
+      "source": {
+        "nodeId": "bpmn-1",
+        "anchor": "auto"
+      },
+      "target": {
+        "nodeId": "bpmn-2",
+        "anchor": "auto"
+      },
+      "style": {
+        "color": "#374151",
+        "stroke": 2,
+        "arrowHead": "triangle"
+      },
+      "profileData": {
+        "bpmn": {
+          "flowType": "sequence",
+          "condition": "amount > 100",
+          "probability": 0.7,
+          "isDefault": false
+        }
+      }
+    },
+    {
+      "id": "flow-2",
+      "kind": "connector",
+      "source": {
+        "nodeId": "bpmn-2",
+        "anchor": "auto"
+      },
+      "target": {
+        "nodeId": "bpmn-3",
+        "anchor": "auto"
+      },
+      "style": {
+        "color": "#374151",
+        "stroke": 2,
+        "arrowHead": "triangle"
+      },
+      "profileData": {
+        "bpmn": {
+          "flowType": "sequence",
+          "condition": "approved"
+        }
+      }
+    },
+    {
+      "id": "flow-3",
+      "kind": "connector",
+      "source": {
+        "nodeId": "bpmn-3",
+        "anchor": "auto"
+      },
+      "target": {
+        "nodeId": "bpmn-4",
+        "anchor": "auto"
+      },
+      "style": {
+        "color": "#374151",
+        "stroke": 2,
+        "arrowHead": "triangle"
+      },
+      "profileData": {
+        "bpmn": {
+          "flowType": "sequence"
+        }
+      }
+    },
+    {
+      "id": "flow-4",
+      "kind": "connector",
+      "source": {
+        "nodeId": "bpmn-4",
+        "anchor": "auto"
+      },
+      "target": {
+        "nodeId": "bpmn-5",
+        "anchor": "auto"
+      },
+      "style": {
+        "color": "#374151",
+        "stroke": 2,
+        "arrowHead": "triangle"
+      },
+      "profileData": {
+        "bpmn": {
+          "flowType": "sequence"
+        }
+      }
+    }
+  ],
+  "profileConfig": {
+    "bpmn": {
+      "simulation": {
+        "seed": "42",
+        "runs": "500",
+        "slaTargetSec": "",
+        "instances": "1",
+        "arrivalIntervalSec": "10",
+        "calendarStartHour": "",
+        "calendarEndHour": "",
+        "arrivalClasses": [
+          {
+            "count": "2",
+            "intervalSec": "15",
+            "priority": "high"
+          },
+          {
+            "count": "1",
+            "intervalSec": "30",
+            "priority": "normal"
+          }
+        ],
+        "rolePolicies": {
+          "operator": {
+            "capacity": "2",
+            "queuePolicy": "fifo"
+          }
+        }
+      }
+    }
+  },
+  "history": {
+    "yjsState": null,
+    "snapshots": [],
+    "retention": {
+      "keepAllNamed": true,
+      "keepLastAuto": 20,
+      "decayBucketsHours": [
+        1,
+        6,
+        24,
+        168
+      ],
+      "maxSnapshots": 120,
+      "maxHistoryRatio": 3
+    }
+  },
+  "assets": {}
+}

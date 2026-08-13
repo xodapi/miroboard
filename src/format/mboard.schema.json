@@ -3,48 +3,308 @@
   "$id": "https://miroboard.local/schema/mboard-v1.json",
   "title": "MiroBoard document",
   "type": "object",
-  "required": ["format", "schemaVersion", "meta", "nodes", "edges", "profileConfig", "history", "assets"],
+  "required": [
+    "format",
+    "schemaVersion",
+    "meta",
+    "nodes",
+    "edges",
+    "profileConfig",
+    "history",
+    "assets"
+  ],
   "properties": {
-    "format": { "const": "mboard" },
-    "schemaVersion": { "const": 1 },
+    "format": {
+      "const": "mboard"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
     "meta": {
       "type": "object",
-      "required": ["id", "title", "createdAt", "updatedAt", "createdWith", "profiles"],
+      "required": [
+        "id",
+        "title",
+        "createdAt",
+        "updatedAt",
+        "createdWith",
+        "profiles"
+      ],
       "properties": {
-        "id": { "type": "string" }, "title": { "type": "string" },
-        "createdAt": { "type": "string" }, "updatedAt": { "type": "string" },
-        "createdWith": { "type": "object", "required": ["version", "commit"], "properties": { "version": { "type": "string" }, "commit": { "type": "string" } } },
-        "profiles": { "type": "array", "items": { "type": "string" } }
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "createdWith": {
+          "type": "object",
+          "required": [
+            "version",
+            "commit"
+          ],
+          "properties": {
+            "version": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string"
+            }
+          }
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
-    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
-    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
-    "profileConfig": { "type": "object" },
-    "history": { "$ref": "#/$defs/history" },
-    "assets": { "type": "object", "maxProperties": 0 }
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    },
+    "profileConfig": {
+      "type": "object"
+    },
+    "history": {
+      "$ref": "#/$defs/history"
+    },
+    "assets": {
+      "type": "object",
+      "maxProperties": 0
+    }
   },
   "$defs": {
     "node": {
-      "type": "object", "required": ["id", "kind", "parentId", "frame", "z", "style", "content", "profileData"],
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "parentId",
+        "frame",
+        "z",
+        "style",
+        "content",
+        "profileData"
+      ],
       "properties": {
-        "id": { "type": "string" }, "kind": { "type": "string" }, "parentId": { "type": ["string", "null"] }, "z": { "type": "number" },
-        "frame": { "type": "object", "required": ["x", "y", "w", "h", "rotation"], "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "w": { "type": ["number", "null"] }, "h": { "type": ["number", "null"] }, "rotation": { "type": "number" } } },
-        "style": { "type": "object", "required": ["color", "fill", "stroke"], "properties": { "color": { "type": "string" }, "fill": { "type": ["string", "null"] }, "stroke": { "type": ["number", "null"] } } },
-        "content": { "type": "object" }, "profileData": { "type": "object" }, "createdBy": { "type": "string" }
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "z": {
+          "type": "number"
+        },
+        "frame": {
+          "type": "object",
+          "required": [
+            "x",
+            "y",
+            "w",
+            "h",
+            "rotation"
+          ],
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "w": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "h": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "rotation": {
+              "type": "number"
+            }
+          }
+        },
+        "style": {
+          "type": "object",
+          "required": [
+            "color",
+            "fill",
+            "stroke"
+          ],
+          "properties": {
+            "color": {
+              "type": "string"
+            },
+            "fill": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stroke": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          }
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "text": { "type": "string" },
+            "emoji": { "type": "string" },
+            "points": { "type": "array", "items": { "$ref": "#/$defs/point" } }
+          }
+        },
+        "profileData": {
+          "type": "object",
+          "additionalProperties": { "type": "object" }
+        },
+        "createdBy": {
+          "type": "string"
+        }
       }
     },
-    "endpoint": { "type": "object", "required": ["nodeId", "anchor"], "properties": { "nodeId": { "type": "string" }, "anchor": { "type": "string" } } },
-    "edge": {
-      "type": "object", "required": ["id", "kind", "source", "target", "style", "profileData"],
+    "endpoint": {
+      "type": "object",
+      "required": [
+        "nodeId",
+        "anchor"
+      ],
       "properties": {
-        "id": { "type": "string" }, "kind": { "type": "string" }, "source": { "$ref": "#/$defs/endpoint" }, "target": { "$ref": "#/$defs/endpoint" },
-        "style": { "type": "object", "required": ["color", "stroke", "arrowHead"], "properties": { "color": { "type": "string" }, "stroke": { "type": ["number", "null"] }, "arrowHead": { "enum": ["none", "triangle"] } } },
-        "content": { "type": "object" }, "profileData": { "type": "object" }
+        "nodeId": {
+          "type": "string"
+        },
+        "anchor": {
+          "type": "string"
+        }
+      }
+    },
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "source",
+        "target",
+        "style",
+        "profileData"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "target": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "waypoints": { "type": "array", "items": { "$ref": "#/$defs/point" } },
+        "style": {
+          "type": "object",
+          "required": [
+            "color",
+            "stroke",
+            "arrowHead"
+          ],
+          "properties": {
+            "color": {
+              "type": "string"
+            },
+            "stroke": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "arrowHead": {
+              "enum": [
+                "none",
+                "triangle"
+              ]
+            }
+          }
+        },
+        "content": {
+          "type": "object",
+          "properties": {
+            "label": { "type": "string" },
+            "offset": { "$ref": "#/$defs/point" }
+          }
+        },
+        "profileData": {
+          "type": "object",
+          "additionalProperties": { "type": "object" }
+        }
       }
     },
     "history": {
-      "type": "object", "required": ["yjsState", "snapshots", "retention"],
-      "properties": { "yjsState": { "type": ["string", "null"] }, "snapshots": { "type": "array" }, "retention": { "type": "object" } }
+      "type": "object",
+      "required": [
+        "yjsState",
+        "snapshots",
+        "retention"
+      ],
+      "properties": {
+        "yjsState": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshots": {
+          "type": "array"
+        },
+        "retention": {
+          "type": "object"
+        }
+      }
     }
   }
 }

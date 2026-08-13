@@ -1,0 +1,170 @@
+{
+  "format": "mboard",
+  "schemaVersion": 1,
+  "meta": {
+    "id": "doc_freeform",
+    "title": "Freeform board",
+    "createdAt": "2026-08-13T00:00:00.000Z",
+    "updatedAt": "2026-08-13T00:00:00.000Z",
+    "createdWith": {
+      "version": "0.16.0",
+      "commit": "format-fixtures"
+    },
+    "profiles": [
+      "core"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "sticky-note",
+      "kind": "sticky",
+      "parentId": null,
+      "frame": {
+        "x": 80,
+        "y": 80,
+        "w": 160,
+        "h": 100,
+        "rotation": 0
+      },
+      "z": 1,
+      "style": {
+        "color": "#374151",
+        "fill": "#FEF3C7",
+        "stroke": 2
+      },
+      "content": {
+        "text": "Идея 🚀"
+      },
+      "profileData": {}
+    },
+    {
+      "id": "path-1",
+      "kind": "path",
+      "parentId": null,
+      "frame": {
+        "x": 300,
+        "y": 100,
+        "w": null,
+        "h": null,
+        "rotation": 0
+      },
+      "z": 2,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 40,
+            "y": 25
+          },
+          {
+            "x": 80,
+            "y": 0
+          }
+        ]
+      },
+      "profileData": {}
+    },
+    {
+      "id": "text-1",
+      "kind": "text",
+      "parentId": null,
+      "frame": {
+        "x": 100,
+        "y": 260,
+        "w": 160,
+        "h": 100,
+        "rotation": 0
+      },
+      "z": 3,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "text": "Свободная заметка"
+      },
+      "profileData": {}
+    },
+    {
+      "id": "emoji-1",
+      "kind": "emoji",
+      "parentId": null,
+      "frame": {
+        "x": 420,
+        "y": 220,
+        "w": null,
+        "h": null,
+        "rotation": 0
+      },
+      "z": 4,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "emoji": "🧭"
+      },
+      "profileData": {}
+    },
+    {
+      "id": "arrow-geometry",
+      "kind": "arrow",
+      "parentId": null,
+      "frame": {
+        "x": 500,
+        "y": 100,
+        "w": 160,
+        "h": 100,
+        "rotation": 0
+      },
+      "z": 5,
+      "style": {
+        "color": "#374151",
+        "fill": null,
+        "stroke": 2
+      },
+      "content": {
+        "points": [
+          {
+            "x": 0,
+            "y": 0
+          },
+          {
+            "x": 140,
+            "y": 40
+          }
+        ]
+      },
+      "profileData": {}
+    }
+  ],
+  "edges": [],
+  "profileConfig": {},
+  "history": {
+    "yjsState": null,
+    "snapshots": [],
+    "retention": {
+      "keepAllNamed": true,
+      "keepLastAuto": 20,
+      "decayBucketsHours": [
+        1,
+        6,
+        24,
+        168
+      ],
+      "maxSnapshots": 120,
+      "maxHistoryRatio": 3
+    }
+  },
+  "assets": {}
+}

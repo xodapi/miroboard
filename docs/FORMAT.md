@@ -154,3 +154,52 @@ configuration. Any BPMN model or simulation-draft edit clears the displayed resu
 requiring a fresh run. A future schema that elects to persist results must store the
 exact producing configuration alongside them and mark or invalidate them whenever the
 model or configuration fingerprint changes.
+
+
+## Shipped fixtures and review gate
+
+The permanent fixtures are executable format examples, not disposable test data:
+
+- `examples/freeform-board.mboard` demonstrates sticky notes, freehand paths, text,
+  emoji, and an arrow with no `bpmnFlow`. That arrow is deliberately a node, because
+  geometry alone does not provide graph endpoints.
+- `examples/bpmn-process.mboard` demonstrates all six BPMN node types
+  (`startEvent`, `endEvent`, `task`, `xorGateway`, `andGateway`, `orGateway`),
+  sequence flows with XOR/AND conditions, probabilities, default-flow flags,
+  resource roles, and ordered arrival classes.
+- `examples/mixed.mboard` combines BPMN nodes with a free-form annotation and an
+  unknown `profileData.mindmap` namespace. Unknown namespaces are opaque and survive
+  a round trip.
+- `examples/legacy/v0-synthetic.mboard` is the immutable, never-edited v0 migration
+  vehicle. It is not a released user format.
+
+The fixture immutability rule is strict: once shipped, these files and the six
+learning modules (`examples/basic-fixed.json`, `batch-workload.json`,
+`fifo-vs-priority.json`, `parallel-queue.json`, `priority-queue.json`, and
+`sla-calendar.json`) are never regenerated to make a test pass. A mismatch is a
+real regression. The six paths are the migration inventory used by unit and e2e
+regression gates.
+
+Before freezing v1, the schema review gate was exercised with hand-authored raw
+documents representing a mind-map and an eEPC. Both use the existing general graph:
+nodes carry `kind`, frame, content and opaque profile namespaces; relationships are
+edges with endpoints and optional labels. No profile-specific structural field was
+needed, so the schema remains unchanged. A future profile may add fields only under
+its namespace.
+
+## Schema evolution policy
+
+`schemaVersion` is an integer and is bumped only for breaking changes. Readers accept
+older versions through an explicit, forward-only migration chain and refuse newer
+versions without partial loading. Additive fields and unknown namespaces are
+preserved; readers must not strip data they do not understand. Required-field or
+semantic changes require a new version and a migration test plus a permanent fixture.
+The v0 fixture proves the chain before a released predecessor exists. There is no
+pre-1.0 stability promise, but version 1 files remain readable after 1.0.
+
+Branch decisions are intentional and documented above: whole-document rejection for
+malformed profile payloads, duplicate IDs, or dangling endpoints; omission of
+`undefined` but preservation of explicit `null` and falsy values; preservation of
+unknown data; canonical `profileData: {}` for non-BPMN elements; and geometry-only
+arrows remaining nodes. JSON Schema, `src/format/types.ts`, and the runtime validator
+are the coordinated source of truth.
