@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { deserialise, normalise, serialise } from './mboard'
 import type { BoardElement, SerialiseInput } from './mboard'
-import type { MboardFile } from './types'
+import type { DocHistory, MboardFile } from './types'
 
-const history = {
+const history: DocHistory = {
   yjsState: null,
   snapshots: [],
   retention: { keepAllNamed: true, keepLastAuto: 20, decayBucketsHours: [], maxSnapshots: 120, maxHistoryRatio: 3 },
-} as const
+}
 
 const meta = {
   id: 'doc.integrity',
