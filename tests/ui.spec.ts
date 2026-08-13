@@ -133,6 +133,9 @@ test('invalid BPMN import preserves the current board', async ({ page }) => {
 })
 
 test('reloading a persisted board does not duplicate BPMN tasks', async ({ page }) => {
+  // Recovery caches are keyed by document id. Keep this board's legacy URL-derived
+  // id across the reload so the test exercises the persisted board, not a new one.
+  await page.goto('/?board=ui-persisted-bpmn-reload', { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: 'Примеры' }).click()
   await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
   const task = page.getByText('Подготовить данные', { exact: true })
