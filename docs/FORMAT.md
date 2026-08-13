@@ -138,3 +138,19 @@ rather than entering a partially enabled mode. Choosing the BPMN palette explici
 creates the default BPMN simulation configuration and activates the profile.
 Document identity is likewise stored in the Y.Doc `getMap("meta")`, allowing the
 IndexedDB recovery state to retain identity even if the app crashes.
+
+### Simulation-result persistence and staleness
+
+Version 1 persists the simulation **configuration**, not simulation result output.
+`profileConfig.bpmn.simulation` stores all nine UI draft values as strings without
+numeric conversion, including leading zeroes in `seed` (for example, `"042"`), and
+preserves `arrivalClasses` array order plus each role policy's `capacity` and
+`queuePolicy`. This is deliberate: the UI passes the seed string to the engine, where
+`BigInt("042")` semantics must remain available.
+
+Displayed simulation results are transient derived data. They are never emitted in a
+`.mboard` file and therefore cannot reload as current results for a different model or
+configuration. Any BPMN model or simulation-draft edit clears the displayed result,
+requiring a fresh run. A future schema that elects to persist results must store the
+exact producing configuration alongside them and mark or invalidate them whenever the
+model or configuration fingerprint changes.

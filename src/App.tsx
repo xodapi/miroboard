@@ -749,6 +749,15 @@ export default function App() {
     }
   }, [createSimulationBpmnModel, simulationRuns, simulationSeed, showToast])
 
+  // Results are a transient view of this exact model and simulation draft. They
+  // are intentionally not serialised into profileConfig, so a model/config edit
+  // must remove them instead of displaying measurements from an older state.
+  useEffect(() => {
+    setBpmnSimulationResult(null)
+    setBottleneckRole(null)
+    setBpmnSimulationSummary(null)
+  }, [createSimulationBpmnModel, simulationRuns, simulationSeed])
+
   useEffect(() => {
     if (!__MIROBOARD_DEBUG_HOOK__) return
     window.__MIROBOARD_DEBUG__ = {
