@@ -63,6 +63,22 @@ reserved v1 `assets` value is canonicalised to `{}`.
 undefined values, and rounds coordinate values (including frame, points, and
 waypoints) to four decimal places. Other numeric values are not rounded.
 
+### Round-trip projection and routed edges
+
+The element round-trip property compares `fromDoc(toDoc(element))` through the
+exported `canonicalElement()` projection. Nodes retain every renderer- and
+profile-visible field; an omitted rotation is equivalent to `rotation: 0`, and
+an omitted z-index is equivalent to `zIndex: 0`. BPMN flow elements are rendered
+from their endpoints, so their in-memory `x` and `y` are canonicalised to zero,
+and node-only fields (`w`, `h`, `fill`, `points`, `emoji`, `createdBy`, and
+`zIndex`) are not part of an edge's projection. This is the complete documented
+lossy projection, not a general-purpose field filter.
+
+Edges may carry `waypoints` and `content.offset`; both are preserved exactly
+through adapter conversion and represent manually routed geometry and label
+placement. Coordinate normalisation still applies only when `normalise()` is
+explicitly called.
+
 ## Profiles and simulation configuration
 
 `meta.profiles` is derived on every save, never trusted from React state. It is

@@ -71,7 +71,7 @@ export interface DocEdge {
   target: EndpointRef
   waypoints?: { x: number; y: number }[]
   style: EdgeStyle
-  content?: { label?: string }
+  content?: { label?: string; offset?: { x: number; y: number } }
   profileData: Record<string, Record<string, unknown>>
 }
 

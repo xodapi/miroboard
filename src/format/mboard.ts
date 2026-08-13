@@ -35,6 +35,8 @@ export interface BoardElement {
   bpmnResourceCapacity?: number
   bpmnPriority?: number
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
+  waypoints?: Point[]
+  labelOffset?: Point
 }
 
 export type DocElement = { node: DocNode } | { edge: DocEdge }
@@ -91,7 +93,10 @@ export function toDocElement(element: BoardElement): DocElement {
         source: { nodeId: sourceId, anchor: 'auto' },
         target: { nodeId: targetId, anchor: 'auto' },
         style: { color: element.color, stroke: element.stroke ?? null, arrowHead: element.type === 'arrow' ? 'triangle' as const : 'none' as const },
-        content: element.text === undefined ? undefined : { label: element.text },
+        waypoints: element.waypoints,
+        content: element.text === undefined && element.labelOffset === undefined
+          ? undefined
+          : defined({ label: element.text, offset: element.labelOffset }),
         profileData,
       }),
     }
@@ -157,6 +162,8 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
     color: edge.style.color,
     stroke: edge.style.stroke ?? undefined,
     text: edge.content?.label,
+    waypoints: edge.waypoints,
+    labelOffset: edge.content?.offset,
     bpmnFlow: defined({
       sourceId: edge.source.nodeId,
       targetId: edge.target.nodeId,
@@ -168,6 +175,35 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
   }) as BoardElement
   elementExtras.set(element, { ...unknownKeys(edge as unknown as Record<string, unknown>, EDGE_KEYS), profileData: profileExtras(edge.profileData) })
   return element
+}
+
+/**
+ * Projection used by the element round-trip property.
+ *
+ * Nodes use the in-memory convention that zero rotation and zero z are
+ * defaults. Edges are rendered from their endpoints, so their x/y are not
+ * semantic and are intentionally excluded. All other BoardElement fields are
+ * compared, including edge routing and label placement.
+ */
+export function canonicalElement(element: BoardElement): BoardElement {
+  const result = { ...element } as BoardElement
+  if (result.rotation === 0) delete result.rotation
+  if (result.zIndex === undefined) result.zIndex = 0
+  if (result.bpmnFlow) {
+    result.x = 0
+    result.y = 0
+  }
+  if (result.bpmnFlow) {
+    delete result.w
+    delete result.h
+    delete result.rotation
+    delete result.zIndex
+    delete result.fill
+    delete result.createdBy
+    delete result.emoji
+    delete result.points
+  }
+  return result
 }
 
 /** Derives the active document profiles from namespaced element data. */
