@@ -1,10 +1,12 @@
 import { test, expect, type Browser, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const root = process.cwd()
+const captureMode = process.env.BASELINE_CAPTURE_MODE === 'verify' ? 'verify' : 'generate'
+const outputRoot = captureMode === 'verify' ? join(root, '.baseline-verify') : join(root, 'baseline')
 const examples = [
   'basic-fixed.json',
   'parallel-queue.json',
@@ -105,12 +107,13 @@ test('capture immutable BPMN simulation baseline', async ({ browser }) => {
   }
 
   // The test-only hook is confirmed before replacing any immutable artifacts.
-  rmSync(join(root, 'baseline'), { recursive: true, force: true })
+  // Verify mode deliberately writes only to a git-ignored observation directory.
+  rmSync(outputRoot, { recursive: true, force: true })
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
   for (const name of examples) {
     const fixture = readFixture(name)
     const moduleName = name.replace(/\.json$/, '')
-    const dir = join(root, 'baseline', moduleName)
+    const dir = join(outputRoot, moduleName)
     mkdirSync(dir, { recursive: true })
     const contexts: { context: Awaited<ReturnType<Browser['newContext']>>; id: string }[] = []
     const first = await browser.newContext()
@@ -138,7 +141,19 @@ test('capture immutable BPMN simulation baseline', async ({ browser }) => {
     writeFileSync(join(dir, 'baseline.json'), `${JSON.stringify(canonical, null, 2)}\n`)
     writeFileSync(join(dir, 'README.md'), `# ${fixture.title}\n\nSource: \`examples/${name}\`\n\n- Captured at: ${artifact1.provenance.capturedAt}\n- Commit: \`${commit}\`\n- Seed: 42\n- Runs: 500\n- Expected SVG element count: ${fixture.elementCount}\n- Result payload SHA256: \`${hashes[0]}\`\n\nThis baseline is NEVER regenerated to make a test pass.\n`)
   }
-  writeFileSync(join(root, 'baseline', 'README.md'), `# BPMN Simulation Baseline (M0)\n\nCaptured at commit \`${commit}\`, before \`src/format/\` exists, via the test build and \`tests/baseline-capture.spec.ts\` driving the real UI through \`window.__MIROBOARD_DEBUG__\`.\n\n## Purpose\n\nThis baseline is the immutable oracle for BPMN regression tests and migration invariance.\n\n## Immutability Rule\n\n**These artifacts are NEVER edited or regenerated to make a test pass.** A mismatch is a regression to investigate, not a reason to update this baseline.\n\n## Expected Element Counts\n\n| Module | Nodes+Flows |\n| --- | ---: |\n${examples.map(name => { const f = readFixture(name); return `| ${name} | ${f.elementCount} |` }).join('\n')}\n\n## Capture Method\n\nEach module has independent first-load, same-session-reload, and post-browser-restart captures. Result payloads are SHA256-verified byte-identical, with seed=42 and runs=500; each module README records its shared hash.\n`)
+  writeFileSync(join(outputRoot, 'README.md'), `# BPMN Simulation ${captureMode === 'verify' ? 'Verification Observation' : 'Baseline'}\n\nCaptured at commit \`${commit}\`.\n`)
+  if (captureMode === 'verify') {
+    for (const name of examples) {
+      const moduleName = name.replace(/\.json$/, '')
+      const expectedPath = join(root, 'baseline', moduleName, 'baseline.json')
+      expect(existsSync(expectedPath), `committed baseline must exist for ${moduleName}`).toBe(true)
+      const expected = JSON.parse(readFileSync(expectedPath, 'utf8')) as { sha256: string }
+      const observed = JSON.parse(readFileSync(join(outputRoot, moduleName, 'baseline.json'), 'utf8')) as { sha256: string }
+      expect(observed.sha256, `${moduleName} payload hash differs from immutable baseline`).toBe(expected.sha256)
+    }
+  } else {
+    writeFileSync(join(root, 'baseline', 'README.md'), `# BPMN Simulation Baseline (M0)\n\nCaptured at commit \`${commit}\`, before \`src/format/\` exists, via the test build and \`tests/baseline-capture.spec.ts\` driving the real UI through \`window.__MIROBOARD_DEBUG__\`.\n\n## Purpose\n\nThis baseline is the immutable oracle for BPMN regression tests and migration invariance.\n\n## Immutability Rule\n\n**These artifacts are NEVER edited or regenerated to make a test pass.** A mismatch is a regression to investigate, not a reason to update this baseline.\n\n## Expected Element Counts\n\n| Module | Nodes+Flows |\n| --- | ---: |\n${examples.map(name => { const f = readFixture(name); return `| ${name} | ${f.elementCount} |` }).join('\n')}\n\n## Capture Method\n\nEach module has independent first-load, same-session-reload, and post-browser-restart captures. Result payloads are SHA256-verified byte-identical, with seed=42 and runs=500; each module README records its shared hash.\n`)
+  }
 })
 
 function writeArtifact(dir: string, captureId: string, artifact: unknown) {

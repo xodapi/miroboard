@@ -11,6 +11,7 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+.baseline-verify/
 
 # Jujutsu co-located metadata
 .jj/

@@ -8,6 +8,19 @@ listener by port even when the suite fails.
 Do not run `node node_modules\playwright\cli.js test` directly on Windows unless you
 have already started the preview server through the manifest and will stop it by port.
 
+## Immutable baseline capture modes
+
+`tests/baseline-capture.spec.ts` is opt-in only and requires the debug test build.
+
+- **Generate mode** (the default) writes `baseline/` and is destructive. It exists only
+  for the original M0 capture; never use it to make a regression pass.
+- **Verify mode** (`BASELINE_CAPTURE_MODE=verify`) writes a fresh observation to the
+  git-ignored `.baseline-verify/` directory, compares each captured payload SHA-256 to
+  committed `baseline/`, and fails on any mismatch. It never writes to `baseline/`.
+
+Use the manifest `test:baseline-verify` command for the non-destructive gate. Hash
+`baseline/` before and after a verify run when recording invariance evidence.
+
 ## Debug-hook BPMN validation suite
 
 `bpmn-validation-regression-suite.spec.ts` reads the full validation payload from the
