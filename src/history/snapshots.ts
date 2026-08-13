@@ -29,11 +29,12 @@ export function captureSnapshot(
   ydoc: Y.Doc,
   kind: HistorySnapshot['kind'],
   label?: string,
+  at = new Date().toISOString(),
 ): HistorySnapshot {
   const snapshot = Y.snapshot(ydoc)
   return {
     id: `snap_${crypto.randomUUID()}`,
-    at: new Date().toISOString(),
+    at,
     kind,
     ...(label === undefined ? {} : { label }),
     snapshot: toBase64(Y.encodeSnapshot(snapshot)),

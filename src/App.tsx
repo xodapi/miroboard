@@ -9,12 +9,13 @@ import { openDocument, openDroppedDocument, saveDocument, type FileSession, type
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
-import { HISTORY_RESTORE_ORIGIN } from './history/snapshots'
+import { captureSnapshot, HISTORY_RESTORE_ORIGIN } from './history/snapshots'
+import { createCaptureTriggers, type CaptureTriggers } from './history/capture-triggers'
 import { attachRecoveryCache } from './persistence/indexeddb'
 import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/legacy-adoption'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
 import { deserialise, serialise } from './format/mboard'
-import type { DocHistory, DocMeta, ProfileConfig } from './format/types'
+import type { DocHistory, DocMeta, HistorySnapshot, ProfileConfig } from './format/types'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
 import slaCalendarExample from '../examples/sla-calendar.json'
@@ -200,6 +201,7 @@ export default function App() {
   const [showMore, setShowMore] = useState(false)
   const [fileSession, setFileSession] = useState<FileSession>({ handle: null, name: null, isUntitled: true })
   const [isDirty, setIsDirty] = useState(false)
+  const [historySnapshots, setHistorySnapshots] = useState<HistorySnapshot[]>([])
   const [pendingOpen, setPendingOpen] = useState<PendingOpen | null>(null)
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
   const [flowPreviewPoint, setFlowPreviewPoint] = useState<Point | null>(null)
@@ -256,6 +258,8 @@ export default function App() {
   const ydoc = useMemo(() => new Y.Doc({ gc: false }), [])
   const yElements = useRef<Y.Array<BoardElement> | null>(null)
   const dirtyTrackerRef = useRef<DirtyTracker | null>(null)
+  const captureTriggersRef = useRef<CaptureTriggers | null>(null)
+  const historySnapshotsRef = useRef<HistorySnapshot[]>([])
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
   const profileConfigRef = useRef<Y.Map<unknown> | null>(null)
   const profileConfigJsonRef = useRef('')
@@ -263,6 +267,22 @@ export default function App() {
     setToast({ message, tone })
     window.setTimeout(() => setToast(null), 4200)
   }, [])
+  const appendCheckpoint = useCallback((kind: HistorySnapshot['kind'], label?: string, at?: string) => {
+    const checkpoint = captureSnapshot(ydoc, kind, label, at)
+    historySnapshotsRef.current = [...historySnapshotsRef.current, checkpoint]
+    setHistorySnapshots(historySnapshotsRef.current)
+    return checkpoint
+  }, [ydoc])
+  const markCurrentState = useCallback(() => {
+    const label = window.prompt('Название состояния')
+    if (label === null) return
+    if (!label.trim()) {
+      showToast('Введите непустое название состояния', 'error')
+      return
+    }
+    captureTriggersRef.current?.captureNow('named', label)
+    showToast('Состояние отмечено', 'success')
+  }, [showToast])
   const finishTour = useCallback(() => {
     try { localStorage.setItem('miro-onboarding-seen', '1') } catch { /* onboarding is optional */ }
     setTourStep(-1)
@@ -391,6 +411,11 @@ export default function App() {
     const profileConfig = ydoc.getMap<unknown>('profileConfig')
     yElements.current = yarray
     dirtyTrackerRef.current = createDirtyTracker(ydoc, setIsDirty)
+    captureTriggersRef.current = createCaptureTriggers({
+      ydoc,
+      capture: appendCheckpoint,
+      ignoredOrigins: new Set([RECOVERY_ORIGIN, HISTORY_RESTORE_ORIGIN]),
+    })
     profileConfigRef.current = profileConfig
     if (!meta.has('id')) {
       ydoc.transact(() => {
@@ -459,6 +484,7 @@ export default function App() {
     return () => {
       disposed = true
       dirtyTrackerRef.current?.dispose(); dirtyTrackerRef.current = null
+      captureTriggersRef.current?.dispose(); captureTriggersRef.current = null
       yarray.unobserve(updateElements)
       profileConfig.unobserve(applyProfileConfig)
       profileConfigRef.current = null
@@ -468,7 +494,7 @@ export default function App() {
       persistence?.destroy()
       ydoc.destroy()
     }
-  }, [ydoc])
+  }, [appendCheckpoint, ydoc])
   useEffect(() => {
     return addBeforeUnloadGuard(isDirty)
   }, [isDirty])
@@ -517,6 +543,9 @@ export default function App() {
     const metaTitle = metaMap.get('title')
     const metaCreatedAt = metaMap.get('createdAt')
     const now = new Date().toISOString()
+    // The checkpoint is captured before serialisation, so the saved timeline's
+    // newest entry is precisely the state that was written to disk.
+    captureTriggersRef.current?.captureNow('auto', undefined, now)
     const meta: DocMeta = {
       id: typeof metaId === 'string' ? metaId : `doc_${genId()}`,
       title: typeof metaTitle === 'string' ? metaTitle : 'Untitled board',
@@ -527,7 +556,7 @@ export default function App() {
     }
     const history: DocHistory = {
       yjsState: null,
-      snapshots: [],
+      snapshots: historySnapshotsRef.current,
       retention: { keepAllNamed: true, keepLastAuto: 20, decayBucketsHours: [1, 6, 24, 168], maxSnapshots: 120, maxHistoryRatio: 3 },
     }
     const file = serialise({
@@ -565,6 +594,8 @@ export default function App() {
       profileConfig.clear()
     }, RECOVERY_ORIGIN)
     setFileSession({ handle: null, name: null, isUntitled: true })
+    historySnapshotsRef.current = []
+    setHistorySnapshots([])
     setSelectedId(null)
     setWorkspaceMode('board')
     setBpmnProfileActive(false)
@@ -584,6 +615,8 @@ export default function App() {
       Object.entries(loaded.profileConfig).forEach(([key, value]) => profileConfig.set(key, value))
     }, RECOVERY_ORIGIN)
     setFileSession(outcome.session)
+    historySnapshotsRef.current = loaded.history.snapshots
+    setHistorySnapshots(loaded.history.snapshots)
     setSelectedId(null)
     dirtyTrackerRef.current?.markSaved()
     showToast(
@@ -2116,6 +2149,13 @@ export default function App() {
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
             ⇩ Сохранить как
           </button>
+          <button onClick={() => { markCurrentState(); setShowMore(false) }}
+            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+            ◉ Отметить состояние
+          </button>
+          <span role="status" aria-live="polite" className={`px-2 text-[11px] font-medium ${textSec}`}>
+            Контрольные точки: {historySnapshots.length}
+          </span>
           <button onClick={() => { setTransform({ x: 0, y: 0, scale: 1 }); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M9 22V12h6v10" /></svg> Домой
