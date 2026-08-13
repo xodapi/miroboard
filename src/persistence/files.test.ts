@@ -109,6 +109,21 @@ describe('file save paths', () => {
     await expect(openDocument()).resolves.toEqual({ kind: 'failed', failure: { kind: 'not-mboard' } })
   })
 
+  it.each([
+    ['empty', '', { kind: 'empty' }],
+    ['truncated JSON', '{"format":"mboard"', { kind: 'parse-error', message: 'Invalid JSON: unable to parse document' }],
+    ['wrong document shape', '{"hello":1}', { kind: 'not-mboard' }],
+    ['newer schema', JSON.stringify({ ...documentFile(), schemaVersion: 2 }), { kind: 'too-new', found: 2, supported: 1 }],
+  ])('preserves a distinct load failure for %s', async (_name, contents, failure) => {
+    const handle = {
+      name: 'bad.mboard',
+      getFile: vi.fn().mockResolvedValue({ name: 'bad.mboard', text: async () => contents }),
+    }
+    ;(window as Window & { showOpenFilePicker?: unknown }).showOpenFilePicker = vi.fn().mockResolvedValue([handle])
+
+    await expect(openDocument()).resolves.toEqual({ kind: 'failed', failure })
+  })
+
   it('opens the first dropped .mboard and retains an item FSA handle', async () => {
     const handle = { kind: 'file', name: 'dropped.mboard' }
     const file = { name: 'dropped.mboard', text: async () => JSON.stringify(documentFile()) } as File

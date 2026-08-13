@@ -2,6 +2,8 @@ import { CURRENT_SCHEMA_VERSION, type MboardFile } from './types'
 import { runMigrations } from './migrations'
 
 export type LoadFailure =
+  | { kind: 'empty' }
+  | { kind: 'parse-error'; message: string }
   | { kind: 'not-mboard' }
   | { kind: 'too-new'; found: number; supported: number }
   | { kind: 'invalid'; errors: string[] }
@@ -18,12 +20,13 @@ const isRecord = (value: unknown): value is RecordValue =>
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value)
 
-function parseRaw(raw: unknown): { value: unknown } | { error: string } {
+function parseRaw(raw: unknown): { value: unknown } | { failure: Extract<LoadFailure, { kind: 'empty' | 'parse-error' }> } {
   if (typeof raw !== 'string') return { value: raw }
+  if (raw.trim().length === 0) return { failure: { kind: 'empty' } }
   try {
     return { value: JSON.parse(raw) }
   } catch {
-    return { error: 'Invalid JSON: unable to parse document' }
+    return { failure: { kind: 'parse-error', message: 'Invalid JSON: unable to parse document' } }
   }
 }
 
@@ -180,7 +183,7 @@ function validateGraphIntegrity(nodes: unknown[], edges: unknown[], errors: stri
 /** Validates untrusted JSON without throwing or coercing values. */
 export function loadMboard(raw: unknown): LoadResult {
   const parsed = parseRaw(raw)
-  if ('error' in parsed) return { ok: false, failure: { kind: 'invalid', errors: [parsed.error] } }
+  if ('failure' in parsed) return { ok: false, failure: parsed.failure }
   if (!isRecord(parsed.value) || parsed.value.format !== 'mboard') {
     return { ok: false, failure: { kind: 'not-mboard' } }
   }

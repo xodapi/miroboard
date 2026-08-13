@@ -33,7 +33,7 @@ type OpenPickerOptions = {
 }
 
 export type OpenOutcome =
-  | { kind: 'opened'; file: MboardFile; session: FileSession }
+  | { kind: 'opened'; file: MboardFile; session: FileSession; migratedFrom?: number }
   | { kind: 'cancelled' }
   | { kind: 'failed'; failure: LoadFailure }
 
@@ -102,7 +102,7 @@ function download(contents: string, name: string): void {
 async function readMboard(file: File): Promise<OpenOutcome> {
   const loaded = loadMboard(await file.text())
   return loaded.ok
-    ? { kind: 'opened', file: loaded.file, session: { handle: null, name: file.name, isUntitled: false } }
+    ? { kind: 'opened', file: loaded.file, session: { handle: null, name: file.name, isUntitled: false }, migratedFrom: loaded.migratedFrom }
     : { kind: 'failed', failure: loaded.failure }
 }
 

@@ -58,16 +58,20 @@ describe('loadMboard', () => {
   })
 
   it.each(['{"format":"mboard"', '{"format":"mboard",}', '\x00\x01\x02'])(
-    'returns an explicit invalid failure for unparseable input %j',
+    'returns an explicit parse-error failure for unparseable input %j',
     raw => {
       const result = loadMboard(raw)
 
       expect(result).toMatchObject({
         ok: false,
-        failure: { kind: 'invalid', errors: [expect.stringMatching(/JSON/i)] },
+        failure: { kind: 'parse-error', message: 'Invalid JSON: unable to parse document' },
       })
     },
   )
+
+  it.each(['', ' \n\t '])('returns an explicit empty failure for empty input %j', raw => {
+    expect(loadMboard(raw)).toEqual({ ok: false, failure: { kind: 'empty' } })
+  })
 
   it.each(['schemaVersion', 'nodes', 'edges'])('names missing required field %s', field => {
     const source = validDocument() as Record<string, unknown>

@@ -564,14 +564,23 @@ export default function App() {
     setFileSession(outcome.session)
     setSelectedId(null)
     dirtyTrackerRef.current?.markSaved()
-    showToast(`Открыт документ «${outcome.session.name}»`, 'success')
+    showToast(
+      outcome.migratedFrom === undefined
+        ? `Открыт документ «${outcome.session.name}»`
+        : `Открыт документ «${outcome.session.name}». Схема обновлена с v${outcome.migratedFrom} до v1`,
+      'success',
+    )
   }, [showToast, ydoc])
   const showOpenFailure = useCallback((outcome: Extract<OpenOutcome, { kind: 'failed' }>) => {
-    const message = outcome.failure.kind === 'too-new'
-      ? `Документ использует схему v${outcome.failure.found}, поддерживается v${outcome.failure.supported}`
-      : outcome.failure.kind === 'not-mboard'
-        ? 'Файл не является документом .mboard'
-        : outcome.failure.errors[0] ?? 'Не удалось открыть документ .mboard'
+    const message = outcome.failure.kind === 'empty'
+      ? 'Файл пуст. Выберите непустой документ .mboard'
+      : outcome.failure.kind === 'parse-error'
+        ? 'Не удалось разобрать JSON документа .mboard'
+        : outcome.failure.kind === 'too-new'
+          ? `Документ использует более новую схему v${outcome.failure.found}, поддерживается v${outcome.failure.supported}`
+          : outcome.failure.kind === 'not-mboard'
+            ? 'Файл не является документом .mboard'
+            : `Недопустимый документ .mboard: ${outcome.failure.errors[0] ?? 'неизвестная ошибка'}`
     showToast(message, 'error')
   }, [showToast])
   const requestOpen = useCallback(async (proceed: () => Promise<void>) => {
