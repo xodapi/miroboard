@@ -12,7 +12,8 @@ import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTr
 import { captureSnapshot, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot, toBase64 } from './history/snapshots'
 import { loadIntoDoc } from './history/state'
 import { createCaptureTriggers, type CaptureTriggers } from './history/capture-triggers'
-import { TimelinePanel, formatSnapshotTimestamp } from './history/TimelinePanel'
+import { TimelinePanel } from './history/TimelinePanel'
+import { HistoryPreviewBanner } from './history/HistoryPreviewBanner'
 import { DEFAULT_RETENTION, retainForSave } from './history/retention'
 import { HistoryRetentionControls } from './history/HistoryRetentionControls'
 import { attachRecoveryCache } from './persistence/indexeddb'
@@ -39,7 +40,6 @@ const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
 declare const __MIROBOARD_VERSION__: string
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 declare const __MIROBOARD_DEBUG_HOOK__: boolean
-const PROJECT_HISTORY = __MIROBOARD_HISTORY__
 type ImportedBpmnModel = {
   nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number; priority?: number }[]
   flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }[]
@@ -589,7 +589,7 @@ export default function App() {
       title: typeof metaTitle === 'string' ? metaTitle : 'Untitled board',
       createdAt: typeof metaCreatedAt === 'string' ? metaCreatedAt : now,
       updatedAt: now,
-      createdWith: { version: __MIROBOARD_VERSION__, commit: PROJECT_HISTORY[0]?.commit ?? 'local' },
+      createdWith: { version: __MIROBOARD_VERSION__, commit: __MIROBOARD_HISTORY__[0]?.commit ?? 'local' },
       profiles: [],
     }
     const untrimmedHistory: DocHistory = {
@@ -1826,14 +1826,7 @@ export default function App() {
           <div className="flex items-start gap-3"><span>{toast.tone === 'error' ? '!' : toast.tone === 'success' ? '✓' : 'i'}</span><span>{toast.message}</span><button onClick={() => setToast(null)} className="ml-auto text-base leading-none">×</button></div>
         </div>
       )}
-      {previewSnapshot && (
-        <div role="status" aria-live="polite" className={`absolute left-1/2 top-[62px] z-50 -translate-x-1/2 rounded-xl border px-4 py-2 text-center text-xs font-semibold shadow-lg ${dk ? 'border-violet-400 bg-violet-950 text-violet-100' : 'border-violet-300 bg-violet-50 text-violet-900'}`} data-ui>
-          Просмотр состояния от {formatSnapshotTimestamp(previewSnapshot.at)}
-          {previewSnapshot.kind === 'named' && previewSnapshot.label ? `, «${previewSnapshot.label}»` : ''}. Редактирование отключено.
-          <button onClick={restorePreview} className="ml-3 rounded-md bg-violet-600 px-2 py-1 text-white hover:bg-violet-700">Восстановить это состояние</button>
-          <button onClick={closeTimeline} className="ml-3 rounded-md px-2 py-1 underline underline-offset-2 hover:bg-violet-200/40">Закрыть</button>
-        </div>
-      )}
+      <HistoryPreviewBanner darkMode={dk} snapshot={previewSnapshot} onRestore={restorePreview} onClose={closeTimeline} />
       {pendingOpen && (
         <UnsavedChangesDialog
           onCancel={() => setPendingOpen(null)}
@@ -2425,7 +2418,7 @@ export default function App() {
             </div>
             <h3 className="text-sm font-bold mb-3">Этапы</h3>
             <ol className="space-y-3">
-              {PROJECT_HISTORY.map(({ date, commit, title, release }) => (
+              {__MIROBOARD_HISTORY__.map(({ date, commit, title, release }) => (
                 <li key={commit} className={`relative pl-5 border-l-2 ${dk ? 'border-slate-600' : 'border-slate-200'}`}>
                   <span className={`absolute -left-[5px] top-1.5 size-2 rounded-full ${dk ? 'bg-violet-400' : 'bg-violet-500'}`} />
                   <div className={`text-[11px] font-mono ${textSec}`}>{date}</div>
