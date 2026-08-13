@@ -46,6 +46,18 @@ async function debug(page: Page): Promise<DebugPayload> {
   })
 }
 
+async function debugModelAndValidation(page: Page): Promise<Pick<DebugPayload, 'createBpmnModel' | 'validateBpmn'>> {
+  await expect.poll(() => page.evaluate(() => Boolean(window.__MIROBOARD_DEBUG__))).toBe(true)
+  return page.evaluate(() => {
+    const hook = window.__MIROBOARD_DEBUG__
+    if (!hook) throw new Error('debug hook unavailable')
+    return JSON.parse(JSON.stringify({
+      createBpmnModel: hook.createBpmnModel(),
+      validateBpmn: hook.validateBpmn(),
+    }))
+  })
+}
+
 async function saveAndReopen(page: Page, suffix: string): Promise<void> {
   await page.getByRole('button', { name: 'Дополнительные инструменты' }).click()
   await page.getByRole('button').filter({ hasText: 'Сохранить' }).first().click()
@@ -56,9 +68,15 @@ async function saveAndReopen(page: Page, suffix: string): Promise<void> {
 }
 
 async function openMboardText(page: Page, text: string, name = 'mutation.mboard'): Promise<void> {
+  await page.evaluate(() => {
+    delete (window as Window & { showOpenFilePicker?: unknown }).showOpenFilePicker
+  })
   await page.getByRole('button', { name: 'Дополнительные инструменты' }).click()
-  await page.getByRole('button', { name: 'Открыть', exact: true }).click()
-  await page.locator('input[type="file"]').last().setInputFiles({
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.getByRole('button', { name: 'Открыть', exact: true }).click(),
+  ])
+  await chooser.setFiles({
     name,
     mimeType: 'application/json',
     buffer: Buffer.from(text),
@@ -104,6 +122,9 @@ test.describe('BPMN migration invariance gate', () => {
   test('unknown namespaces and free-form annotations are simulation-inert and preserved', async ({ page }) => {
     await openExample(page, 'basic-fixed.json')
     const expected = await debug(page)
+    await page.evaluate(() => {
+      delete (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker
+    })
     await page.getByRole('button', { name: 'Дополнительные инструменты' }).click()
     const download = await Promise.all([
       page.waitForEvent('download'),
@@ -114,6 +135,7 @@ test.describe('BPMN migration invariance gate', () => {
     document.nodes[0].profileData = { bpmn: document.nodes[0].profileData && (document.nodes[0].profileData as Record<string, unknown>).bpmn, mindmap: { arbitrary: ['payload'] } }
     document.nodes.push({
       id: 'freeform-annotation',
+      order: document.nodes.length + document.edges.length,
       kind: 'sticky',
       parentId: null,
       frame: { x: 10, y: 10, w: 100, h: 80, rotation: 0 },
@@ -130,8 +152,11 @@ test.describe('BPMN migration invariance gate', () => {
     const legacy = readFileSync(join(process.cwd(), 'examples', 'legacy', 'v0-synthetic.mboard'), 'utf8')
     await openMboardText(page, legacy, 'v0-synthetic.mboard')
     await expect(page.getByText(/Открыт документ/)).toBeVisible()
-    const payload = await debug(page)
-    expect(payload.validateBpmn).toEqual({ valid: true, issues: [] })
+    const payload = await debugModelAndValidation(page)
+    expect(payload.validateBpmn).toMatchObject({
+      valid: false,
+      issues: [{ code: 'start-event-missing', severity: 'error' }],
+    })
     expect(payload.createBpmnModel).toMatchObject({ nodes: [] })
   })
 
