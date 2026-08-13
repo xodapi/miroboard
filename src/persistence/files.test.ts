@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { hasFileSystemAccess, saveDocument, type FileSession } from './files'
+import { hasFileSystemAccess, openDocument, saveDocument, type FileSession } from './files'
 import type { MboardFile } from '../format/types'
 
 const documentFile = (): MboardFile => ({
@@ -15,6 +15,7 @@ const untitled: FileSession = { handle: null, name: null, isUntitled: true }
 afterEach(() => {
   vi.restoreAllMocks()
   delete (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker
+  delete (window as Window & { showOpenFilePicker?: unknown }).showOpenFilePicker
 })
 
 describe('file save paths', () => {
@@ -64,5 +65,47 @@ describe('file save paths', () => {
   it('reports picker cancellation distinctly', async () => {
     ;(window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker = vi.fn().mockRejectedValue(new DOMException('Cancelled', 'AbortError'))
     await expect(saveDocument(documentFile(), untitled, 'saveAs')).resolves.toEqual({ kind: 'cancelled' })
+  })
+
+  it('opens a validated document through FSA and retains its handle', async () => {
+    const handle = {
+      name: 'opened.mboard',
+      getFile: vi.fn().mockResolvedValue({ name: 'opened.mboard', text: async () => JSON.stringify(documentFile()) }),
+    }
+    const picker = vi.fn().mockResolvedValue([handle])
+    ;(window as Window & { showOpenFilePicker?: unknown }).showOpenFilePicker = picker
+
+    await expect(openDocument()).resolves.toMatchObject({
+      kind: 'opened',
+      file: documentFile(),
+      session: { handle, name: 'opened.mboard', isUntitled: false },
+    })
+    expect(picker).toHaveBeenCalledWith(expect.objectContaining({
+      multiple: false,
+      types: [expect.objectContaining({ accept: { 'application/json': ['.mboard'] } })],
+    }))
+  })
+
+  it('uses a hidden file input with the required accept filter without FSA', async () => {
+    let accept = ''
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+      accept = this.accept
+      Object.defineProperty(this, 'files', { value: [{ name: 'fallback.mboard', text: async () => JSON.stringify(documentFile()) }] })
+      this.onchange?.(new Event('change'))
+    })
+
+    await expect(openDocument()).resolves.toMatchObject({
+      kind: 'opened',
+      session: { handle: null, name: 'fallback.mboard', isUntitled: false },
+    })
+    expect(click).toHaveBeenCalledOnce()
+    expect(accept).toBe('.mboard,application/json')
+    expect(document.querySelector('input[type="file"]')).toBeNull()
+  })
+
+  it('does not open invalid documents', async () => {
+    const handle = { name: 'bad.mboard', getFile: vi.fn().mockResolvedValue({ name: 'bad.mboard', text: async () => '{}' }) }
+    ;(window as Window & { showOpenFilePicker?: unknown }).showOpenFilePicker = vi.fn().mockResolvedValue([handle])
+    await expect(openDocument()).resolves.toEqual({ kind: 'failed', failure: { kind: 'not-mboard' } })
   })
 })

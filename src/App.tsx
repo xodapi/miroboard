@@ -3,10 +3,10 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
-import { saveDocument, type FileSession } from './persistence/files'
+import { openDocument, saveDocument, type FileSession } from './persistence/files'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
-import { serialise } from './format/mboard'
+import { deserialise, serialise } from './format/mboard'
 import type { DocHistory, DocMeta, ProfileConfig } from './format/types'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
@@ -14,13 +14,11 @@ import slaCalendarExample from '../examples/sla-calendar.json'
 import batchWorkloadExample from '../examples/batch-workload.json'
 import priorityQueueExample from '../examples/priority-queue.json'
 import fifoPriorityExample from '../examples/fifo-vs-priority.json'
-
 declare global {
   interface Window {
     __MIROBOARD_DEBUG__?: { version: string; createBpmnModel: () => unknown; validateBpmn: () => unknown; exportBpmnXml: () => string; runBpmn: () => unknown; simulateBpmn: (seed: number | string | bigint, runs: number) => BpmnSimulationResult; getElements: () => BoardElement[] }
   }
 }
-
 type Point = { x: number; y: number }
 type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
 type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
@@ -47,7 +45,6 @@ type BpmnSimulationResult = {
 }
 type EducationalExample = { title: string; explanation: string; checks: string[]; model: ImportedBpmnModel }
 const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample, batchWorkloadExample, priorityQueueExample, fifoPriorityExample] as unknown as EducationalExample[]
-
 interface BoardElement {
   id: string
   type: 'path' | 'sticky' | 'rect' | 'circle' | 'arrow' | 'line' | 'text' | 'emoji'
@@ -76,19 +73,16 @@ interface BoardElement {
   bpmnPriority?: number
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
 }
-
 const COLORS = [
   '#FF5D5D', '#FF9F43', '#FFD93D',
   '#6BCB77', '#4D96FF', '#9D65C9',
   '#EC4899', '#000000', '#FFFFFF'
 ]
-
 const STICKY_COLORS = [
   '#FFD93D', '#6BCB77', '#4D96FF',
   '#FF9F43', '#9D65C9', '#FF5D5D',
   '#F9F871', '#A0E7E5'
 ]
-
 const EMOJIS = ['👍', '❤️', '⭐', '🔥', '💡', '✅', '❌', '🎯', '📌', '❓', '💪', '🎉', '🚀', '💯', '⚡', '🏆', '👀', '🤔', '💬', '🧠']
 type ContextMenuAction = 'edit' | 'duplicate' | 'front' | 'back' | 'delete'
 const CONTEXT_MENU_ITEMS: { label: string; action: ContextMenuAction; danger?: boolean }[] = [
@@ -98,7 +92,6 @@ const CONTEXT_MENU_ITEMS: { label: string; action: ContextMenuAction; danger?: b
   { label: '⬇️ На задний план', action: 'back' },
   { label: '🗑️ Удалить', action: 'delete', danger: true },
 ]
-
 function genId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID()
@@ -112,7 +105,6 @@ function genId() {
   // Final fallback (should never reach in modern browsers)
   return Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9)
 }
-
 function pointToLineDistance(p: Point, a: Point, b: Point): number {
   const dx = b.x - a.x
   const dy = b.y - a.y
@@ -120,7 +112,6 @@ function pointToLineDistance(p: Point, a: Point, b: Point): number {
   if (len === 0) return Math.hypot(p.x - a.x, p.y - a.y)
   return Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / len
 }
-
 function simplifyPath(points: Point[], tolerance = 2): Point[] {
   if (points.length <= 2) return points
   let maxDist = 0, maxIdx = 0
@@ -136,7 +127,6 @@ function simplifyPath(points: Point[], tolerance = 2): Point[] {
   }
   return [first, last]
 }
-
 function smoothPathD(points: Point[]): string {
   if (points.length < 2) return ''
   if (points.length === 2) return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`
@@ -149,9 +139,7 @@ function smoothPathD(points: Point[]): string {
   d += ` L ${points[points.length - 1].x} ${points[points.length - 1].y}`
   return d
 }
-
 function snapVal(v: number, grid = 20) { return snap_to_grid(v, grid) }
-
 function bpmnEdgeAnchor(element: BoardElement, towardX: number, towardY: number): Point {
   const width = element.w || 0
   const height = element.h || 0
@@ -160,7 +148,6 @@ function bpmnEdgeAnchor(element: BoardElement, towardX: number, towardY: number)
   const dx = towardX - centerX
   const dy = towardY - centerY
   if (dx === 0 && dy === 0) return { x: centerX, y: centerY }
-
   const halfWidth = width / 2
   const halfHeight = height / 2
   let scale: number
@@ -173,7 +160,6 @@ function bpmnEdgeAnchor(element: BoardElement, towardX: number, towardY: number)
   }
   return { x: centerX + dx * scale, y: centerY + dy * scale }
 }
-
 export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -232,7 +218,6 @@ export default function App() {
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false })
   const [showMiniMap, setShowMiniMap] = useState(true)
   const [laserPos, setLaserPos] = useState<Point | null>(null)
-
   const chooseTool = useCallback((nextTool: Tool) => {
     setTool(nextTool)
     if (nextTool !== 'bpmnSequence') {
@@ -240,12 +225,10 @@ export default function App() {
       setFlowPreviewPoint(null)
     }
   }, [tool])
-
   // Drag state
   const [dragInfo, setDragInfo] = useState<{
     id: string; startX: number; startY: number; elStartX: number; elStartY: number
   } | null>(null)
-
   // Resize state
   const [resizeInfo, setResizeInfo] = useState<{
     id: string; corner: string; startX: number; startY: number;
@@ -255,12 +238,10 @@ export default function App() {
   // (and one gc:false tombstone) per pointer event.
   const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> } | null>(null)
   const transientFrameRef = useRef<{ id: string; updates: Partial<BoardElement> } | null>(null)
-
   // Long press
   const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null)
   const bpmnImportRef = useRef<HTMLInputElement>(null)
   const bpmnRunTimersRef = useRef<number[]>([])
-
   // Yjs
   const ydoc = useMemo(() => new Y.Doc(), [])
   const yElements = useRef<Y.Array<BoardElement> | null>(null)
@@ -276,7 +257,6 @@ export default function App() {
     try { localStorage.setItem('miro-onboarding-seen', '1') } catch { /* onboarding is optional */ }
     setTourStep(-1)
   }, [])
-
   const createBpmnModel = useCallback(() => {
     const nodes = elements
       .filter((element) => element.bpmnNodeType)
@@ -331,7 +311,6 @@ export default function App() {
       resourceRoles,
     }
   }, [elements, simulationTarget, calendarStart, calendarEnd, simulationInstances, arrivalInterval, arrivalClasses, rolePolicies])
-
   const createSimulationBpmnModel = useCallback(() => {
     const model = createBpmnModel()
     return {
@@ -345,11 +324,9 @@ export default function App() {
       })),
     }
   }, [createBpmnModel])
-
   const bpmnIssues = useMemo(() => {
     const model = createBpmnModel()
     if (model.nodes.length === 0) return []
-
     try {
       return JSON.parse(validate_bpmn(JSON.stringify(model))).issues as {
         severity: 'error' | 'warning'
@@ -360,7 +337,6 @@ export default function App() {
       return [{ severity: 'error' as const, message: 'Не удалось проверить BPMN-модель.' }]
     }
   }, [createBpmnModel])
-
   // Roles that actually appear on the canvas, with the inline capacity that the
   // engine would use if no explicit role policy is configured.
   const detectedRoles = useMemo(() => {
@@ -372,7 +348,6 @@ export default function App() {
     }
     return [...roles.entries()].sort(([left], [right]) => left.localeCompare(right))
   }, [elements])
-
   const selectedBpmnTask = useMemo(
     () => elements.find((element) => element.id === selectedId && element.bpmnNodeType === 'task') ?? null,
     [elements, selectedId],
@@ -385,7 +360,6 @@ export default function App() {
     () => selectedBpmnFlow?.bpmnFlow && elements.find((element) => element.id === selectedBpmnFlow.bpmnFlow!.sourceId)?.bpmnNodeType === 'xorGateway',
     [elements, selectedBpmnFlow],
   )
-
   const user = useMemo(() => {
     const saved = localStorage.getItem('miro-author-id')
     if (saved) return { id: saved }
@@ -393,7 +367,6 @@ export default function App() {
     try { localStorage.setItem('miro-author-id', id) } catch { /* author id is optional metadata */ }
     return { id }
   }, [])
-
   useEffect(() => {
     const yarray = ydoc.getArray<BoardElement>('elements')
     const meta = ydoc.getMap<unknown>('meta')
@@ -407,7 +380,6 @@ export default function App() {
         meta.set('createdAt', new Date().toISOString())
       }, RECOVERY_ORIGIN)
     }
-
     const applyProfileConfig = () => {
       const config = profileConfig.toJSON() as ProfileConfig
       profileConfigJsonRef.current = JSON.stringify(config)
@@ -430,11 +402,9 @@ export default function App() {
     }
     profileConfig.observe(applyProfileConfig)
     applyProfileConfig()
-
     // UndoManager
     const undoManager = new Y.UndoManager(yarray, { captureTimeout: 500 })
     undoManagerRef.current = undoManager
-
     const updateUndoState = () => setUndoState({
       canUndo: undoManager.undoStack.length > 0,
       canRedo: undoManager.redoStack.length > 0,
@@ -442,40 +412,14 @@ export default function App() {
     undoManager.on('stack-item-added', updateUndoState)
     undoManager.on('stack-item-popped', updateUndoState)
     undoManager.on('stack-item-updated', updateUndoState)
-
     // IndexedDB persistence
     let persistence: IndexeddbPersistence | null = null
     try { persistence = new IndexeddbPersistence('miroboard-local', ydoc) } catch (e) { console.warn('IndexedDB failed', e) }
-
     // Sync
     const updateElements = () => setElements(yarray.toArray())
     yarray.observe(updateElements)
     updateElements()
-
-    // Fallback load only after IndexedDB has finished restoring, otherwise it duplicates data.
-    const restoreFallback = () => {
-      const saved = localStorage.getItem('board-local')
-      if (saved && yarray.length === 0) {
-        try {
-          const parsed: unknown = JSON.parse(saved)
-          if (Array.isArray(parsed)) ydoc.transact(() => parsed.forEach((el: BoardElement) => yarray.push([el])), RECOVERY_ORIGIN)
-        } catch { /* ignore */ }
-      }
-    }
-    if (persistence) persistence.once('synced', restoreFallback)
-    else restoreFallback()
-
-    // Auto-save
-    const si = setInterval(() => {
-      try {
-        localStorage.setItem('board-local', JSON.stringify(yarray.toArray()))
-      } catch (error) {
-        console.warn('Could not autosave board to localStorage', error)
-      }
-    }, 3000)
-
     return () => {
-      clearInterval(si)
       dirtyTrackerRef.current?.dispose(); dirtyTrackerRef.current = null
       yarray.unobserve(updateElements)
       profileConfig.unobserve(applyProfileConfig)
@@ -487,11 +431,9 @@ export default function App() {
       ydoc.destroy()
     }
   }, [ydoc])
-
   useEffect(() => {
     return addBeforeUnloadGuard(isDirty)
   }, [isDirty])
-
   const simulationProfile = useMemo(() => ({
     ...DEFAULT_BPMN_SIMULATION,
     seed: simulationSeed,
@@ -504,7 +446,6 @@ export default function App() {
     arrivalClasses,
     rolePolicies,
   }), [simulationSeed, simulationRuns, simulationTarget, simulationInstances, arrivalInterval, calendarStart, calendarEnd, arrivalClasses, rolePolicies])
-
   useEffect(() => {
     if (!bpmnProfileActive || !profileConfigRef.current) return
     const config = withBpmnSimulation({}, simulationProfile)
@@ -513,7 +454,6 @@ export default function App() {
     profileConfigJsonRef.current = encoded
     ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn))
   }, [bpmnProfileActive, simulationProfile, ydoc])
-
   const activateBpmnProfile = useCallback(() => {
     if (profileConfigRef.current && !bpmnProfileActive) {
       const config = withBpmnSimulation({}, DEFAULT_BPMN_SIMULATION)
@@ -533,7 +473,6 @@ export default function App() {
     setWorkspaceMode('bpmn')
     setShowBpmnPalette(true)
   }, [bpmnProfileActive, ydoc])
-
   const saveBoard = useCallback(async (mode: 'save' | 'saveAs') => {
     const metaMap = ydoc.getMap<unknown>('meta')
     const metaId = metaMap.get('id')
@@ -574,6 +513,55 @@ export default function App() {
       showToast('Не удалось сохранить документ. Проверьте доступ к файлу.', 'error')
     }
   }, [elements, fileSession, showToast, ydoc])
+  const resetDocument = useCallback(() => {
+    if (isDirty && !window.confirm('Несохраненные изменения будут потеряны. Продолжить?')) return
+    const meta = ydoc.getMap<unknown>('meta')
+    const profileConfig = ydoc.getMap<unknown>('profileConfig')
+    ydoc.transact(() => {
+      yElements.current?.delete(0, yElements.current.length)
+      meta.clear()
+      meta.set('id', `doc_${genId()}`)
+      meta.set('createdAt', new Date().toISOString())
+      profileConfig.clear()
+    }, RECOVERY_ORIGIN)
+    setFileSession({ handle: null, name: null, isUntitled: true })
+    setSelectedId(null)
+    setWorkspaceMode('board')
+    setBpmnProfileActive(false)
+    dirtyTrackerRef.current?.markSaved()
+    showToast('Создан новый документ', 'success')
+  }, [isDirty, showToast, ydoc])
+  const openBoard = useCallback(async () => {
+    if (isDirty && !window.confirm('Несохраненные изменения будут потеряны. Продолжить?')) return
+    const outcome = await openDocument()
+    if (outcome.kind === 'cancelled') return
+    if (outcome.kind === 'failed') {
+      const message = outcome.failure.kind === 'too-new'
+        ? `Документ использует схему v${outcome.failure.found}, поддерживается v${outcome.failure.supported}`
+        : outcome.failure.kind === 'not-mboard'
+          ? 'Файл не является документом .mboard'
+          : outcome.failure.errors[0] ?? 'Не удалось открыть документ .mboard'
+      showToast(message, 'error')
+      return
+    }
+    const loaded = deserialise(outcome.file)
+    const meta = ydoc.getMap<unknown>('meta')
+    const profileConfig = ydoc.getMap<unknown>('profileConfig')
+    ydoc.transact(() => {
+      yElements.current?.delete(0, yElements.current.length)
+      if (loaded.elements.length) yElements.current?.push(loaded.elements)
+      meta.clear()
+      Object.entries(loaded.meta).forEach(([key, value]) => meta.set(key, value))
+      profileConfig.clear()
+      Object.entries(loaded.profileConfig).forEach(([key, value]) => profileConfig.set(key, value))
+    }, RECOVERY_ORIGIN)
+    setFileSession(outcome.session)
+    setSelectedId(null)
+    dirtyTrackerRef.current?.markSaved()
+    if (outcome.file.meta.title !== outcome.session.name) {
+      showToast(`Открыт документ «${outcome.session.name}»`, 'success')
+    }
+  }, [isDirty, showToast, ydoc])
 
   // ======================== HELPERS ========================
 
@@ -1322,6 +1310,11 @@ export default function App() {
         void saveBoard(e.shiftKey ? 'saveAs' : 'save')
         return
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault()
+        void openBoard()
+        return
+      }
       const map: Record<string, Tool> = {
         v: 'select', h: 'pan', p: 'pen', m: 'marker', e: 'eraser',
         s: 'sticky', t: 'text', r: 'rect', o: 'circle', a: 'arrow', l: 'line'
@@ -1339,7 +1332,7 @@ export default function App() {
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
-  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard])
+  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard])
 
   // ======================== RENDER ELEMENT ========================
   const renderedElements = useMemo(() => {
@@ -1644,7 +1637,7 @@ export default function App() {
             <div className="size-7 rounded-lg bg-gradient-to-br from-violet-500 to-blue-500 grid place-items-center">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
             </div>
-            <span className={`text-[15px] font-bold tracking-tight ${textC}`}>MiroBoard</span>
+            <span className={`text-[15px] font-bold tracking-tight ${textC}`}>{fileSession.name ?? 'Новый документ'}</span>
             <span role="status" aria-live="polite" className={`text-[11px] font-semibold ${isDirty ? 'text-amber-700' : textSec}`}>{isDirty ? 'Не сохранено' : 'Сохранено'}</span>
             <span className="select-text rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600" title="Build version: можно выделить и скопировать">{__MIROBOARD_VERSION__}</span>
             <div className="ml-1 hidden rounded-lg bg-slate-100 p-0.5 sm:flex">
@@ -2062,6 +2055,14 @@ export default function App() {
           <button onClick={() => { exportToPNG(); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg> PNG
+          </button>
+          <button onClick={() => { resetDocument(); setShowMore(false) }}
+            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+            Новый
+          </button>
+          <button onClick={() => { void openBoard(); setShowMore(false) }}
+            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+            Открыть
           </button>
           <button onClick={() => { void saveBoard('save'); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>

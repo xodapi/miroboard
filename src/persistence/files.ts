@@ -1,4 +1,5 @@
 import type { MboardFile } from '../format/types'
+import { loadMboard, type LoadFailure } from '../format/schema'
 
 export const MBOARD_EXTENSION = '.mboard'
 export const MBOARD_MIME = 'application/json'
@@ -18,6 +19,7 @@ export type SaveOutcome =
 
 type SavePickerWindow = Window & {
   showSaveFilePicker?: (options?: SavePickerOptions) => Promise<FileSystemFileHandle>
+  showOpenFilePicker?: (options?: OpenPickerOptions) => Promise<FileSystemFileHandle[]>
 }
 
 type SavePickerOptions = {
@@ -25,8 +27,22 @@ type SavePickerOptions = {
   types?: { description: string; accept: Record<string, string[]> }[]
 }
 
+type OpenPickerOptions = {
+  multiple?: boolean
+  types?: { description: string; accept: Record<string, string[]> }[]
+}
+
+export type OpenOutcome =
+  | { kind: 'opened'; file: MboardFile; session: FileSession }
+  | { kind: 'cancelled' }
+  | { kind: 'failed'; failure: LoadFailure }
+
 export function hasFileSystemAccess(): boolean {
   return typeof window !== 'undefined' && typeof (window as SavePickerWindow).showSaveFilePicker === 'function'
+}
+
+function hasOpenFileSystemAccess(): boolean {
+  return typeof window !== 'undefined' && typeof (window as SavePickerWindow).showOpenFilePicker === 'function'
 }
 
 function defaultName(file: MboardFile, session: FileSession): string {
@@ -41,6 +57,16 @@ function defaultName(file: MboardFile, session: FileSession): string {
 function pickerOptions(suggestedName: string): SavePickerOptions {
   return {
     suggestedName,
+    types: [{
+      description: 'MiroBoard document',
+      accept: { [MBOARD_MIME]: [MBOARD_EXTENSION] },
+    }],
+  }
+}
+
+function openPickerOptions(): OpenPickerOptions {
+  return {
+    multiple: false,
     types: [{
       description: 'MiroBoard document',
       accept: { [MBOARD_MIME]: [MBOARD_EXTENSION] },
@@ -69,6 +95,53 @@ function download(contents: string, name: string): void {
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
+}
+
+async function readMboard(file: File): Promise<OpenOutcome> {
+  const loaded = loadMboard(await file.text())
+  return loaded.ok
+    ? { kind: 'opened', file: loaded.file, session: { handle: null, name: file.name, isUntitled: false } }
+    : { kind: 'failed', failure: loaded.failure }
+}
+
+function chooseFileFallback(): Promise<File | null> {
+  return new Promise(resolve => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = `${MBOARD_EXTENSION},${MBOARD_MIME}`
+    input.style.display = 'none'
+    input.onchange = () => {
+      const file = input.files?.[0] ?? null
+      input.remove()
+      resolve(file)
+    }
+    input.oncancel = () => {
+      input.remove()
+      resolve(null)
+    }
+    document.body.append(input)
+    input.click()
+  })
+}
+
+/** Opens and validates a `.mboard` document without mutating the current session. */
+export async function openDocument(): Promise<OpenOutcome> {
+  try {
+    if (hasOpenFileSystemAccess()) {
+      const [handle] = await (window as SavePickerWindow).showOpenFilePicker!(openPickerOptions())
+      if (!handle) return { kind: 'cancelled' }
+      const loaded = await readMboard(await handle.getFile())
+      return loaded.kind === 'opened'
+        ? { ...loaded, session: { handle, name: handle.name, isUntitled: false } }
+        : loaded
+    }
+
+    const file = await chooseFileFallback()
+    return file ? readMboard(file) : { kind: 'cancelled' }
+  } catch (error) {
+    if (isCancellation(error)) return { kind: 'cancelled' }
+    return { kind: 'failed', failure: { kind: 'invalid', errors: ['Не удалось прочитать документ .mboard'] } }
+  }
 }
 
 /**
