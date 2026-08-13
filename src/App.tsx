@@ -13,6 +13,8 @@ import { captureSnapshot, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot,
 import { loadIntoDoc } from './history/state'
 import { createCaptureTriggers, type CaptureTriggers } from './history/capture-triggers'
 import { TimelinePanel, formatSnapshotTimestamp } from './history/TimelinePanel'
+import { DEFAULT_RETENTION, retainForSave } from './history/retention'
+import { HistoryRetentionControls } from './history/HistoryRetentionControls'
 import { attachRecoveryCache } from './persistence/indexeddb'
 import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/legacy-adoption'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
@@ -265,6 +267,7 @@ export default function App() {
   const dirtyTrackerRef = useRef<DirtyTracker | null>(null)
   const captureTriggersRef = useRef<CaptureTriggers | null>(null)
   const historySnapshotsRef = useRef<HistorySnapshot[]>([])
+  const compactHistoryOnSaveRef = useRef(false)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
   const profileConfigRef = useRef<Y.Map<unknown> | null>(null)
   const profileConfigJsonRef = useRef('')
@@ -317,6 +320,7 @@ export default function App() {
     captureTriggersRef.current?.captureNow('named', label)
     showToast('Состояние отмечено', 'success')
   }, [showToast])
+  const compactHistory = useCallback(() => { historySnapshotsRef.current = []; setHistorySnapshots([]); compactHistoryOnSaveRef.current = true; showToast('Контрольные точки удалены. Сохраните документ, чтобы уменьшить его размер.', 'success') }, [showToast])
   const finishTour = useCallback(() => {
     try { localStorage.setItem('miro-onboarding-seen', '1') } catch { /* onboarding is optional */ }
     setTourStep(-1)
@@ -579,7 +583,7 @@ export default function App() {
     const now = new Date().toISOString()
     // The checkpoint is captured before serialisation, so the saved timeline's
     // newest entry is precisely the state that was written to disk.
-    captureTriggersRef.current?.captureNow('auto', undefined, now)
+    if (!compactHistoryOnSaveRef.current) captureTriggersRef.current?.captureNow('auto', undefined, now)
     const meta: DocMeta = {
       id: typeof metaId === 'string' ? metaId : `doc_${genId()}`,
       title: typeof metaTitle === 'string' ? metaTitle : 'Untitled board',
@@ -588,19 +592,25 @@ export default function App() {
       createdWith: { version: __MIROBOARD_VERSION__, commit: PROJECT_HISTORY[0]?.commit ?? 'local' },
       profiles: [],
     }
-    const history: DocHistory = {
-      yjsState: yElements.current ? toBase64(Y.encodeStateAsUpdate(ydoc)) : null,
+    const untrimmedHistory: DocHistory = {
+      yjsState: compactHistoryOnSaveRef.current ? null : yElements.current ? toBase64(Y.encodeStateAsUpdate(ydoc)) : null,
       snapshots: historySnapshotsRef.current,
-      retention: { keepAllNamed: true, keepLastAuto: 20, decayBucketsHours: [1, 6, 24, 168], maxSnapshots: 120, maxHistoryRatio: 3 },
+      retention: DEFAULT_RETENTION,
     }
-    const file = serialise({
+    const initialFile = serialise({
       elements: yElements.current?.toArray() ?? elements,
       meta,
       profileConfig: (profileConfigRef.current?.toJSON() ?? {}) as ProfileConfig,
-      history,
+      history: untrimmedHistory,
     })
+    const currentStateBytes = new TextEncoder().encode(JSON.stringify({ nodes: initialFile.nodes, edges: initialFile.edges })).byteLength
+    const history = retainForSave(untrimmedHistory, currentStateBytes, DEFAULT_RETENTION)
+    historySnapshotsRef.current = history.snapshots
+    setHistorySnapshots(history.snapshots)
+    const file = serialise({ ...initialFile, history, elements: yElements.current?.toArray() ?? elements })
     const outcome = await saveDocument(file, fileSession, mode)
     if (outcome.kind === 'saved') {
+      compactHistoryOnSaveRef.current = false
       setFileSession(outcome.session)
       ydoc.transact(() => {
         metaMap.set('title', file.meta.title)
@@ -2180,9 +2190,7 @@ export default function App() {
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
             ◉ Отметить состояние
           </button>
-          <span role="status" aria-live="polite" className={`px-2 text-[11px] font-medium ${textSec}`}>
-            Контрольные точки: {historySnapshots.length}
-          </span>
+          <HistoryRetentionControls elements={elements} snapshots={historySnapshots} ydoc={ydoc} textClassName={textSec} onCompact={compactHistory} />
           <button onClick={() => { setTransform({ x: 0, y: 0, scale: 1 }); setShowMore(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M9 22V12h6v10" /></svg> Домой
