@@ -93,7 +93,10 @@ function validateNode(value: unknown, index: number, errors: string[]): void {
     if (fill !== null && typeof fill !== 'string') errors.push(`${path}.style.fill must be a string or null`)
   }
   validateObject(requireField(node, 'content', errors), `${path}.content`, errors)
-  validateObject(requireField(node, 'profileData', errors), `${path}.profileData`, errors)
+  const profileData = validateObject(requireField(node, 'profileData', errors), `${path}.profileData`, errors)
+  if (profileData && 'bpmn' in profileData) {
+    validateObject(profileData.bpmn, `${path}.profileData.bpmn`, errors)
+  }
 }
 
 function validateEndpoint(value: unknown, path: string, errors: string[]): void {
@@ -139,10 +142,35 @@ function validateMboard(value: RecordValue): string[] {
   const edges = requireField(value, 'edges', errors)
   if (!Array.isArray(edges)) errors.push('edges must be an array')
   else edges.forEach((edge, index) => validateEdge(edge, index, errors))
+  if (Array.isArray(nodes)) validateGraphIntegrity(nodes, Array.isArray(edges) ? edges : [], errors)
   validateObject(requireField(value, 'profileConfig', errors), 'profileConfig', errors)
   validateHistory(requireField(value, 'history', errors), errors)
   validateObject(requireField(value, 'assets', errors), 'assets', errors)
   return errors
+}
+
+function validateGraphIntegrity(nodes: unknown[], edges: unknown[], errors: string[]): void {
+  const nodeIndexes = new Map<string, number>()
+  for (const [index, node] of nodes.entries()) {
+    if (!isRecord(node) || typeof node.id !== 'string') continue
+    const firstIndex = nodeIndexes.get(node.id)
+    if (firstIndex !== undefined) {
+      errors.push(`nodes[${index}].id duplicates nodes[${firstIndex}].id: ${node.id}`)
+      continue
+    }
+    nodeIndexes.set(node.id, index)
+  }
+
+  for (const [index, edge] of edges.entries()) {
+    if (!isRecord(edge)) continue
+    for (const endpointName of ['source', 'target'] as const) {
+      const endpoint = edge[endpointName]
+      if (!isRecord(endpoint) || typeof endpoint.nodeId !== 'string') continue
+      if (!nodeIndexes.has(endpoint.nodeId)) {
+        errors.push(`edges[${index}].${endpointName}.nodeId references unknown node id: ${endpoint.nodeId}`)
+      }
+    }
+  }
 }
 
 /** Validates untrusted JSON without throwing or coercing values. */

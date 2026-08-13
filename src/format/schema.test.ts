@@ -130,6 +130,78 @@ describe('loadMboard', () => {
     })
   })
 
+  it.each(['a string', ['bpmn']])('rejects a node whose profileData is %s', profileData => {
+    const source = validDocument()
+    source.nodes[0].profileData = profileData as never
+
+    expect(loadMboard(source)).toEqual({
+      ok: false,
+      failure: {
+        kind: 'invalid',
+        errors: ['nodes[0].profileData must be an object'],
+      },
+    })
+  })
+
+  it('rejects a node whose BPMN profile payload is null', () => {
+    const source = validDocument()
+    source.nodes[0].profileData = { bpmn: null } as never
+
+    expect(loadMboard(source)).toEqual({
+      ok: false,
+      failure: {
+        kind: 'invalid',
+        errors: ['nodes[0].profileData.bpmn must be an object'],
+      },
+    })
+  })
+
+  it.each([
+    ['source', 'missing-source'],
+    ['target', 'missing-target'],
+  ] as const)('rejects an edge with an unknown %s node id', (endpoint, unknownId) => {
+    const source = validDocument()
+    source.edges[0][endpoint].nodeId = unknownId
+
+    expect(loadMboard(source)).toEqual({
+      ok: false,
+      failure: {
+        kind: 'invalid',
+        errors: [`edges[0].${endpoint}.nodeId references unknown node id: ${unknownId}`],
+      },
+    })
+  })
+
+  it('reports both endpoints when an edge references two unknown node ids', () => {
+    const source = validDocument()
+    source.edges[0].source.nodeId = 'missing-source'
+    source.edges[0].target.nodeId = 'missing-target'
+
+    expect(loadMboard(source)).toEqual({
+      ok: false,
+      failure: {
+        kind: 'invalid',
+        errors: [
+          'edges[0].source.nodeId references unknown node id: missing-source',
+          'edges[0].target.nodeId references unknown node id: missing-target',
+        ],
+      },
+    })
+  })
+
+  it('rejects duplicate node ids with both conflicting positions', () => {
+    const source = validDocument()
+    source.nodes.push({ ...source.nodes[0] })
+
+    expect(loadMboard(source)).toEqual({
+      ok: false,
+      failure: {
+        kind: 'invalid',
+        errors: ['nodes[1].id duplicates nodes[0].id: node-1'],
+      },
+    })
+  })
+
   it('collects malformed metadata, node, edge, and history errors', () => {
     const source = validDocument()
     source.meta = {
