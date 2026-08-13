@@ -213,6 +213,18 @@ export function loadMboard(raw: unknown): LoadResult {
   } catch (error) {
     return { ok: false, failure: { kind: 'invalid', errors: [error instanceof Error ? error.message : String(error)] } }
   }
+  // History was introduced after the original v1 file contract. Keep legacy
+  // documents readable and start them with an explicitly empty timeline.
+  if (!('history' in migrated)) {
+    migrated = {
+      ...migrated,
+      history: {
+        yjsState: null,
+        snapshots: [],
+        retention: { keepAllNamed: true, keepLastAuto: 20, decayBucketsHours: [1, 6, 24, 168], maxSnapshots: 120, maxHistoryRatio: 3 },
+      },
+    }
+  }
   const errors = validateMboard(migrated)
   return errors.length === 0
     ? { ok: true, file: migrated as unknown as MboardFile, ...(version < CURRENT_SCHEMA_VERSION ? { migratedFrom: version } : {}) }

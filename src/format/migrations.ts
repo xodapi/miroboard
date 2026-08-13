@@ -14,6 +14,11 @@ const v0ToV1: Migration = {
     schemaVersion: 1,
     profileConfig: doc.profileConfig ?? {},
     assets: doc.assets ?? {},
+    history: doc.history ?? {
+      yjsState: null,
+      snapshots: [],
+      retention: { keepAllNamed: true, keepLastAuto: 20, decayBucketsHours: [1, 6, 24, 168], maxSnapshots: 120, maxHistoryRatio: 3 },
+    },
     nodes: Array.isArray(doc.nodes)
       ? doc.nodes.map((node, index) => addV1NodeFields(node, index))
       : doc.nodes,

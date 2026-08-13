@@ -224,6 +224,11 @@ export function serialise(input: SerialiseInput): MboardFile {
     else edges.push({ ...mergeUnknown(converted.edge, elementExtras.get(input.elements[index])) as DocEdge, order: index })
   })
   const rootExtras = documentExtras.get(input.meta) ?? {}
+  const pairedHistory = input.history.yjsState
+    ? input.history.snapshots.length > 0
+      ? input.history
+      : { ...input.history, yjsState: null }
+    : { ...input.history, snapshots: [] }
   return normalise({
     ...rootExtras,
     format: 'mboard',
@@ -232,7 +237,7 @@ export function serialise(input: SerialiseInput): MboardFile {
     nodes,
     edges,
     profileConfig: input.profileConfig,
-    history: input.history,
+    history: pairedHistory,
     assets: {},
   })
 }

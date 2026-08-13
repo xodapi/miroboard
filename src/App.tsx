@@ -9,13 +9,14 @@ import { openDocument, openDroppedDocument, saveDocument, type FileSession, type
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
-import { captureSnapshot, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot } from './history/snapshots'
+import { captureSnapshot, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot, toBase64 } from './history/snapshots'
+import { loadIntoDoc } from './history/state'
 import { createCaptureTriggers, type CaptureTriggers } from './history/capture-triggers'
 import { TimelinePanel, formatSnapshotTimestamp } from './history/TimelinePanel'
 import { attachRecoveryCache } from './persistence/indexeddb'
 import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/legacy-adoption'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
-import { deserialise, serialise } from './format/mboard'
+import { serialise } from './format/mboard'
 import type { DocHistory, DocMeta, HistorySnapshot, ProfileConfig } from './format/types'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
@@ -588,7 +589,7 @@ export default function App() {
       profiles: [],
     }
     const history: DocHistory = {
-      yjsState: null,
+      yjsState: yElements.current ? toBase64(Y.encodeStateAsUpdate(ydoc)) : null,
       snapshots: historySnapshotsRef.current,
       retention: { keepAllNamed: true, keepLastAuto: 20, decayBucketsHours: [1, 6, 24, 168], maxSnapshots: 120, maxHistoryRatio: 3 },
     }
@@ -636,20 +637,22 @@ export default function App() {
     showToast('Создан новый документ', 'success')
   }, [isDirty, showToast, ydoc])
   const applyOpenOutcome = useCallback((outcome: Extract<OpenOutcome, { kind: 'opened' }>) => {
-    const loaded = deserialise(outcome.file)
+    const reconstructed = loadIntoDoc(outcome.file)
+    const loadedElements = reconstructed.ydoc.getArray<BoardElement>('elements').toArray()
     const meta = ydoc.getMap<unknown>('meta')
     const profileConfig = ydoc.getMap<unknown>('profileConfig')
     ydoc.transact(() => {
       yElements.current?.delete(0, yElements.current.length)
-      if (loaded.elements.length) yElements.current?.push(loaded.elements)
+      if (loadedElements.length) yElements.current?.push(loadedElements)
       meta.clear()
-      Object.entries(loaded.meta).forEach(([key, value]) => meta.set(key, value))
+      Object.entries(outcome.file.meta).forEach(([key, value]) => meta.set(key, value))
       profileConfig.clear()
-      Object.entries(loaded.profileConfig).forEach(([key, value]) => profileConfig.set(key, value))
+      Object.entries(outcome.file.profileConfig).forEach(([key, value]) => profileConfig.set(key, value))
     }, RECOVERY_ORIGIN)
     setFileSession(outcome.session)
-    historySnapshotsRef.current = loaded.history.snapshots
-    setHistorySnapshots(loaded.history.snapshots)
+    const snapshots = reconstructed.historyLost ? [] : outcome.file.history.snapshots
+    historySnapshotsRef.current = snapshots
+    setHistorySnapshots(snapshots)
     setSelectedId(null)
     dirtyTrackerRef.current?.markSaved()
     showToast(
@@ -658,6 +661,8 @@ export default function App() {
         : `Открыт документ «${outcome.session.name}». Схема обновлена с v${outcome.migratedFrom} до v1`,
       'success',
     )
+    if (reconstructed.historyLost) showToast('История документа повреждена. Текущий контент восстановлен, история потеряна.', 'error')
+    reconstructed.ydoc.destroy()
   }, [showToast, ydoc])
   const showOpenFailure = useCallback((outcome: Extract<OpenOutcome, { kind: 'failed' }>) => {
     const message = outcome.failure.kind === 'empty'
@@ -1150,19 +1155,16 @@ export default function App() {
       }
       return
     }
-
     if (tool === 'eraser') {
       const el = target.closest('[data-id]') as HTMLElement
       if (el?.dataset.id) deleteElement(el.dataset.id)
       return
     }
-
     if (tool === 'bpmnSequence') {
       const elementTarget = target.closest('[data-id]') as HTMLElement
       const targetId = elementTarget?.dataset.id
       const targetNode = targetId ? elements.find(element => element.id === targetId && element.bpmnNodeType) : undefined
       if (!targetNode) return
-
       if (!bpmnFlowSourceId) {
         setBpmnFlowSourceId(targetNode.id)
         setSelectedId(targetNode.id)
@@ -1170,14 +1172,12 @@ export default function App() {
         showToast('Источник выбран. Теперь выберите целевой BPMN-узел.', 'info')
         return
       }
-
       const sourceNode = elements.find(element => element.id === bpmnFlowSourceId && element.bpmnNodeType)
       if (!sourceNode || sourceNode.id === targetNode.id) {
         setBpmnFlowSourceId(null)
         setFlowPreviewPoint(null)
         return
       }
-
       const sourceX = sourceNode.x + (sourceNode.w || 0) / 2
       const sourceY = sourceNode.y + (sourceNode.h || 0) / 2
       const targetX = targetNode.x + (targetNode.w || 0) / 2
@@ -1203,7 +1203,6 @@ export default function App() {
       showToast('Sequence flow создан.', 'success')
       return
     }
-
     const bpmnNodeByTool: Partial<Record<Tool, { type: BpmnNodeType; text: string; w: number; h: number; color: string; durationMs?: number }>> = {
       bpmnStart: { type: 'startEvent', text: 'Старт', w: 72, h: 72, color: '#6BCB77' },
       bpmnTask: { type: 'task', text: 'Задача', w: 176, h: 76, color: '#4D96FF', durationMs: 1000 },
