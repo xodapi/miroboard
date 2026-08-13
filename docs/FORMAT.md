@@ -91,6 +91,25 @@ explicitly called.
 
 ## Profiles and simulation configuration
 
+## Save/load self-consistency regression gate
+
+Every document emitted by `serialise()` is immediately passed through
+`loadMboard()` in `src/format/self-consistency.test.ts`. The permanent test
+inventory is the six shipped learning modules:
+
+1. `examples/basic-fixed.json`
+2. `examples/batch-workload.json`
+3. `examples/fifo-vs-priority.json`
+4. `examples/parallel-queue.json`
+5. `examples/priority-queue.json`
+6. `examples/sla-calendar.json`
+
+The inventory also includes `all-element-types-board`, a hand-built document
+covering path, sticky, rect, circle, arrow, line, text, emoji, a BPMN task, and
+a connector. Each document is serialised, JSON encoded, validated, deserialised,
+and serialised again; validation must succeed at both save boundaries and no
+console error may be emitted.
+
 `meta.profiles` is derived on every save, never trusted from React state. It is
 `["core"]`, plus `"bpmn"` when any node or edge has a `profileData.bpmn`
 namespace, regardless of array ordering. `profileConfig` is namespaced document
