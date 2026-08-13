@@ -9,6 +9,7 @@ import { openDocument, openDroppedDocument, saveDocument, type FileSession, type
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
+import { HISTORY_RESTORE_ORIGIN } from './history/snapshots'
 import { attachRecoveryCache } from './persistence/indexeddb'
 import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/legacy-adoption'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
@@ -252,7 +253,7 @@ export default function App() {
   const bpmnImportRef = useRef<HTMLInputElement>(null)
   const bpmnRunTimersRef = useRef<number[]>([])
   // Yjs
-  const ydoc = useMemo(() => new Y.Doc(), [])
+  const ydoc = useMemo(() => new Y.Doc({ gc: false }), [])
   const yElements = useRef<Y.Array<BoardElement> | null>(null)
   const dirtyTrackerRef = useRef<DirtyTracker | null>(null)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
@@ -420,7 +421,10 @@ export default function App() {
     profileConfig.observe(applyProfileConfig)
     applyProfileConfig()
     // UndoManager
-    const undoManager = new Y.UndoManager(yarray, { captureTimeout: 500 })
+    const undoManager = new Y.UndoManager(yarray, {
+      captureTimeout: 500,
+      trackedOrigins: new Set([null, HISTORY_RESTORE_ORIGIN]),
+    })
     undoManagerRef.current = undoManager
     const updateUndoState = () => setUndoState({
       canUndo: undoManager.undoStack.length > 0,

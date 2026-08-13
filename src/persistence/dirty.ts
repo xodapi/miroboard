@@ -1,11 +1,10 @@
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
+export { HISTORY_RESTORE_ORIGIN } from '../history/snapshots'
+import { HISTORY_RESTORE_ORIGIN } from '../history/snapshots'
 
 /** Marks Yjs writes that replay the local recovery cache rather than user intent. */
 export const RECOVERY_ORIGIN = Symbol('recovery')
-
-/** Marks a history restore, which has its own explicit dirty-state handling. */
-export const HISTORY_RESTORE_ORIGIN = Symbol('history-restore')
 
 export interface DirtyTracker {
   isDirty(): boolean
