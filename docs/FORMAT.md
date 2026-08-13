@@ -47,3 +47,20 @@ in-memory model adopts the document representation.
   All other BPMN fields are optional and stay absent when unspecified.
 - `profileData: {}` is the v1 canonical representation for non-BPMN nodes and edges.
   In particular, a non-BPMN element must never gain `profileData.bpmn: {}`.
+
+## Profiles and simulation configuration
+
+`meta.profiles` is derived on every save, never trusted from React state. It is
+`["core"]`, plus `"bpmn"` when any node or edge has a `profileData.bpmn`
+namespace, regardless of array ordering. `profileConfig` is namespaced document
+configuration. The app stores `profileConfig.bpmn.simulation` in the Y.Doc
+`getMap("profileConfig")` shared type, preserving the UI's string values (including
+leading zeroes), arrival-class order, and role policies.
+
+The app activates BPMN affordances only when a valid `profileConfig.bpmn.simulation`
+exists. A document with BPMN element data but absent or non-BPMN profileConfig is
+therefore opened deterministically in core/board mode with BPMN affordances hidden,
+rather than entering a partially enabled mode. Choosing the BPMN palette explicitly
+creates the default BPMN simulation configuration and activates the profile.
+Document identity is likewise stored in the Y.Doc `getMap("meta")`, allowing the
+IndexedDB recovery state to retain identity even if the app crashes.

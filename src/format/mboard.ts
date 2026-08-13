@@ -163,7 +163,8 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
   }) as BoardElement
 }
 
-function profiles(nodes: DocNode[], edges: DocEdge[]): string[] {
+/** Derives the active document profiles from namespaced element data. */
+export function detectProfiles(nodes: DocNode[], edges: DocEdge[]): string[] {
   return nodes.some(node => node.profileData.bpmn !== undefined) || edges.some(edge => edge.profileData.bpmn !== undefined)
     ? ['core', 'bpmn']
     : ['core']
@@ -180,7 +181,7 @@ export function serialise(input: SerialiseInput): MboardFile {
   return normalise({
     format: 'mboard',
     schemaVersion: CURRENT_SCHEMA_VERSION,
-    meta: { ...input.meta, profiles: profiles(nodes, edges) },
+    meta: { ...input.meta, profiles: detectProfiles(nodes, edges) },
     nodes,
     edges,
     profileConfig: input.profileConfig,

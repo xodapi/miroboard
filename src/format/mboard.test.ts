@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deserialise, fromDocNode, normalise, serialise, toDocElement, type BoardElement } from './mboard'
+import { deserialise, detectProfiles, fromDocNode, normalise, serialise, toDocElement, type BoardElement } from './mboard'
 import type { DocHistory, DocMeta, ProfileConfig } from './types'
 
 const meta: DocMeta = {
@@ -76,6 +76,21 @@ describe('mboard adapter', () => {
     expect(file.meta.profiles).toEqual(['core'])
     expect(file.nodes[0].parentId).toBeNull()
     expect(file.edges).toEqual([])
+  })
+
+  it('detects BPMN from either graph collection, independently of element order', () => {
+    const bpmnNode = toDocElement({ ...plain, id: 'task', bpmnNodeType: 'task' })
+    const bpmnEdge = toDocElement({
+      ...plain, id: 'flow', type: 'arrow',
+      bpmnFlow: { sourceId: 'sticky', targetId: 'task', flowType: 'sequence' },
+    })
+    if (!('node' in bpmnNode) || !('edge' in bpmnEdge)) throw new Error('expected graph elements')
+
+    expect(detectProfiles([bpmnNode.node], [])).toEqual(['core', 'bpmn'])
+    expect(detectProfiles([], [bpmnEdge.edge])).toEqual(['core', 'bpmn'])
+    const plainNode = toDocElement(plain)
+    if (!('node' in plainNode)) throw new Error('expected node')
+    expect(detectProfiles([plainNode.node], [])).toEqual(['core'])
   })
 
   it('deserialises the document content and retains metadata configuration and history', () => {

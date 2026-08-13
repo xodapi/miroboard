@@ -3,6 +3,8 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
+import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
+import type { ProfileConfig } from './format/types'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
 import slaCalendarExample from '../examples/sla-calendar.json'
@@ -215,6 +217,7 @@ export default function App() {
   const [rolePolicies, setRolePolicies] = useState<Record<string, RolePolicyDraft>>({})
   const [calendarStart, setCalendarStart] = useState('')
   const [calendarEnd, setCalendarEnd] = useState('')
+  const [bpmnProfileActive, setBpmnProfileActive] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
   const [snapGrid, setSnapGrid] = useState(false)
@@ -257,6 +260,8 @@ export default function App() {
   const ydoc = useMemo(() => new Y.Doc(), [])
   const yElements = useRef<Y.Array<BoardElement> | null>(null)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
+  const profileConfigRef = useRef<Y.Map<unknown> | null>(null)
+  const profileConfigJsonRef = useRef('')
   const showToast = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, tone })
     window.setTimeout(() => setToast(null), 4200)
@@ -385,7 +390,39 @@ export default function App() {
 
   useEffect(() => {
     const yarray = ydoc.getArray<BoardElement>('elements')
+    const meta = ydoc.getMap<unknown>('meta')
+    const profileConfig = ydoc.getMap<unknown>('profileConfig')
     yElements.current = yarray
+    profileConfigRef.current = profileConfig
+    if (!meta.has('id')) {
+      ydoc.transact(() => {
+        meta.set('id', `doc_${genId()}`)
+        meta.set('createdAt', new Date().toISOString())
+      })
+    }
+
+    const applyProfileConfig = () => {
+      const config = profileConfig.toJSON() as ProfileConfig
+      profileConfigJsonRef.current = JSON.stringify(config)
+      const simulation = bpmnSimulationFromProfileConfig(config)
+      setBpmnProfileActive(simulation !== null)
+      if (!simulation) {
+        setWorkspaceMode('board')
+        setShowSimulationPanel(false)
+        return
+      }
+      setSimulationSeed(simulation.seed)
+      setSimulationRuns(simulation.runs)
+      setSimulationTarget(simulation.slaTargetSec)
+      setSimulationInstances(simulation.instances)
+      setArrivalInterval(simulation.arrivalIntervalSec)
+      setArrivalClasses(simulation.arrivalClasses)
+      setRolePolicies(simulation.rolePolicies)
+      setCalendarStart(simulation.calendarStartHour)
+      setCalendarEnd(simulation.calendarEndHour)
+    }
+    profileConfig.observe(applyProfileConfig)
+    applyProfileConfig()
 
     // UndoManager
     const undoManager = new Y.UndoManager(yarray, { captureTimeout: 500 })
@@ -433,6 +470,8 @@ export default function App() {
     return () => {
       clearInterval(si)
       yarray.unobserve(updateElements)
+      profileConfig.unobserve(applyProfileConfig)
+      profileConfigRef.current = null
       undoManager.off('stack-item-added', updateUndoState)
       undoManager.off('stack-item-popped', updateUndoState)
       undoManager.off('stack-item-updated', updateUndoState)
@@ -440,6 +479,48 @@ export default function App() {
       ydoc.destroy()
     }
   }, [ydoc])
+
+  const simulationProfile = useMemo(() => ({
+    ...DEFAULT_BPMN_SIMULATION,
+    seed: simulationSeed,
+    runs: simulationRuns,
+    slaTargetSec: simulationTarget,
+    instances: simulationInstances,
+    arrivalIntervalSec: arrivalInterval,
+    calendarStartHour: calendarStart,
+    calendarEndHour: calendarEnd,
+    arrivalClasses,
+    rolePolicies,
+  }), [simulationSeed, simulationRuns, simulationTarget, simulationInstances, arrivalInterval, calendarStart, calendarEnd, arrivalClasses, rolePolicies])
+
+  useEffect(() => {
+    if (!bpmnProfileActive || !profileConfigRef.current) return
+    const config = withBpmnSimulation({}, simulationProfile)
+    const encoded = JSON.stringify(config)
+    if (encoded === profileConfigJsonRef.current) return
+    profileConfigJsonRef.current = encoded
+    ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn))
+  }, [bpmnProfileActive, simulationProfile, ydoc])
+
+  const activateBpmnProfile = useCallback(() => {
+    if (profileConfigRef.current && !bpmnProfileActive) {
+      const config = withBpmnSimulation({}, DEFAULT_BPMN_SIMULATION)
+      profileConfigJsonRef.current = JSON.stringify(config)
+      ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn))
+      setSimulationSeed(DEFAULT_BPMN_SIMULATION.seed)
+      setSimulationRuns(DEFAULT_BPMN_SIMULATION.runs)
+      setSimulationTarget(DEFAULT_BPMN_SIMULATION.slaTargetSec)
+      setSimulationInstances(DEFAULT_BPMN_SIMULATION.instances)
+      setArrivalInterval(DEFAULT_BPMN_SIMULATION.arrivalIntervalSec)
+      setArrivalClasses(DEFAULT_BPMN_SIMULATION.arrivalClasses)
+      setRolePolicies(DEFAULT_BPMN_SIMULATION.rolePolicies)
+      setCalendarStart(DEFAULT_BPMN_SIMULATION.calendarStartHour)
+      setCalendarEnd(DEFAULT_BPMN_SIMULATION.calendarEndHour)
+    }
+    setBpmnProfileActive(true)
+    setWorkspaceMode('bpmn')
+    setShowBpmnPalette(true)
+  }, [bpmnProfileActive, ydoc])
 
   // ======================== HELPERS ========================
 
@@ -1504,7 +1585,13 @@ export default function App() {
                 ['bpmn', 'BPMN'],
                 ['simulation', 'Симуляция'],
               ] as [WorkspaceMode, string][]).map(([mode, label]) => (
-                <button key={mode} onClick={() => { setWorkspaceMode(mode); if (mode === 'simulation') setShowSimulationPanel(true) }} className={`rounded-md px-2 py-1 text-[10px] font-semibold transition ${workspaceMode === mode ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                <button key={mode} onClick={() => {
+                  if ((mode === 'bpmn' || mode === 'simulation') && !bpmnProfileActive) {
+                    activateBpmnProfile()
+                  }
+                  setWorkspaceMode(mode)
+                  if (mode === 'simulation') setShowSimulationPanel(true)
+                }} className={`rounded-md px-2 py-1 text-[10px] font-semibold transition ${workspaceMode === mode ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
                   {label}
                 </button>
               ))}
@@ -1880,7 +1967,7 @@ export default function App() {
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'eraser' ? 'bg-black text-white' : hoverBg}`}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 20H7L3 16a1.9 1.9 0 0 1 0-2.8L14.2 2h.8l6 6v.8L9.8 20" /></svg> Ластик
           </button>
-          <button onClick={() => { setWorkspaceMode('bpmn'); setShowBpmnPalette(true); setShowMore(false); setShowEmoji(false) }}
+          <button onClick={() => { activateBpmnProfile(); setShowMore(false); setShowEmoji(false) }}
             className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${showBpmnPalette ? 'bg-violet-600 text-white' : hoverBg}`}>
             ◇ BPMN
           </button>
