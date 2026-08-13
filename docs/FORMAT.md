@@ -37,6 +37,16 @@ in-memory model adopts the document representation.
 - Optional `BoardElement` fields that are `undefined` are omitted. `null` is reserved
   for required nullable structural fields such as `frame.w`, `frame.h`, `style.fill`,
   and `style.stroke`.
+
+### Null and falsy value policy
+
+The format preserves explicit `null` values everywhere they are accepted, while
+`undefined` properties are omitted. Required nullable structural fields are always
+written explicitly as `null` (for example `frame.w`, `frame.h`, `style.fill`, and
+`style.stroke`), so their absence is never confused with a null value. Empty strings,
+empty arrays, `0`, negative numbers, large integers, fractions, and `false` are real
+values and are never treated as missing. The normaliser rejects cyclic objects with
+`Cannot normalise cyclic structure` rather than recursing indefinitely.
 - `parentId` is always written as `null` and top-level `assets` is always `{}` in v1.
   Containers and assets are not supported yet.
 - A `bpmnFlow` becomes an edge. `sourceId` and `targetId` are structural endpoints;

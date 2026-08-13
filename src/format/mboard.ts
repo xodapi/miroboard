@@ -273,14 +273,28 @@ function profileExtras(profileData: Record<string, Record<string, unknown>>): Re
   ]))
 }
 
-function canonical(value: unknown, key?: string): unknown {
+function canonical(value: unknown, key?: string, ancestors = new WeakSet<object>()): unknown {
   if (typeof value === 'number' && ['x', 'y', 'w', 'h', 'rotation'].includes(key ?? '')) return Math.round(value * 10_000) / 10_000
-  if (Array.isArray(value)) return value.map(item => canonical(item, key))
+  if (Array.isArray(value)) {
+    if (ancestors.has(value)) throw new TypeError('Cannot normalise cyclic structure')
+    ancestors.add(value)
+    try {
+      return value.map(item => canonical(item, key, ancestors))
+    } finally {
+      ancestors.delete(value)
+    }
+  }
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value)
-      .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([childKey, item]) => [childKey, canonical(item, childKey)]))
+    if (ancestors.has(value)) throw new TypeError('Cannot normalise cyclic structure')
+    ancestors.add(value)
+    try {
+      return Object.fromEntries(Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([childKey, item]) => [childKey, canonical(item, childKey, ancestors)]))
+    } finally {
+      ancestors.delete(value)
+    }
   }
   return value
 }

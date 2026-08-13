@@ -15,6 +15,8 @@ export interface MboardFile {
 export interface DocMeta {
   id: string
   title: string
+  /** Optional user-authored description, preserved verbatim when present. */
+  description?: string | null
   createdAt: string
   updatedAt: string
   createdWith: { version: string; commit: string }
