@@ -1,4 +1,5 @@
 import * as Y from 'yjs'
+import { IndexeddbPersistence } from 'y-indexeddb'
 import { HISTORY_RESTORE_ORIGIN } from './snapshots'
 import type { HistorySnapshot } from '../format/types'
 
@@ -46,7 +47,7 @@ export function createCaptureTriggers({
     return entry
   }
   const onUpdate = (_update: Uint8Array, origin: unknown) => {
-    if (ignoredOrigins.has(origin)) return
+    if (ignoredOrigins.has(origin) || origin instanceof IndexeddbPersistence) return
     editsSinceCapture += 1
     hasEditSinceCapture = true
     if (editsSinceCapture >= EDITS_PER_AUTOMATIC_CHECKPOINT) captureNow('auto')

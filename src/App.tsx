@@ -576,6 +576,7 @@ export default function App() {
     setShowBpmnPalette(true)
   }, [bpmnProfileActive, ydoc])
   const saveBoard = useCallback(async (mode: 'save' | 'saveAs'): Promise<boolean> => {
+    if (previewSnapshot) { showToast('Недоступно во время просмотра истории.', 'info'); return false }
     const metaMap = ydoc.getMap<unknown>('meta')
     const metaId = metaMap.get('id')
     const metaTitle = metaMap.get('title')
@@ -625,7 +626,7 @@ export default function App() {
       showToast('Не удалось сохранить документ. Проверьте доступ к файлу.', 'error')
     }
     return false
-  }, [elements, fileSession, showToast, ydoc])
+  }, [elements, fileSession, previewSnapshot, showToast, ydoc])
   const resetDocument = useCallback(() => {
     if (isDirty && !window.confirm('Несохраненные изменения будут потеряны. Продолжить?')) return
     const meta = ydoc.getMap<unknown>('meta')
@@ -691,13 +692,15 @@ export default function App() {
     else await proceed()
   }, [isDirty])
   const openBoard = useCallback(async () => {
+    if (previewSnapshot) return void showToast('Недоступно во время просмотра истории.', 'info')
     await requestOpen(async () => {
       const outcome = await openDocument()
       if (outcome.kind === 'opened') applyOpenOutcome(outcome)
       else if (outcome.kind === 'failed') showOpenFailure(outcome)
     })
-  }, [applyOpenOutcome, requestOpen, showOpenFailure])
+  }, [applyOpenOutcome, previewSnapshot, requestOpen, showOpenFailure, showToast])
   const loadDroppedBoard = useCallback(async (transfer: DataTransfer) => {
+    if (previewSnapshot) return void showToast('Недоступно во время просмотра истории.', 'info')
     const outcome = await openDroppedDocument(transfer)
     if (outcome.kind === 'cancelled') return
     if (outcome.kind === 'failed') {
@@ -709,7 +712,7 @@ export default function App() {
       applyOpenOutcome(outcome)
       if (outcome.ignoredFileCount) showToast(`Открыт первый .mboard, ещё файлов проигнорировано: ${outcome.ignoredFileCount}`, 'success')
     })
-  }, [applyOpenOutcome, requestOpen, showOpenFailure, showToast])
+  }, [applyOpenOutcome, previewSnapshot, requestOpen, showOpenFailure, showToast])
   const { isDropTarget, onDragEnter, onDragOver, onDragLeave, onCanvasDrop } = useFileDrop(loadDroppedBoard)
   // ======================== HELPERS ========================
 
@@ -733,7 +736,6 @@ export default function App() {
     if (!yElements.current) return
     commitElementUpdate(ydoc, yElements.current, id, updates)
   }, [previewSnapshot, ydoc])
-
   const deleteElement = useCallback((id: string) => {
     if (previewSnapshot) return
     if (!yElements.current) return
@@ -757,11 +759,9 @@ export default function App() {
       })
     }
   }, [previewSnapshot, ydoc])
-
   const sendToBack = useCallback((id: string) => {
     updateElement(id, { zIndex: 0 })
   }, [updateElement])
-
   const duplicateElement = useCallback((id: string) => {
     const el = elements.find(e => e.id === id)
     if (el) {

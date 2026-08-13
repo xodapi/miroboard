@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
+import { IndexeddbPersistence } from 'y-indexeddb'
 import type { HistorySnapshot } from '../format/types'
 import { RECOVERY_ORIGIN } from '../persistence/dirty'
 import { HISTORY_RESTORE_ORIGIN } from './snapshots'
@@ -33,6 +34,19 @@ describe('checkpoint capture triggers', () => {
     doc.transact(() => elements.push(['recovery']), RECOVERY_ORIGIN)
     doc.transact(() => elements.push(['restore']), HISTORY_RESTORE_ORIGIN)
     expect(capture).toHaveBeenCalledTimes(1)
+    triggers.dispose()
+  })
+
+  it('does not treat an IndexedDB recovery replay as a user edit', () => {
+    const doc = new Y.Doc({ gc: false })
+    const capture = vi.fn(entry)
+    const triggers = createCaptureTriggers({ ydoc: doc, capture })
+
+    for (let index = 0; index < EDITS_PER_AUTOMATIC_CHECKPOINT; index += 1) {
+      doc.transact(() => doc.getArray('elements').push([index]), Object.create(IndexeddbPersistence.prototype))
+    }
+
+    expect(capture).not.toHaveBeenCalled()
     triggers.dispose()
   })
 
