@@ -9,7 +9,7 @@ import { openDocument, openDroppedDocument, saveDocument, type FileSession, type
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
-import { captureSnapshot, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot, toBase64 } from './history/snapshots'
+import { captureSnapshot, fromBase64, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot, toBase64 } from './history/snapshots'
 import { loadIntoDoc } from './history/state'
 import { createCaptureTriggers, type CaptureTriggers } from './history/capture-triggers'
 import { TimelinePanel } from './history/TimelinePanel'
@@ -652,7 +652,8 @@ export default function App() {
     const profileConfig = ydoc.getMap<unknown>('profileConfig')
     ydoc.transact(() => {
       yElements.current?.delete(0, yElements.current.length)
-      if (loadedElements.length) yElements.current?.push(loadedElements)
+      if (!reconstructed.historyLost && outcome.file.history.yjsState) Y.applyUpdate(ydoc, fromBase64(outcome.file.history.yjsState), RECOVERY_ORIGIN)
+      else if (loadedElements.length) yElements.current?.push(loadedElements)
       meta.clear()
       Object.entries(outcome.file.meta).forEach(([key, value]) => meta.set(key, value))
       profileConfigJsonRef.current = JSON.stringify(outcome.file.profileConfig); profileConfig.clear()
