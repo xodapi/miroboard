@@ -168,7 +168,7 @@ test.describe('VAL-CROSS-013..018: history and simulation composition', () => {
     expect(await displayedConfig(page)).toEqual(newerConfig)
   })
 
-  test('historical preview suppresses stale results and prevents simulation from running', async ({ page }, testInfo) => {
+  test('historical preview disables simulation launchers until preview closes', async ({ page }) => {
     await boot(page)
     await loadBasicExample(page)
     await simulate(page)
@@ -177,10 +177,19 @@ test.describe('VAL-CROSS-013..018: history and simulation composition', () => {
     await closeSimulation(page)
     await preview(page, 'До изменения')
 
-    const panel = await openSimulation(page)
-    await expect(panel.getByText('Средняя стоимость:', { exact: false })).toHaveCount(0)
-    await page.screenshot({ path: testInfo.outputPath('preview-simulation-control.png'), fullPage: true })
-    await expect(panel.getByRole('button', { name: 'Запустить симуляцию' })).toBeDisabled()
+    const panel = simulationPanel(page)
+    const modeLauncher = page.getByRole('button', { name: 'Симуляция', exact: true }).first()
+    const headerLauncher = page.getByTitle('Открыть Monte Carlo симуляцию')
+    await expect(panel).toHaveCount(0)
+    await expect(modeLauncher).toBeDisabled()
+    await expect(headerLauncher).toBeDisabled()
+    await expect(page.locator('[role="status"][data-ui]')).toContainText('Симуляция недоступна')
+
+    await page.getByRole('button', { name: 'Закрыть', exact: true }).click()
+    await expect(modeLauncher).toBeEnabled()
+    await expect(headerLauncher).toBeEnabled()
+    await headerLauncher.click()
+    await expect(panel).toBeVisible()
   })
 
   test('four edit-and-simulate checkpoints remain independently reproducible', async ({ page }) => {

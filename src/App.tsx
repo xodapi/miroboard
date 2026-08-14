@@ -295,6 +295,7 @@ export default function App() {
     const historical = readSnapshot<BoardElement>(ydoc, snapshot)
     setPreviewSnapshot(snapshot)
     setPreviewElements(historical)
+    setShowSimulationPanel(false)
     setSelectedId(null)
     setEditingText(null)
     setShowMore(false)
@@ -573,6 +574,7 @@ export default function App() {
     setWorkspaceMode('bpmn')
     setShowBpmnPalette(true)
   }, [bpmnProfileActive, ydoc])
+  const openSimulation = useCallback(() => { if (previewSnapshot) return void showToast('Симуляция недоступна во время просмотра истории.', 'info'); if (!bpmnProfileActive) activateBpmnProfile(); setWorkspaceMode('simulation'); setShowSimulationPanel(true) }, [activateBpmnProfile, bpmnProfileActive, previewSnapshot, showToast])
   const saveBoard = useCallback(async (mode: 'save' | 'saveAs'): Promise<boolean> => {
     if (previewSnapshot) { showToast('Недоступно во время просмотра истории.', 'info'); return false }
     const metaMap = ydoc.getMap<unknown>('meta')
@@ -927,6 +929,7 @@ export default function App() {
   }, [createSimulationBpmnModel, showToast])
 
   const simulateBpmn = useCallback(() => {
+    if (previewSnapshot) return void showToast('Симуляция недоступна во время просмотра истории.', 'info')
     try {
       const runs = Number(simulationRuns)
       if (!Number.isInteger(runs) || runs < 1 || runs > 10000) throw new Error('Количество прогонов должно быть целым числом от 1 до 10000.')
@@ -942,10 +945,10 @@ export default function App() {
       setSimulationResultFingerprint(null)
       showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.', 'error')
     }
-  }, [createSimulationBpmnModel, simulationFingerprint, simulationRuns, simulationSeed, showToast])
-  const visibleSimulationResult = simulationResultFingerprint === simulationFingerprint ? bpmnSimulationResult : null
-  const visibleSimulationSummary = simulationResultFingerprint === simulationFingerprint ? bpmnSimulationSummary : null
-  const visibleBottleneckRole = simulationResultFingerprint === simulationFingerprint ? bottleneckRole : null
+  }, [createSimulationBpmnModel, previewSnapshot, simulationFingerprint, simulationRuns, simulationSeed, showToast])
+  const visibleSimulationResult = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationResult : null
+  const visibleSimulationSummary = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationSummary : null
+  const visibleBottleneckRole = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bottleneckRole : null
 
   useEffect(() => {
     if (!__MIROBOARD_DEBUG_HOOK__) return
@@ -1731,13 +1734,7 @@ export default function App() {
                 ['bpmn', 'BPMN'],
                 ['simulation', 'Симуляция'],
               ] as [WorkspaceMode, string][]).map(([mode, label]) => (
-                <button key={mode} onClick={() => {
-                  if ((mode === 'bpmn' || mode === 'simulation') && !bpmnProfileActive) {
-                    activateBpmnProfile()
-                  }
-                  setWorkspaceMode(mode)
-                  if (mode === 'simulation') setShowSimulationPanel(true)
-                }} className={`rounded-md px-2 py-1 text-[10px] font-semibold transition ${workspaceMode === mode ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                <button key={mode} onClick={() => mode === 'simulation' ? openSimulation() : (mode === 'bpmn' && !bpmnProfileActive ? activateBpmnProfile() : setWorkspaceMode(mode))} disabled={mode === 'simulation' && isPreview} className={`rounded-md px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${workspaceMode === mode ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
                   {label}
                 </button>
               ))}
@@ -1789,7 +1786,7 @@ export default function App() {
                 <span>{bpmnIssues.some(issue => issue.severity === 'error') ? '!' : '✓'}</span>
                 BPMN {bpmnIssues.length || 'OK'}
               </div>
-              <button onClick={() => { setWorkspaceMode('simulation'); setShowSimulationPanel(true) }} className="h-7 rounded-lg bg-fuchsia-500 px-2.5 text-[11px] font-bold text-white shadow-sm hover:bg-fuchsia-600" title="Открыть Monte Carlo симуляцию">
+              <button onClick={openSimulation} disabled={isPreview} className="h-7 rounded-lg bg-fuchsia-500 px-2.5 text-[11px] font-bold text-white shadow-sm hover:bg-fuchsia-600 disabled:cursor-not-allowed disabled:opacity-50" title="Открыть Monte Carlo симуляцию">
                 Симуляция
               </button>
               {bpmnRunSummary && (
@@ -1947,7 +1944,7 @@ export default function App() {
               {!sidebarCollapsed && <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">BPMN workspace</div>}
               <button onClick={() => setSidebarCollapsed(value => !value)} className="grid size-7 place-items-center rounded-lg text-slate-500 hover:bg-slate-100" title={sidebarCollapsed ? 'Развернуть BPMN-меню' : 'Свернуть BPMN-меню'}>{sidebarCollapsed ? '›' : '‹'}</button>
             </div>
-            <button onClick={() => { setWorkspaceMode('simulation'); setShowSimulationPanel(true) }} className={`mb-1 flex w-full items-center gap-2 rounded-xl bg-violet-600 py-2.5 text-left text-xs font-bold text-white shadow-sm hover:bg-violet-700 ${sidebarCollapsed ? 'justify-center px-0' : 'px-3'}`} title="Симуляция">
+            <button onClick={openSimulation} disabled={isPreview} className={`mb-1 flex w-full items-center gap-2 rounded-xl bg-violet-600 py-2.5 text-left text-xs font-bold text-white shadow-sm hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50 ${sidebarCollapsed ? 'justify-center px-0' : 'px-3'}`} title="Симуляция">
               <span>◌</span>{!sidebarCollapsed && ' Симуляция'}
             </button>
             <button onClick={() => setShowLearningModules(true)} className={`mb-1 flex w-full items-center gap-2 rounded-xl py-2 text-left text-xs font-semibold text-slate-700 hover:bg-violet-50 ${sidebarCollapsed ? 'justify-center px-0' : 'px-3'}`} title="Учебные модули">
@@ -2149,8 +2146,8 @@ export default function App() {
                 className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
                 ▶ Запуск
               </button>
-              <button onClick={() => { setShowSimulationPanel(true); setShowMore(false) }}
-                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
+              <button onClick={() => { openSimulation(); setShowMore(false) }} disabled={isPreview}
+                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition disabled:cursor-not-allowed disabled:opacity-50 ${hoverBg}`}>
                 ◌ Симуляция
               </button>
               <button onClick={() => { exportToBpmn(); setShowMore(false) }}
@@ -2343,7 +2340,7 @@ export default function App() {
         </div>
       )}
       {/* ===== SIMULATION MODAL ===== */}
-      {showSimulationPanel && (
+      {showSimulationPanel && !isPreview && (
         <SimulationModal
         arrivalClasses={arrivalClasses}
         arrivalInterval={arrivalInterval}
