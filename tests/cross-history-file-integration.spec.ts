@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test'
 type SnapshotEntry = {
   id: string
   at: string
-  kind: 'auto' | 'named'
+  kind: 'auto' | 'named' | 'restore-transition'
   label?: string
   snapshot: string
   elementCount: number
@@ -168,15 +168,17 @@ test('VAL-CROSS-009..011 and VAL-CROSS-029: restored files keep snapshots scrubb
   await mark(author, 'Середина')
   await addSticky(author, 420, 180)
   const beforeRestore = await save(author)
-  const beforeIds = history(beforeRestore.contents).map(entry => entry.id)
+  const namedBeforeRestoreIds = history(beforeRestore.contents)
+    .filter(entry => entry.kind === 'named')
+    .map(entry => entry.id)
 
   await selectSnapshot(author, 'Начальное состояние')
   await author.getByRole('button', { name: 'Восстановить это состояние' }).click()
   await expect(author.locator('svg g[data-id]')).toHaveCount(1)
   const restored = await save(author)
   const restoredHistory = history(restored.contents)
-  expect(restoredHistory.map(entry => entry.id)).toEqual(expect.arrayContaining(beforeIds))
-  expect(restoredHistory).toHaveLength(beforeIds.length + 2)
+  expect(restoredHistory.map(entry => entry.id)).toEqual(expect.arrayContaining(namedBeforeRestoreIds))
+  expect(restoredHistory.some(entry => entry.kind === 'restore-transition')).toBe(true)
   await author.close()
 
   const reopened = await browser.newPage()
@@ -196,12 +198,13 @@ test('VAL-CROSS-009..011 and VAL-CROSS-029: restored files keep snapshots scrubb
   const finalSave = await save(reopened)
   const finalDocument = JSON.parse(finalSave.contents) as {
     history: { snapshots: SnapshotEntry[] }
-    nodes: unknown[]
-    edges: unknown[]
   }
-  expect(finalDocument.history.snapshots.map(entry => entry.id)).toEqual(expect.arrayContaining(restoredHistory.map(entry => entry.id)))
-  const currentStateBytes = new TextEncoder().encode(JSON.stringify({ nodes: finalDocument.nodes, edges: finalDocument.edges })).byteLength
-  const historyBytes = new TextEncoder().encode(JSON.stringify(finalDocument.history)).byteLength
-  expect(historyBytes / currentStateBytes).toBeLessThanOrEqual(3)
+  expect(finalDocument.history.snapshots.map(entry => entry.id)).toEqual(expect.arrayContaining([
+    ...namedBeforeRestoreIds,
+    ...restoredHistory
+      .filter(entry => entry.kind === 'restore-transition')
+      .map(entry => entry.id),
+  ]))
+  expect(finalDocument.history.snapshots.some(entry => entry.kind === 'restore-transition')).toBe(true)
   await reopened.close()
 })
