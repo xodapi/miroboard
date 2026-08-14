@@ -505,7 +505,7 @@ export default function App() {
       if (typeof id !== 'string') return
       // Copy old room-keyed recovery caches before attaching this document's
       // cache. Adoption is fail-soft and runs after first paint in this effect.
-      await adoptLegacyRooms()
+      const adoption = await adoptLegacyRooms(); const failedCurrentLegacyRoom = adoption.failed.find(roomId => id === `doc_${roomId}`); if (failedCurrentLegacyRoom) { showToast(`Не удалось восстановить прежнюю доску «${failedCurrentLegacyRoom}». Исходные данные не изменены.`, 'error'); return }
       if (disposed) return
       const result = await attachRecoveryCache(id, ydoc)
       if (disposed) {

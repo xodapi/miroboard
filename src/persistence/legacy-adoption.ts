@@ -8,6 +8,7 @@ export const LEGACY_ROOM_INDEX = 'mboard-adopted-rooms'
 export interface LegacyAdoptionResult {
   adopted: string[]
   skipped: string[]
+  failed: string[]
 }
 
 type LegacyContent = {
@@ -86,8 +87,49 @@ async function hasDatabase(name: string): Promise<boolean> {
   return (await databaseNames()).includes(name)
 }
 
+function toYjsUpdate(value: unknown): Uint8Array {
+  if (value instanceof Uint8Array) return value
+  if (value instanceof ArrayBuffer) return new Uint8Array(value)
+  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  throw new Error('expected Yjs update bytes')
+}
+
+async function validateLegacyIndexedDbUpdates(roomId: string): Promise<void> {
+  const updates = await new Promise<unknown[]>((resolve, reject) => {
+    const request = indexedDB.open(roomId)
+    request.onerror = () => reject(request.error ?? new Error('could not open legacy room'))
+    request.onsuccess = () => {
+      const database = request.result
+      try {
+        const transaction = database.transaction('updates', 'readonly')
+        const read = transaction.objectStore('updates').getAll()
+        read.onerror = () => {
+          database.close()
+          reject(read.error ?? new Error('could not read legacy updates'))
+        }
+        read.onsuccess = () => {
+          database.close()
+          resolve(read.result)
+        }
+      } catch (error) {
+        database.close()
+        reject(error)
+      }
+    }
+  })
+  const doc = new Y.Doc()
+  try {
+    for (const update of updates) Y.applyUpdate(doc, toYjsUpdate(update))
+  } finally {
+    doc.destroy()
+  }
+}
+
 async function readLegacyIndexedDb(roomId: string): Promise<LegacyContent | null> {
   if (!await hasDatabase(roomId)) return null
+  // Validate before y-indexeddb attaches. Its replay promise never rejects on
+  // malformed updates, leaving adoption hung and unable to report the failure.
+  await validateLegacyIndexedDbUpdates(roomId)
   const doc = new Y.Doc()
   let persistence: IndexeddbPersistence | null = null
   try {
@@ -159,7 +201,7 @@ async function availableDocumentId(baseId: string): Promise<string> {
 export async function adoptLegacyRooms(): Promise<LegacyAdoptionResult> {
   const index = adoptionIndex()
   const discovered = new Set([...await listLegacyRoomStores(), ...localStorageRooms()])
-  const result: LegacyAdoptionResult = { adopted: [], skipped: [] }
+  const result: LegacyAdoptionResult = { adopted: [], skipped: [], failed: [] }
   for (const roomId of discovered) {
     if (index.has(roomId)) {
       result.skipped.push(roomId)
@@ -177,6 +219,7 @@ export async function adoptLegacyRooms(): Promise<LegacyAdoptionResult> {
         result.adopted.push(id)
       }
     } catch (error) {
+      result.failed.push(roomId)
       console.warn(`Legacy room "${roomId}" could not be adopted; original data was left untouched.`, error)
     } finally {
       // Record inspected empty and broken rooms too, preventing repeated startup work.

@@ -22,6 +22,45 @@ async function seedLegacy(roomId: string, elements: unknown[], meta: Record<stri
   doc.destroy()
 }
 
+async function seedMalformedLegacy(roomId: string): Promise<void> {
+  created.add(roomId)
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open(roomId, 1)
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('updates')) request.result.createObjectStore('updates', { autoIncrement: true })
+      if (!request.result.objectStoreNames.contains('custom')) request.result.createObjectStore('custom')
+    }
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      const database = request.result
+      const transaction = database.transaction('updates', 'readwrite')
+      transaction.objectStore('updates').add(new Uint8Array([1, 2, 3]))
+      transaction.onerror = () => reject(transaction.error)
+      transaction.oncomplete = () => {
+        database.close()
+        resolve()
+      }
+    }
+  })
+}
+
+async function legacyUpdateBytes(roomId: string): Promise<number[][]> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(roomId)
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      const database = request.result
+      const transaction = database.transaction('updates', 'readonly')
+      const updates = transaction.objectStore('updates').getAll()
+      updates.onerror = () => reject(updates.error)
+      updates.onsuccess = () => {
+        database.close()
+        resolve((updates.result as Uint8Array[]).map(update => Array.from(update)))
+      }
+    }
+  })
+}
+
 async function readCache(id: string): Promise<Y.Doc> {
   created.add(docKey(id))
   const doc = new Y.Doc()
@@ -90,6 +129,22 @@ describe('legacy room adoption', () => {
     expect(warn).toHaveBeenCalled()
     const local = await readCache('doc_local-only')
     expect(local.getArray('elements').toJSON()).toEqual([{ id: 'local', color: '#fff' }])
+  })
+
+  it('reports malformed Yjs updates and leaves the legacy IndexedDB record untouched', async () => {
+    const roomId = 'malformed-yjs-update'
+    await seedMalformedLegacy(roomId)
+    const before = await legacyUpdateBytes(roomId)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    await expect(adoptLegacyRooms()).resolves.toMatchObject({ adopted: [], failed: [roomId] })
+
+    expect(warn).toHaveBeenCalledWith(
+      `Legacy room "${roomId}" could not be adopted; original data was left untouched.`,
+      expect.anything(),
+    )
+    expect(await legacyUpdateBytes(roomId)).toEqual(before)
+    expect(localStorage.getItem(LEGACY_ROOM_INDEX)).toContain(roomId)
   })
 
   it('preserves an occupied document cache and adopts the legacy board to an alternate id', async () => {
