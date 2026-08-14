@@ -4,7 +4,7 @@ import baseConfig from './playwright.config'
 export default defineConfig({
   ...baseConfig,
   testIgnore: [],
-  testMatch: ['**/bpmn-validation-regression-suite.spec.ts', '**/bpmn-token-execution-regression-suite.spec.ts', '**/bpmn-simulation-parameter-regression-suite.spec.ts', '**/bpmn-resource-metrics-regression-suite.spec.ts', '**/bpmn-topology-edge-case-suite.spec.ts', '**/bpmn-authoring-regression-suite.spec.ts', '**/bpmn-migration-invariance-gate.spec.ts'],
+  testMatch: ['**/bpmn-validation-regression-suite.spec.ts', '**/bpmn-token-execution-regression-suite.spec.ts', '**/bpmn-simulation-parameter-regression-suite.spec.ts', '**/bpmn-resource-metrics-regression-suite.spec.ts', '**/bpmn-topology-edge-case-suite.spec.ts', '**/bpmn-authoring-regression-suite.spec.ts', '**/bpmn-migration-invariance-gate.spec.ts', '**/cross-history-simulation-integration.spec.ts'],
   // Do not recreate a Playwright-owned preview server when the Windows base config omits it.
   webServer: baseConfig.webServer && {
     ...baseConfig.webServer,
