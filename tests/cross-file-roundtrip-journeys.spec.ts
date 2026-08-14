@@ -115,7 +115,7 @@ async function draw(page: Page, shortcut: string, from: { x: number; y: number }
 }
 
 async function longPressElement(page: Page, index: number): Promise<void> {
-  await page.getByTestId('canvas').click({ position: { x: 30, y: 30 } })
+  await page.keyboard.press('Escape')
   await page.waitForTimeout(80)
   const box = await page.locator('svg g[data-id]').nth(index).boundingBox()
   if (!box) throw new Error(`Element ${index} has no bounding box`)
