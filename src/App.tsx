@@ -257,8 +257,7 @@ export default function App() {
   // (and one gc:false tombstone) per pointer event.
   const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> } | null>(null)
   const transientFrameRef = useRef<{ id: string; updates: Partial<BoardElement> } | null>(null)
-  // Long press
-  const longPressRef = useRef<{ timer: number; x: number; y: number } | null>(null)
+  const longPressRef = useRef<{ timer: number | null; x: number; y: number; startedAt: number } | null>(null)
   const bpmnImportRef = useRef<HTMLInputElement>(null)
   const bpmnRunTimersRef = useRef<number[]>([])
   // Yjs
@@ -1152,14 +1151,13 @@ export default function App() {
             elStartX: boardEl.x, elStartY: boardEl.y
           })
         }
-        // Long press detection
-        longPressRef.current = {
-          timer: window.setTimeout(() => {
-            setContextMenu({ x: point.x, y: point.y, id: elId })
-            if ('vibrate' in navigator) navigator.vibrate(30)
-          }, 500),
-          x: e.clientX, y: e.clientY
-        }
+        const longPress = { timer: null as number | null, x: e.clientX, y: e.clientY, startedAt: performance.now() }
+        longPress.timer = window.setTimeout(() => {
+          if (longPressRef.current === longPress) longPressRef.current = null
+          setContextMenu({ x: point.x, y: point.y, id: elId })
+          if ('vibrate' in navigator) navigator.vibrate(30)
+        }, 500)
+        longPressRef.current = longPress
       } else {
         setSelectedId(null)
       }
@@ -1282,7 +1280,7 @@ export default function App() {
     // Cancel long press if moved
     if (longPressRef.current) {
       if (Math.hypot(e.clientX - longPressRef.current.x, e.clientY - longPressRef.current.y) > 8) {
-        clearTimeout(longPressRef.current.timer)
+        if (longPressRef.current.timer !== null) clearTimeout(longPressRef.current.timer)
         longPressRef.current = null
       }
     }
@@ -1334,8 +1332,10 @@ export default function App() {
   const handlePointerUp = useCallback(() => {
     // Cancel long press
     if (longPressRef.current) {
-      clearTimeout(longPressRef.current.timer)
-      longPressRef.current = null
+      if (performance.now() - longPressRef.current.startedAt < 500) {
+        if (longPressRef.current.timer !== null) clearTimeout(longPressRef.current.timer)
+        longPressRef.current = null
+      }
     }
     if (isDrawing && (tool === 'pen' || tool === 'marker') && currentPath.length > 1) {
       const simplified = simplifyPath(currentPath, 2)
