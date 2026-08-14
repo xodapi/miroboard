@@ -557,23 +557,17 @@ export default function App() {
   }, [bpmnProfileActive, simulationProfile, ydoc])
   const activateBpmnProfile = useCallback(() => {
     if (profileConfigRef.current && !bpmnProfileActive) {
-      const config = withBpmnSimulation({}, DEFAULT_BPMN_SIMULATION)
+      // Learning modules populate the drafts before opening Simulation. Promote
+      // those drafts into the document profile instead of replacing them with
+      // defaults, so fixture arrival classes and role policies survive activation.
+      const config = withBpmnSimulation({}, simulationProfile)
       profileConfigJsonRef.current = JSON.stringify(config)
       ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn))
-      setSimulationSeed(DEFAULT_BPMN_SIMULATION.seed)
-      setSimulationRuns(DEFAULT_BPMN_SIMULATION.runs)
-      setSimulationTarget(DEFAULT_BPMN_SIMULATION.slaTargetSec)
-      setSimulationInstances(DEFAULT_BPMN_SIMULATION.instances)
-      setArrivalInterval(DEFAULT_BPMN_SIMULATION.arrivalIntervalSec)
-      setArrivalClasses(DEFAULT_BPMN_SIMULATION.arrivalClasses)
-      setRolePolicies(DEFAULT_BPMN_SIMULATION.rolePolicies)
-      setCalendarStart(DEFAULT_BPMN_SIMULATION.calendarStartHour)
-      setCalendarEnd(DEFAULT_BPMN_SIMULATION.calendarEndHour)
     }
     setBpmnProfileActive(true)
     setWorkspaceMode('bpmn')
     setShowBpmnPalette(true)
-  }, [bpmnProfileActive, ydoc])
+  }, [bpmnProfileActive, simulationProfile, ydoc])
   const openSimulation = useCallback(() => { if (previewSnapshot) return void showToast('Симуляция недоступна во время просмотра истории.', 'info'); if (!bpmnProfileActive) activateBpmnProfile(); setWorkspaceMode('simulation'); setShowSimulationPanel(true) }, [activateBpmnProfile, bpmnProfileActive, previewSnapshot, showToast])
   const saveBoard = useCallback(async (mode: 'save' | 'saveAs'): Promise<boolean> => {
     if (previewSnapshot) { showToast('Недоступно во время просмотра истории.', 'info'); return false }
