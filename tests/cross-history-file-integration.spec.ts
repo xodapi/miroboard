@@ -149,7 +149,7 @@ test('VAL-CROSS-006..012: history survives close/reopen, remains byte-stable, an
   await reopened.locator('aside[aria-label="История доски"] ol button').filter({ hasText: '«До продолжения»' }).click()
   await expect(reopened.locator('svg g[data-id]')).toHaveCount(1)
   await reopened.screenshot({ path: testInfo.outputPath('preview-after-reopen.png') })
-  await reopened.getByRole('button', { name: 'Закрыть' }).click()
+  await reopened.getByRole('button', { name: 'Закрыть', exact: true }).click()
 
   const secondSave = await save(reopened)
   expect(history(secondSave.contents)).toEqual(expect.arrayContaining(beforeHistory))
@@ -191,7 +191,7 @@ test('VAL-CROSS-009..011 and VAL-CROSS-029: restored files keep snapshots scrubb
     await expect(reopened.locator('[role="status"][data-ui]')).toContainText('Просмотр')
   }
   await reopened.screenshot({ path: testInfo.outputPath('scrubbed-after-restore-reload.png') })
-  await reopened.getByRole('button', { name: 'Закрыть' }).click()
+  await reopened.getByRole('button', { name: 'Закрыть', exact: true }).click()
 
   const finalSave = await save(reopened)
   const finalDocument = JSON.parse(finalSave.contents) as {
