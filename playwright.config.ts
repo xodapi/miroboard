@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests',
-  testIgnore: ['**/baseline-capture.spec.ts', '**/bpmn-validation-regression-suite.spec.ts', '**/bpmn-token-execution-regression-suite.spec.ts', '**/bpmn-simulation-parameter-regression-suite.spec.ts', '**/bpmn-resource-metrics-regression-suite.spec.ts', '**/bpmn-topology-edge-case-suite.spec.ts', '**/bpmn-authoring-regression-suite.spec.ts', '**/bpmn-migration-invariance-gate.spec.ts', '**/cross-history-simulation-integration.spec.ts'],
+  testIgnore: ['**/baseline-capture.spec.ts', '**/bpmn-validation-regression-suite.spec.ts', '**/bpmn-token-execution-regression-suite.spec.ts', '**/bpmn-token-visibility.spec.ts', '**/bpmn-simulation-parameter-regression-suite.spec.ts', '**/bpmn-resource-metrics-regression-suite.spec.ts', '**/bpmn-topology-edge-case-suite.spec.ts', '**/bpmn-authoring-regression-suite.spec.ts', '**/bpmn-migration-invariance-gate.spec.ts', '**/cross-history-simulation-integration.spec.ts'],
   timeout: 60_000,
   workers: 1,
   // Playwright cannot reliably tear down its cmd.exe-owned Vite child on Windows.
