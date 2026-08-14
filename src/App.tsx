@@ -268,8 +268,7 @@ export default function App() {
   const historySnapshotsRef = useRef<HistorySnapshot[]>([])
   const compactHistoryOnSaveRef = useRef(false)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
-  const profileConfigRef = useRef<Y.Map<unknown> | null>(null)
-  const profileConfigJsonRef = useRef('')
+  const profileConfigRef = useRef<Y.Map<unknown> | null>(null); const profileConfigJsonRef = useRef(''); const profileConfigHydratingRef = useRef(false)
   const showToast = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, tone })
     window.setTimeout(() => setToast(null), 4200)
@@ -460,7 +459,7 @@ export default function App() {
         meta.set('createdAt', new Date().toISOString())
       }, RECOVERY_ORIGIN)
     }
-    const applyProfileConfig = () => {
+    const applyProfileConfig = (_event?: unknown, transaction?: Y.Transaction) => {
       const config = profileConfig.toJSON() as ProfileConfig
       profileConfigJsonRef.current = JSON.stringify(config)
       const simulation = bpmnSimulationFromProfileConfig(config)
@@ -470,10 +469,9 @@ export default function App() {
         setShowSimulationPanel(false)
         return
       }
-      setSimulationSeed(simulation.seed)
-      setSimulationRuns(simulation.runs)
-      setSimulationTarget(simulation.slaTargetSec)
-      setSimulationInstances(simulation.instances)
+      profileConfigHydratingRef.current = transaction?.origin === RECOVERY_ORIGIN
+      setSimulationSeed(simulation.seed); setSimulationRuns(simulation.runs)
+      setSimulationTarget(simulation.slaTargetSec); setSimulationInstances(simulation.instances)
       setArrivalInterval(simulation.arrivalIntervalSec)
       setArrivalClasses(simulation.arrivalClasses)
       setRolePolicies(simulation.rolePolicies)
@@ -549,6 +547,7 @@ export default function App() {
   }), [simulationSeed, simulationRuns, simulationTarget, simulationInstances, arrivalInterval, calendarStart, calendarEnd, arrivalClasses, rolePolicies])
   useEffect(() => {
     if (!bpmnProfileActive || !profileConfigRef.current) return
+    if (profileConfigHydratingRef.current) { profileConfigHydratingRef.current = false; return }
     const config = withBpmnSimulation({}, simulationProfile)
     const encoded = JSON.stringify(config)
     if (encoded === profileConfigJsonRef.current) return
@@ -1422,6 +1421,7 @@ export default function App() {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && previewSnapshot) { e.preventDefault(); closeTimeline(); return }
+      if (e.key === 'Escape') { e.preventDefault(); setSelectedId(null); setContextMenu(null); setShowBpmnPalette(false); setWorkspaceMode('board'); return }
       if (editingText) return
       if (showSimulationPanel && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
@@ -1459,7 +1459,6 @@ export default function App() {
       }
       if (!e.metaKey && !e.ctrlKey && map[e.key]) chooseTool(map[e.key])
       if (!e.metaKey && !e.ctrlKey && e.key.toLowerCase() === '0') fitToContent()
-      if (e.key === 'Escape') { setSelectedId(null); setContextMenu(null) }
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
