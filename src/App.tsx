@@ -5,6 +5,7 @@ import { commitElementUpdate } from './persistence/updates'
 import { useFileDrop } from './hooks/useFileDrop'
 import { DropTargetCue } from './components/DropTargetCue'
 import { MiniMap } from './components/MiniMap'
+import { RecoveryDivergenceNotice } from './components/RecoveryDivergenceNotice'
 import { openDocument, openDroppedDocument, saveDocument, type FileSession, type OpenOutcome } from './persistence/files'
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
@@ -17,6 +18,7 @@ import { HistoryPreviewBanner } from './history/HistoryPreviewBanner'
 import { DEFAULT_RETENTION, retainForSave } from './history/retention'
 import { HistoryRetentionControls } from './history/HistoryRetentionControls'
 import { attachRecoveryCache } from './persistence/indexeddb'
+import { createRecoverySession, inspectRecoverySession, setRecoverySession } from './persistence/recovery-session'
 import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/legacy-adoption'
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
 import { serialise } from './format/mboard'
@@ -207,7 +209,7 @@ export default function App() {
   const [showSimulationPanel, setShowSimulationPanel] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [fileSession, setFileSession] = useState<FileSession>({ handle: null, name: null, isUntitled: true })
-  const [isDirty, setIsDirty] = useState(false)
+  const [isDirty, setIsDirty] = useState(false); const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null)
   const [historySnapshots, setHistorySnapshots] = useState<HistorySnapshot[]>([])
   const [pendingOpen, setPendingOpen] = useState<PendingOpen | null>(null)
   const [showBpmnPalette, setShowBpmnPalette] = useState(false)
@@ -511,6 +513,10 @@ export default function App() {
         return
       }
       persistence = result.persistence
+      if (result.synced) {
+        const inspection = inspectRecoverySession(meta, yarray.toJSON(), profileConfig.toJSON())
+        if (inspection) { setFileSession(current => current.name ? current : { handle: null, name: inspection.session.fileName, isUntitled: false }); setRecoveryNotice(inspection.diverges ? inspection.message : null); if (inspection.diverges) { dirtyTrackerRef.current?.markDirty(); showToast(inspection.message, 'error') } }
+      }
     }
     void attachPersistence()
     // Sync
@@ -530,7 +536,7 @@ export default function App() {
       persistence?.destroy()
       ydoc.destroy()
     }
-  }, [appendCheckpoint, ydoc])
+  }, [appendCheckpoint, showToast, ydoc])
   useEffect(() => {
     return addBeforeUnloadGuard(isDirty)
   }, [isDirty])
@@ -610,7 +616,9 @@ export default function App() {
       ydoc.transact(() => {
         metaMap.set('title', file.meta.title)
         metaMap.set('updatedAt', now)
+        setRecoverySession(metaMap, createRecoverySession(outcome.session.name ?? file.meta.title, yElements.current?.toJSON() ?? elements, profileConfigRef.current?.toJSON() ?? {}))
       }, RECOVERY_ORIGIN)
+      setRecoveryNotice(null)
       dirtyTrackerRef.current?.markSaved()
       showToast('Документ сохранён', 'success')
       return true
@@ -621,8 +629,7 @@ export default function App() {
     }
     return false
   }, [elements, fileSession, previewSnapshot, showToast, ydoc])
-  const resetDocument = useCallback(() => {
-    if (isDirty && !window.confirm('Несохраненные изменения будут потеряны. Продолжить?')) return
+  const resetDocument = useCallback(() => { if (isDirty && !window.confirm('Несохраненные изменения будут потеряны. Продолжить?')) return
     const meta = ydoc.getMap<unknown>('meta')
     const profileConfig = ydoc.getMap<unknown>('profileConfig')
     ydoc.transact(() => {
@@ -632,7 +639,7 @@ export default function App() {
       meta.set('createdAt', new Date().toISOString())
       profileConfig.clear()
     }, RECOVERY_ORIGIN)
-    setFileSession({ handle: null, name: null, isUntitled: true })
+    setFileSession({ handle: null, name: null, isUntitled: true }); setRecoveryNotice(null)
     historySnapshotsRef.current = []
     setHistorySnapshots([])
     setSelectedId(null)
@@ -654,8 +661,9 @@ export default function App() {
       Object.entries(outcome.file.meta).forEach(([key, value]) => meta.set(key, value))
       profileConfigJsonRef.current = JSON.stringify(outcome.file.profileConfig); profileConfig.clear()
       Object.entries(outcome.file.profileConfig).forEach(([key, value]) => profileConfig.set(key, value))
+      setRecoverySession(meta, createRecoverySession(outcome.session.name ?? outcome.file.meta.title, yElements.current?.toJSON() ?? loadedElements, profileConfig.toJSON()))
     }, RECOVERY_ORIGIN)
-    setFileSession(outcome.session)
+    setFileSession(outcome.session); setRecoveryNotice(null)
     const snapshots = reconstructed.historyLost ? [] : outcome.file.history.snapshots
     historySnapshotsRef.current = snapshots
     setHistorySnapshots(snapshots)
@@ -1721,6 +1729,7 @@ export default function App() {
             </div>
             <span className={`text-[15px] font-bold tracking-tight ${textC}`}>{fileSession.name ?? 'Новый документ'}</span>
             <span role="status" aria-live="polite" className={`text-[11px] font-semibold ${isDirty ? 'text-amber-700' : textSec}`}>{isDirty ? 'Не сохранено' : 'Сохранено'}</span>
+            {recoveryNotice && <RecoveryDivergenceNotice message={recoveryNotice} />}
             <span className="select-text rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600" title="Build version: можно выделить и скопировать">{__MIROBOARD_VERSION__}</span>
             <div className="ml-1 hidden rounded-lg bg-slate-100 p-0.5 sm:flex">
               {([

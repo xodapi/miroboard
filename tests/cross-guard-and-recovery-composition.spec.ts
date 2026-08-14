@@ -338,5 +338,6 @@ test.describe('VAL-CROSS-027..028: guard, history, file, and recovery compositio
       title: 'recovery-target.mboard',
       status: 'Не сохранено',
     })
+    await expect(page.getByTestId('recovery-divergence')).toHaveText('Восстановлено из локального кэша: файл отстаёт')
   })
 })
