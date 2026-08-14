@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const incomingDocument = readFileSync(resolve('examples/freeform-board.mboard'), 'utf8')
+const bpmnIncomingDocument = readFileSync(resolve('examples/bpmn-process.mboard'), 'utf8')
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -62,6 +63,29 @@ test('recovery replay stays clean and the next user edit becomes dirty', async (
 
   await page.getByRole('button', { name: 'Примеры' }).click()
   await page.getByText('Линейный процесс: фиксированная длительность', { exact: true }).click()
+  await expect(status).toHaveText('Не сохранено')
+})
+
+test('opening a BPMN-configured document stays clean until a user edit', async ({ page }) => {
+  await page.addInitScript(documentText => {
+    Object.defineProperty(window, 'showOpenFilePicker', {
+      configurable: true,
+      value: async () => [{
+        name: 'bpmn-process.mboard',
+        getFile: async () => ({ name: 'bpmn-process.mboard', text: async () => documentText }),
+      }],
+    })
+  }, bpmnIncomingDocument)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+
+  await page.getByRole('button', { name: 'Дополнительные инструменты' }).click()
+  await page.getByRole('button', { name: 'Открыть', exact: true }).click()
+  const status = page.getByRole('status')
+  await expect(status).toHaveText('Сохранено')
+
+  await page.getByTitle('Открыть Monte Carlo симуляцию').click()
+  const modal = page.getByRole('heading', { name: 'Monte Carlo симуляция' }).locator('xpath=ancestor::section')
+  await modal.locator('input').nth(0).fill('43')
   await expect(status).toHaveText('Не сохранено')
 })
 

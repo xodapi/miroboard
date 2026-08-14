@@ -656,7 +656,7 @@ export default function App() {
       if (loadedElements.length) yElements.current?.push(loadedElements)
       meta.clear()
       Object.entries(outcome.file.meta).forEach(([key, value]) => meta.set(key, value))
-      profileConfig.clear()
+      profileConfigJsonRef.current = JSON.stringify(outcome.file.profileConfig); profileConfig.clear()
       Object.entries(outcome.file.profileConfig).forEach(([key, value]) => profileConfig.set(key, value))
     }, RECOVERY_ORIGIN)
     setFileSession(outcome.session)
