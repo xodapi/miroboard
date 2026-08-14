@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#f7f7f5">
+  <title>MiroBoard — визуальная рабочая среда</title>
+  <meta name="description" content="MiroBoard: локальная визуальная доска с BPMN, детерминированной симуляцией и single-file test build.">
+  <style>
+    :root{--paper:#f7f7f5;--ink:#182033;--muted:#61708b;--line:#dce3ee;--violet:#745cff;--blue:#4d96ff;--green:#1db878;--card:#fff;--max:1160px}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:linear-gradient(180deg,#fff 0,#f7f7f5 72%);font:16px/1.55 Inter,Segoe UI,Arial,sans-serif}a{color:inherit}.wrap{width:min(calc(100% - 40px),var(--max));margin:auto}
+    .nav{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:20px 0}.brand{display:flex;align-items:center;gap:9px;font-size:16px;font-weight:850;letter-spacing:-.03em;text-decoration:none}.mark{display:grid;place-items:center;width:31px;height:31px;color:#fff;background:linear-gradient(135deg,var(--violet),var(--blue));border-radius:9px;font-size:22px;font-weight:400}.navlinks{display:flex;flex-wrap:wrap;gap:8px}.navlinks a{padding:7px 10px;color:var(--muted);border-radius:8px;font-size:13px;text-decoration:none}.navlinks a:hover{color:var(--ink);background:#eef1f7}
+    .hero{display:grid;grid-template-columns:1.05fr .95fr;gap:46px;align-items:center;padding:78px 0 88px}.eyebrow{margin:0 0 14px;color:#5e4be5;font-size:12px;font-weight:850;letter-spacing:.14em;text-transform:uppercase}.hero h1{margin:0 0 20px;font-size:clamp(43px,6.2vw,76px);line-height:.98;letter-spacing:-.075em}.hero h1 span{color:var(--violet)}.lead{max-width:650px;margin:0;color:var(--muted);font-size:clamp(18px,2vw,23px);line-height:1.45}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:27px}.btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:11px 17px;border-radius:11px;font-weight:800;text-decoration:none}.primary{color:#fff;background:linear-gradient(135deg,var(--violet),var(--blue));box-shadow:0 12px 28px #4d96ff35}.secondary{color:#33415a;background:#fff;border:1px solid var(--line)}.btn:hover{transform:translateY(-2px)}
+    .board{position:relative;min-height:385px;overflow:hidden;background-color:#fbfbfa;background-image:radial-gradient(#cbd5e1 1.1px,transparent 1.1px);background-size:22px 22px;border:1px solid var(--line);border-radius:22px;box-shadow:0 24px 70px #23314b18}.toolbar{position:absolute;top:17px;left:17px;right:17px;display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#fffffff0;border:1px solid #e3e8f0;border-radius:12px;box-shadow:0 8px 22px #17203a12}.toolbar b{font-size:13px}.dotrow{display:flex;gap:5px}.dot{width:8px;height:8px;border-radius:50%;background:#d6ddea}.dot.on{background:var(--green)}.node{position:absolute;padding:12px 14px;background:#fff;border:1px solid #dbe2ed;border-radius:12px;box-shadow:0 10px 22px #1d2b4514;font-size:13px;font-weight:750}.node.one{left:13%;top:39%;border-color:#bdb2ff}.node.two{left:43%;top:24%;color:#fff;background:linear-gradient(135deg,var(--violet),var(--blue));border:0}.node.three{right:9%;top:51%;border-color:#a8dfc7}.line{position:absolute;height:2px;background:#9aa9c2;transform-origin:left center}.l1{left:30%;top:48%;width:120px;transform:rotate(-23deg)}.l2{left:60%;top:44%;width:110px;transform:rotate(25deg)}.note{position:absolute;right:11%;top:25%;padding:7px 10px;color:#7b5600;background:#fff4bd;border-radius:7px;font-size:11px;transform:rotate(4deg)}
+    section{padding:76px 0;border-top:1px solid var(--line)}.kicker{color:#5e4be5;font-size:12px;font-weight:850;letter-spacing:.14em;text-transform:uppercase}h2{max-width:850px;margin:10px 0 14px;font-size:clamp(31px,4vw,53px);line-height:1.03;letter-spacing:-.06em}.intro{max-width:760px;margin:0;color:var(--muted);font-size:18px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:15px;margin-top:30px}.card{grid-column:span 4;padding:24px;background:var(--card);border:1px solid var(--line);border-radius:17px;box-shadow:0 12px 34px #17203a09}.card.wide{grid-column:span 6}.card h3{margin:0 0 8px;font-size:22px;letter-spacing:-.035em}.card p{margin:0;color:var(--muted)}.icon{display:grid;place-items:center;width:42px;height:42px;margin-bottom:17px;color:#fff;background:linear-gradient(135deg,var(--violet),var(--blue));border-radius:12px;font-size:19px}.icon.green{background:var(--green)}.tag{display:inline-block;margin-bottom:14px;padding:4px 8px;color:#5040d1;background:#eeeaff;border-radius:999px;font-size:10px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}
+    .flow{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-top:28px}.flow div{position:relative;padding:18px;background:#fff;border:1px solid var(--line);border-radius:13px}.flow b{display:block;margin-bottom:6px;color:var(--violet);font-size:25px}.flow p{margin:0;color:var(--muted);font-size:14px}.status{padding:25px 28px;margin-top:28px;color:#30405a;background:#edf4ff;border:1px solid #cddcf3;border-radius:17px}.status b{color:var(--ink)}.status code{padding:2px 5px;background:#fff;border:1px solid #d9e4f5;border-radius:5px}
+    .cta{padding:82px 0;text-align:center}.cta p{max-width:640px;margin:0 auto;color:var(--muted);font-size:18px}.cta .actions{justify-content:center}.foot{padding:28px 0 44px;color:#78859b;font-size:12px;text-align:center}
+    @media(max-width:850px){.hero{grid-template-columns:1fr;padding-top:48px}.board{min-height:320px}.card,.card.wide{grid-column:span 12}.flow{grid-template-columns:1fr 1fr}}@media(max-width:540px){.wrap{width:min(calc(100% - 28px),var(--max))}.nav{align-items:flex-start;flex-direction:column}.hero h1{font-size:47px}.flow{grid-template-columns:1fr}.board{min-height:280px}.l1{width:90px}.l2{width:75px}.node{font-size:11px}}
+  </style>
+</head>
+<body>
+  <header class="wrap nav">
+    <a class="brand" href="./"><span class="mark">+</span>MiroBoard</a>
+    <nav class="navlinks" aria-label="Навигация"><a href="#capabilities">Возможности</a><a href="#roadmap">Roadmap</a><a href="https://github.com/xodapi/miroboard" target="_blank" rel="noopener">GitHub ↗</a></nav>
+  </header>
+  <main>
+    <section class="wrap hero">
+      <div>
+        <p class="eyebrow">Visual workspace · test build</p>
+        <h1>Доска, на которой <span>процесс можно проверить</span></h1>
+        <p class="lead">MiroBoard объединяет свободную визуальную работу, BPMN-моделирование и детерминированную симуляцию. От эскиза процесса до воспроизводимой модели, без переключения между инструментами.</p>
+        <div class="actions"><a class="btn primary" href="/app/">Открыть тестовую доску →</a><a class="btn secondary" href="https://github.com/xodapi/miroboard" target="_blank" rel="noopener">Исходный код ↗</a></div>
+      </div>
+      <div class="board" aria-label="Схема процесса в стиле MiroBoard">
+        <div class="toolbar"><b><span class="mark" style="display:inline-grid;width:18px;height:18px;margin-right:6px;border-radius:5px;font-size:13px">+</span>MiroBoard</b><span class="dotrow"><i class="dot on"></i><i class="dot"></i><i class="dot"></i></span></div>
+        <div class="node one">Заявка</div><i class="line l1"></i><div class="node two">Проверка</div><i class="line l2"></i><div class="node three">Результат</div><span class="note">BPMN · P90 · SLA</span>
+      </div>
+    </section>
+    <section id="capabilities">
+      <div class="wrap">
+        <div class="kicker">Что доступно в test build</div>
+        <h2>От визуальной схемы к измеримому процессу</h2>
+        <p class="intro">Текущая версия — автономная single-file сборка для тестирования. В ней уже работают доска, BPMN-палитра, импорт/экспорт и детерминированные simulation-сценарии.</p>
+        <div class="grid">
+          <article class="card"><span class="icon">✦</span><h3>Визуальная доска</h3><p>Стикеры, текст, фигуры, связи, сетка, мини-карта, темы, отмена/возврат и примеры — быстрый слой для совместного мышления о задаче.</p></article>
+          <article class="card"><span class="icon">◇</span><h3>BPMN 2.0</h3><p>События, задачи, XOR/AND-шлюзы и sequence flow. Валидация структуры процесса и переносимый BPMN XML с BPMN-DI геометрией.</p></article>
+          <article class="card"><span class="icon green">▶</span><h3>Симуляция</h3><p>Детерминированный token runner, Monte Carlo, P50/P90/P95, SLA, роли ресурсов, классы прибытия и FIFO/priority очереди.</p></article>
+        </div>
+      </div>
+    </section>
+    <section>
+      <div class="wrap">
+        <div class="kicker">Зачем</div>
+        <h2>Не «нарисовать процесс», а проверить гипотезу</h2>
+        <div class="flow">
+          <div><b>01</b><p>Собрать схему на доске без тяжёлого моделирования на старте.</p></div>
+          <div><b>02</b><p>Добавить BPMN-семантику: события, задачи, потоки и условия.</p></div>
+          <div><b>03</b><p>Запустить воспроизводимую симуляцию с нагрузкой и ресурсами.</p></div>
+          <div><b>04</b><p>Посмотреть SLA, ожидание и узкие места, затем изменить модель.</p></div>
+        </div>
+      </div>
+    </section>
+    <section id="roadmap">
+      <div class="wrap">
+        <div class="kicker">Phase 1 · roadmap</div>
+        <h2>Файлы вместо URL и история вместо потери контекста</h2>
+        <p class="intro">Следующая фаза фиксирует переход от URL-зависимой доски к owned document: переносимые <code>.mboard</code>-файлы, offline-first работа и replayable content history.</p>
+        <div class="grid">
+          <article class="card wide"><span class="tag">v0.16</span><h3>Документ как основной объект</h3><p>Версионированный формат <code>.mboard</code>: nodes, edges, профиль BPMN, метаданные и миграции схемы. Save/Open, drag-and-drop, IndexedDB по ID документа и Ctrl+S / Ctrl+O.</p></article>
+          <article class="card wide"><span class="tag">v0.17</span><h3>История внутри документа</h3><p>Checkpoint-снимки, подписанные состояния, timeline, read-only просмотр прошлого и безопасное восстановление как новое состояние, без удаления будущего.</p></article>
+        </div>
+        <div class="status"><b>Честный статус:</b> file-first формат и встроенная история — план текущей Phase 1, а не заявление о готовой функции. Тестовая доска ниже показывает текущую рабочую основу: BPMN и simulation.</div>
+      </div>
+    </section>
+    <section class="cta">
+      <div class="wrap">
+        <div class="kicker">Попробовать</div>
+        <h2>Откройте последнюю тестовую сборку</h2>
+        <p>Это именно текущий <code>dist/index.html</code>, размещённый отдельным маршрутом. Данные тестовой доски хранятся локально в браузере.</p>
+        <div class="actions"><a class="btn primary" href="/app/">Открыть MiroBoard →</a><a class="btn secondary" href="https://github.com/xodapi/miroboard" target="_blank" rel="noopener">GitHub ↗</a></div>
+      </div>
+    </section>
+  </main>
+  <footer class="wrap foot">MiroBoard · visual workspace · BPMN & simulation · test deployment</footer>
+</body>
+</html>

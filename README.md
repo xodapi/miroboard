@@ -1,112 +1,133 @@
-# MiroBoard
+# MiroBoard — Phase 1
 
-Исходники приложения, опубликованного на <https://arena.syntog.ru/4/>.
+A fully offline, file-first whiteboard application with BPMN simulation.
+Single-file build (`dist/index.html`) — no server required, works over `file://`.
 
-## Состав
+## What's in Phase 1
 
-- `src/` — React/TypeScript-исходники.
-- `wasm/board-core/` — Rust-ядро геометрии доски.
-- `src/wasm/board-core/` — сгенерированные WebAssembly-привязки для Vite.
-- `dist/index.html` — готовая автономная версия, один HTML-файл.
+### File format and persistence
+- `.mboard` file format (v1 schema) — all board state serialized to a single file
+- Open/save via [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API) with Blob fallback for browsers that don't support FSA
+- File open via FSA picker, drag-and-drop onto the canvas, or New Document
+- Dirty tracking: unsaved-changes guard on `beforeunload` and on open/drag-drop
+- IndexedDB recovery cache (`mboard-doc-<id>` keys) for crash recovery
+- Legacy room adoption: migrates old IndexedDB boards to `.mboard` format automatically
 
-## Запуск и сборка
+### In-document history ("История")
+- Automatic checkpoints every 50 edits or 5 minutes, and before every save/restore
+- Named checkpoints via **"Отметить состояние"**
+- Timeline panel with scrubber and per-checkpoint preview
+- Restore-as-append: restoring a checkpoint appends to history rather than discarding future states
+- Backed by Yjs `gc:false` + `Y.snapshot`
+
+### BPMN simulation (offline, deterministic)
+- Token runner with AND split/join, XOR branching, critical path estimation
+- Per-task duration distributions: fixed, uniform, triangular
+- Monte Carlo (`◌ MC 500`): 500 seeded runs, reports Min/Mean/σ/P50/P90/P95/Max
+- SLA threshold: fraction of runs completing within the specified time
+- Arrival classes with instance count, inter-arrival interval, and priority
+- Queue discipline per resource role: `fifo` or `priority`
+- Resource capacity policies override inline node values
+- All simulation runs offline; seed is fixed (`42`) for reproducibility
+
+### Collaboration removed
+- All WebRTC and real-time collaboration code has been removed
+- The app is fully local — no network calls, no signaling server
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| UI | React + TypeScript |
+| Build | Vite + `vite-plugin-singlefile` (single HTML output) |
+| CRDT / history | Yjs (`gc:false`, `Y.snapshot`) |
+| File I/O | File System Access API + Blob fallback |
+| Local cache | IndexedDB |
+| Simulation engine | Rust compiled to WebAssembly via `wasm-pack` |
+
+## Requirements
+
+| Tool | Version |
+|---|---|
+| Node.js | 24+ |
+| npm | 11+ |
+| Rust | 1.97+ |
+| wasm-pack | 0.13+ |
+
+## Setup
 
 ```powershell
 npm ci
-npm run build
 ```
 
-Сборка использует `vite-plugin-singlefile`, поэтому результатом будет
-`dist/index.html`, содержащий стили и JavaScript внутри одного файла.
+## Development
 
-После изменения Rust-ядра сначала пересоберите WASM:
+Start the Vite dev server:
+
+```powershell
+node node_modules\vite\bin\vite.js dev
+```
+
+Or preview the production build on port 4173:
+
+```powershell
+node node_modules\vite\bin\vite.js preview
+```
+
+## Build
+
+```powershell
+node node_modules\vite\bin\vite.js build
+```
+
+Output: `dist/index.html` — a single self-contained HTML file with all CSS and JS inlined.
+
+### Rebuilding the WASM engine
+
+Only needed when `wasm/board-core/src/lib.rs` changes:
 
 ```powershell
 cd wasm/board-core
 wasm-pack build --target web --out-dir ../../src/wasm/board-core --out-name board_core
 cd ../..
-npm run build
+node node_modules\vite\bin\vite.js build
 ```
 
-## Публикация
+## Testing
 
-Для статического хостинга загрузите только `dist/index.html`.
+Unit tests:
 
-## История изменений
+```powershell
+node node_modules\vitest\vitest.mjs run
+```
 
-Репозиторий совместим с Git и настроен для [Jujutsu (`jj`)](https://github.com/jj-vcs/jj).
-Полезные команды: `jj status`, `jj log`, `jj op log` и `jj undo`. GitHub продолжает
-работать через обычный Git remote `origin`. Правила использования jj и безопасного
-резервного копирования приведены в [docs/HISTORY_AND_BACKUP.md](docs/HISTORY_AND_BACKUP.md).
-В приложении кнопка `История` открывает учебную хронологию подтверждённых Git-этапов.
+End-to-end tests (Playwright):
 
-## Дальнейшая миграция
+```powershell
+node node_modules\playwright\cli.js test
+```
 
-В Rust уже перенесены привязка к сетке и ограничение масштаба. Следующий этап —
-перенос пакетных операций над элементами, а React останется слоем интерфейса и
-совместной работы через Yjs.
+## Deployment
 
-## BPMN, первый этап
+Upload `dist/index.html` to any static host. No backend required.
 
-В шаблонах есть стартовая BPMN 2.0-модель. Rust/WASM валидирует идентификаторы,
-связи, границы пулов, стартовые и конечные события, шлюзы и достижимость узлов.
-Индикатор `BPMN` в заголовке показывает ошибки или предупреждения модели.
+## Project layout
 
-В меню `…` → `◇ BPMN` доступна палитра для добавления стартовых и конечных
-событий, задач и XOR-шлюзов непосредственно на доску. Инструмент `Поток`
-создаёт BPMN sequence flow после выбора исходного и целевого узла; стрелка
-следует за элементами при их перемещении.
+```
+src/                  React/TypeScript source
+wasm/board-core/      Rust simulation engine source
+src/wasm/board-core/  Generated WASM bindings (committed, regenerated by wasm-pack)
+dist/index.html       Production build (single file)
+examples/             Tutorial BPMN models (accessible from the in-app Examples menu)
+docs/                 ROADMAP.md, HISTORY_AND_BACKUP.md, and other docs
+```
 
-Для корректной BPMN-модели в меню `…` доступна команда `⇩ BPMN`, которая
-выгружает переносимый BPMN 2.0 XML-файл вместе с геометрией BPMN-DI.
+## Version control
 
-Команда `⇧ BPMN` загружает BPMN 2.0 XML и размещает поддерживаемые события,
-задачи, шлюзы и потоки на доске, сохраняя геометрию BPMN-DI при её наличии.
-Импорт заменяет содержимое текущей доски.
+The repository works with standard Git and is also compatible with
+[Jujutsu (`jj`)](https://github.com/jj-vcs/jj).
+See [`docs/HISTORY_AND_BACKUP.md`](docs/HISTORY_AND_BACKUP.md) for `jj` usage and backup guidelines.
 
-Команда `▶ Запуск` запускает детерминированный token runner. Он подсвечивает
-путь токенов, исполняет AND split/join и показывает оценку времени критического
-пути. Для XOR можно выбрать sequence flow с условием `true` или указать
-default-flow. Выберите BPMN-задачу, чтобы задать её длительность в секундах,
-или стрелку XOR, чтобы задать условие, вероятность и default-flow.
-Команда `◌ MC 500` запускает 500 seeded прогонов и показывает P50/P90/P95
-длительности. Начальный seed сейчас фиксирован на `42`, поэтому результат
-воспроизводим.
-Для BPMN-задачи доступны fixed, uniform и triangular распределения длительности;
-Monte Carlo отчёт показывает Min, Mean, σ, P50, P90, P95 и Max.
-В окне симуляции можно задать SLA в секундах и получить долю прогонов,
-завершившихся в срок.
+## Roadmap
 
-## Классы прибытия и дисциплина очереди
-
-Окно симуляции позволяет описать поток заявок как набор классов прибытия.
-Каждый класс задаёт количество instances, интервал между прибытиями и приоритет.
-Все instances запускаются в одном контексте планирования и конкурируют
-за общие слоты ресурсов, поэтому очередь моделируется между instances,
-а не только внутри одного прогона.
-
-Дисциплина очереди задаётся на уровне роли ресурса, а не на уровне задачи:
-
-- `fifo` — заявки обслуживаются в порядке прибытия, приоритет игнорируется.
-- `priority` — при освобождении слота первым обслуживается токен с наибольшим
-  приоритетом; равные приоритеты разрешаются по времени прибытия, затем
-  по индексу instance, поэтому результат детерминирован.
-
-Раздел «Политики ресурсов» появляется, когда на доске есть задачи с заполненным
-полем роли ресурса. Ёмкость роли, указанная здесь, перекрывает inline-значение
-`resourceCapacity` у отдельных узлов. Если классы прибытия и роли не заданы,
-движок работает в прежнем режиме одиночного instance с FIFO.
-
-Отчёт Monte Carlo дополнительно показывает блок «По приоритетам:» со средним
-временем ожидания и средней длительностью для каждого приоритета. Это позволяет
-увидеть, как приоритизация перераспределяет ожидание между классами,
-не меняя агрегированную пропускную способность.
-
-Учебный модуль «FIFO vs Priority: классы прибытия» демонстрирует этот эффект
-на процессе из трёх узлов с одним оператором и двумя классами заявок.
-
-## Развитие
-
-Долгосрочная программа находится в [`docs/ROADMAP.md`](docs/ROADMAP.md).
-Учебные BPMN-модули находятся в [`examples/`](examples/) и доступны из меню
-«Примеры» в приложении.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md).
