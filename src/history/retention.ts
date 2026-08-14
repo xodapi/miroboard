@@ -30,9 +30,13 @@ function without(snapshot: HistorySnapshot[], removed: HistorySnapshot): History
   return index < 0 ? snapshot : [...snapshot.slice(0, index), ...snapshot.slice(index + 1)]
 }
 
+function isSemanticallyImportant(snapshot: HistorySnapshot): boolean {
+  return snapshot.kind === 'named' || snapshot.kind === 'restore-transition'
+}
+
 /**
- * Retains named checkpoints, the recent automatic window, a progressively sparse
- * representative in each older age bucket, and always the document origin.
+ * Retains named and restore-transition checkpoints, the recent automatic window,
+ * a progressively sparse representative in each older age bucket, and the document origin.
  */
 export function thin(snapshots: HistorySnapshot[], policy: RetentionPolicy, now: Date): HistorySnapshot[] {
   const origin = oldestSnapshot(snapshots)
@@ -41,7 +45,7 @@ export function thin(snapshots: HistorySnapshot[], policy: RetentionPolicy, now:
   const keep = new Set<string>()
 
   for (const snapshot of snapshots) {
-    if (snapshot.kind === 'named' && policy.keepAllNamed) keep.add(snapshot.id)
+    if (isSemanticallyImportant(snapshot) && policy.keepAllNamed) keep.add(snapshot.id)
   }
   if (origin) keep.add(origin.id)
   for (const snapshot of automatic.slice(0, policy.keepLastAuto)) keep.add(snapshot.id)
@@ -73,7 +77,7 @@ export function thin(snapshots: HistorySnapshot[], policy: RetentionPolicy, now:
   return retained
 }
 
-/** Removes only old automatic pointers, never labels or the first checkpoint. */
+/** Removes only old automatic pointers, never semantic checkpoints or the first checkpoint. */
 export function enforceSizeBudget(history: DocHistory, currentStateBytes: number, policy: RetentionPolicy): DocHistory {
   const maximum = Math.max(0, currentStateBytes * policy.maxHistoryRatio)
   let snapshots = [...history.snapshots]

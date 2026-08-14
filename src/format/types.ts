@@ -106,10 +106,13 @@ export interface DocHistory {
   retention: RetentionPolicy
 }
 
+/** Automatic captures that represent a critical state transition stay retained. */
+export type CheckpointKind = 'auto' | 'named' | 'restore-transition'
+
 export interface HistorySnapshot {
   id: string
   at: string
-  kind: 'auto' | 'named'
+  kind: CheckpointKind
   label?: string
   snapshot: string
   elementCount: number

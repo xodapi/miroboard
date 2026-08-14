@@ -42,6 +42,18 @@ describe('history retention', () => {
     expect(retained).toEqual([first, ...named])
   })
 
+  it('preserves restore transitions when thinning automatic checkpoints', () => {
+    const first = snapshot('first', 400)
+    const restoreTransition = snapshot('before-restore', 300, 'restore-transition')
+    const autos = Array.from({ length: 30 }, (_, index) => snapshot(`auto-${index}`, 30 - index))
+
+    const retained = thin([first, restoreTransition, ...autos], { ...DEFAULT_RETENTION, maxSnapshots: 24 }, now)
+
+    expect(retained).toContain(first)
+    expect(retained).toContain(restoreTransition)
+    expect(retained.length).toBeLessThanOrEqual(24)
+  })
+
   it('drops only non-origin automatic checkpoints to meet the serialised history budget', () => {
     const first = snapshot('first', 40, 'auto', 90)
     const named = snapshot('named', 30, 'named', 90)
@@ -58,6 +70,18 @@ describe('history retention', () => {
     expect(retained.snapshots.filter(entry => entry.kind === 'auto')).toEqual([first])
   })
 
+  it('preserves restore transitions while enforcing the serialised history budget', () => {
+    const first = snapshot('first', 40, 'auto', 90)
+    const restoreTransition = snapshot('before-restore', 30, 'restore-transition', 90)
+    const autos = Array.from({ length: 8 }, (_, index) => snapshot(`auto-${index}`, 8 - index, 'auto', 90))
+
+    const retained = enforceSizeBudget(history([first, restoreTransition, ...autos]), 120, DEFAULT_RETENTION)
+
+    expect(retained.snapshots).toContain(first)
+    expect(retained.snapshots).toContain(restoreTransition)
+    expect(retained.snapshots.filter(entry => entry.kind === 'auto')).toEqual([first])
+  })
+
   it('applies thinning before the size budget on every save', () => {
     const snapshots = [
       snapshot('first', 400, 'auto', 90),
@@ -69,4 +93,5 @@ describe('history retention', () => {
     expect(retained.snapshots.length).toBeLessThanOrEqual(5)
     expect(new TextEncoder().encode(JSON.stringify(retained)).byteLength).toBeLessThanOrEqual(660)
   })
+
 })

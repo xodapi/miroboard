@@ -305,7 +305,7 @@ export default function App() {
     setShowTimeline(true)
   }, [chooseTool, ydoc])
   const restorePreview = useCallback(() => {
-    if (!previewSnapshot) return; appendCheckpoint('auto'); undoManagerRef.current?.stopCapturing()
+    if (!previewSnapshot) return; appendCheckpoint('restore-transition'); undoManagerRef.current?.stopCapturing()
     restoreSnapshot<BoardElement>(ydoc, previewSnapshot); dirtyTrackerRef.current?.markDirty(); exitPreview(); showToast('Состояние восстановлено', 'success')
   }, [appendCheckpoint, exitPreview, previewSnapshot, showToast, ydoc])
   const markCurrentState = useCallback(() => {
