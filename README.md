@@ -9,7 +9,7 @@
 
 ## 🎯 Для кого этот инструмент
 
-Вы — бизнес-аналитик, внедряете SAP или описываете процессы компании. ARIS стоит €2000–15000 в год на пользователя. Visio не проверяет логику процесса. draw.io — просто рисовалка без симуляции. Облачные BPM-системы запрещены в вашем банке или госоргане. Вам нужен **offline-инструмент**, который рисует BPMN, **симулирует** процесс (проверяет, что не зависает, считает время выполнения) и хранит **историю изменений внутри файла** — без сервера, без подписки, бесплатно.
+Вы — бизнес-аналитик, внедряете SAP или описываете процессы компании. Visio не проверяет логику процесса. draw.io — просто рисовалка без симуляции. Облачные BPM-системы запрещены в вашем банке или госоргане. Вам нужен **offline-инструмент**, который рисует BPMN, **симулирует** процесс (проверяет, что не зависает, считает время выполнения) и хранит **историю изменений внутри файла** — без сервера, без подписки, бесплатно.
 
 **MiroBoard** — это один HTML-файл. Открываете в браузере через `file://`, рисуете BPMN-диаграмму, запускаете симуляцию с 500 прогонами Monte Carlo, получаете Min/Mean/P50/P90/P95/Max и % выполнения SLA. История версий встроена: откатывайтесь к любой контрольной точке, не теряя будущие изменения. Всё хранится в одном `.mboard`-файле. Никакой регистрации, никаких серверов.
 
@@ -19,7 +19,7 @@
 
 | Ваша боль | Как решает MiroBoard |
 |-----------|---------------------|
-| **ARIS стоит €2000–15000/год на пользователя** | Бесплатно, MIT-лицензия, один HTML-файл |
+| **Профессиональные BPM-системы стоят тысячи евро в год** | Бесплатно, MIT-лицензия, один HTML-файл |
 | **Облачные инструменты запрещены** (банки, госсектор, регулируемые отрасли) | 100% offline — работает через `file://`, никаких сетевых запросов |
 | **draw.io и Visio — просто рисовалки** | BPMN 2.0 с валидацией семантики + детерминированная симуляция процесса |
 | **Нет встроенной истории изменений** | Автоматические и именованные контрольные точки, timeline scrubber, restore-as-append |
@@ -60,7 +60,7 @@ npm run build
 ## Для кого
 
 **👔 Бизнес-аналитик в консалтинге**  
-Описываете процессы клиента для внедрения ERP. ARIS слишком дорог для малого клиента. MiroBoard — бесплатная альтернатива с симуляцией и историей версий.
+Описываете процессы клиента для внедрения ERP. Профессиональные BPM-системы слишком дороги для малого клиента. MiroBoard — бесплатная альтернатива с симуляцией и историей версий.
 
 **🏢 Архитектор корпоративных ИС**  
 Документируете процессы банка. Облачные инструменты запрещены регулятором. MiroBoard работает offline, файлы хранятся на корпоративном диске.
@@ -107,7 +107,6 @@ npm run build
 ## Roadmap
 
 Ближайшие шаги:
-- Поддержка eEPC (extended Event-driven Process Chain) — нотация SAP/ARIS
 - Экспорт в BPMN XML, импорт из других инструментов
 - Offline-first multi-notation (BPMN + eEPC + Value Stream Mapping в одном файле)
 
@@ -134,7 +133,7 @@ MIT — используйте свободно, в том числе в ком�
 
 ## 🎯 Who is this for
 
-You're a business analyst implementing SAP or documenting company processes. ARIS costs €2,000–15,000 per user per year. Visio doesn't validate process logic. draw.io is just a drawing tool with no simulation. Cloud BPM systems are banned in your bank or government agency. You need an **offline tool** that draws BPMN, **simulates** the process (checks for deadlocks, calculates execution time), and keeps **change history inside the file** — no server, no subscription, free.
+You're a business analyst implementing SAP or documenting company processes. Visio doesn't validate process logic. draw.io is just a drawing tool with no simulation. Cloud BPM systems are banned in your bank or government agency. You need an **offline tool** that draws BPMN, **simulates** the process (checks for deadlocks, calculates execution time), and keeps **change history inside the file** — no server, no subscription, free.
 
 **MiroBoard** is a single HTML file. Open it in your browser via `file://`, draw a BPMN diagram, run a Monte Carlo simulation with 500 iterations, get Min/Mean/P50/P90/P95/Max and SLA % compliance. Version history is built-in: roll back to any checkpoint without losing future changes. Everything is stored in a single `.mboard` file. No registration, no servers.
 
@@ -144,7 +143,7 @@ You're a business analyst implementing SAP or documenting company processes. ARI
 
 | Your pain | How MiroBoard solves it |
 |-----------|------------------------|
-| **ARIS costs €2,000–15,000/year per user** | Free, MIT license, single HTML file |
+| **Professional BPM tools cost thousands of euros per year** | Free, MIT license, single HTML file |
 | **Cloud tools are banned** (banking, government, regulated industries) | 100% offline — runs via `file://`, no network requests |
 | **draw.io and Visio are just drawing tools** | BPMN 2.0 with semantic validation + deterministic process simulation |
 | **No built-in change history** | Automatic and named checkpoints, timeline scrubber, restore-as-append |
@@ -185,7 +184,7 @@ npm run build
 ## Who is it for
 
 **👔 Business analyst in consulting**  
-You document client processes for ERP implementation. ARIS is too expensive for small clients. MiroBoard is a free alternative with simulation and version history.
+You document client processes for ERP implementation. Professional BPM tools are too expensive for small clients. MiroBoard is a free alternative with simulation and version history.
 
 **🏢 Enterprise architect**  
 You document bank processes. Cloud tools are banned by the regulator. MiroBoard runs offline, files are stored on corporate drives.
@@ -232,7 +231,6 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for details.
 ## Roadmap
 
 Next steps:
-- Support eEPC (extended Event-driven Process Chain) — SAP/ARIS notation
 - Export to BPMN XML, import from other tools
 - Offline-first multi-notation (BPMN + eEPC + Value Stream Mapping in one file)
 
