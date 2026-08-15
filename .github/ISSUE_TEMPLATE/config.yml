@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation / Документация
+    url: https://github.com/xodapi/miroboard/tree/main/docs
+    about: Read the docs before opening an issue / Прочитайте документацию перед созданием issue
+  - name: Discussions / Обсуждения
+    url: https://github.com/xodapi/miroboard/discussions
+    about: Ask questions and discuss ideas / Задавайте вопросы и обсуждайте идеи
