@@ -1,0 +1,240 @@
+# MiroBoard Phase 2: BPMN Plugin Abstraction
+
+## Project Context
+React + TypeScript + Vite, Rust/WASM, offline-first visual workspace. Refactoring 2531-line monolithic App.tsx into plugin architecture. BPMN elements migrate from inline fields to NotationPlugin system.
+
+---
+
+## 1. REFACTORING STRATEGY
+
+### Strangler-Fig Migration (Critical)
+- Add NotationPlugin interface alongside existing BPMN code
+- Dual-write: BoardElement stores both old bpmn* fields AND new profileData during migration
+- Migrate call sites in batches (render → property panel → model → events)
+- Remove deprecated bpmn* fields only after all call sites migrated
+- Each commit must compile and pass existing tests
+
+### Small Behavior-Preserving Steps
+- Work in small incremental changes (<150 lines)
+- Separate structural changes from functional changes
+- Always preserve observable behavior during refactoring
+- Refactor before feature work (preparatory refactoring) and after (cleanup)
+
+### Characterization Tests First
+- Add Playwright e2e tests for existing BPMN workflows before changing code
+- Test: create task → add gateway → draw sequence flows → save/load
+- Add Vitest unit tests for BoardElement serialization before format change
+- Protect ugly behavior if real consumers rely on it
+
+---
+
+## 2. REACT + TYPESCRIPT
+
+### Component Best Practices
+- Functional components only, <150 lines each
+- Extract reusable logic into custom hooks (use* prefix)
+- Complete dependency arrays in useEffect — never disable exhaustive-deps
+- Handle loading, error, and empty states explicitly
+
+### Type Safety
+- Use discriminated unions: `type BoardElement = PathElement | StickyElement | ...`
+- Define explicit return types for public functions
+- Use `satisfies` operator for type narrowing
+- Use `Readonly<T>` for immutable props/state
+- Enable TypeScript strict mode
+
+### State Management
+- useState for local UI state
+- Context for NotationPluginRegistry (global concern)
+- Yjs for board element CRDT state
+- Don't put derived data in state — use useMemo
+
+---
+
+## 3. PLUGIN ARCHITECTURE
+
+### Deep Module Design
+- NotationPlugin interface should be narrow but hide complexity
+- Methods: createElement, renderElement, validate, getPropertyPanel
+- Each plugin encapsulates all notation-specific logic (BPMN shapes, validation, etc.)
+- Canvas renderer doesn't know about BPMN-specific validation rules
+
+### Information Hiding
+- Hide SVG path generation inside plugin
+- Hide plugin loading/caching inside registry
+- Expose only: id, label, createElement, render, validate
+
+### General-Purpose Design
+- NotationPlugin should work for flowcharts, UML, wireframes, BPMN
+- Don't overfit interface to BPMN-only use case
+- Right abstraction level: specific enough to be strong, general enough to be reusable
+
+---
+
+## 4. FILE FORMAT MIGRATION
+
+### Zero-Downtime Migration (.mboard → .mboard2)
+Phase 1: Detect version on file open, migrate automatically, mark dirty
+Phase 2: Write .mboard2 with schemaVersion: 2
+Phase 3: Support reading .mboard (v1) for backward compatibility
+
+### Idempotent Migration
+- Running migration twice produces same result
+- Test with production-volume datasets (100+ elements)
+- Test edge cases: missing fields, unknown element types, corrupted state
+
+### Version Field
+- Include `version: "2.0.0"` in file format
+- Add `migratedFrom: "1.0.0"` metadata for debugging
+- Support reading N-1 version for 6-12 months
+
+---
+
+## 5. TESTING
+
+### Test Behavior Not Implementation
+- Test "user can create and connect BPMN elements"
+- NOT "App.tsx calls createBPMNElement()"
+- Test plugin contract, not internal plugin implementation
+
+### Unit Tests (Vitest)
+- Mock dependencies with vi.mock() before imports
+- Test critical paths: business logic, validation, serialization
+- Test valid inputs, invalid inputs, edge cases, boundaries
+- Arrange-Act-Assert pattern
+- Keep suite under 5 seconds (mock IndexedDB, File API)
+
+### E2E Tests (Playwright)
+- Test critical user flows with data-testid selectors
+- Create BPMN diagram → save → reload → verify elements present
+- Migrate .mboard to .mboard2 → verify no data loss
+- Undo/redo with plugin elements
+
+---
+
+## 6. RUST/WASM
+
+### Ownership & Error Handling
+- Prefer borrowing (&T, &mut T) over cloning
+- Use `&str` over `&String` in parameters
+- Return Result<JsValue, JsValue> for fallible operations
+- Never .unwrap() in production — use .expect("reason") or handle properly
+- Use thiserror for library errors
+
+### Performance
+- Use iterators over manual loops
+- Avoid cloning BoardElement unnecessarily
+- Use serde_wasm_bindgen for efficient JS↔Rust serialization
+
+---
+
+## 7. PERFORMANCE
+
+### Measurement First
+- Profile before optimizing
+- Set budgets: initial load < 2s, 60fps scrolling, bundle < 200KB
+- Use React DevTools Profiler to find re-render bottlenecks before adding useMemo
+
+### Optimization
+- Code-split plugins: lazy-load BPMNPlugin with dynamic import()
+- Lazy-load PropertyPanel
+- Use React.memo for expensive BoardElement rendering
+- Use useCallback for plugin event handlers
+- Configure Vite manual chunks: core (React, Yjs), plugins (BPMN), ui (Tailwind)
+
+---
+
+## 8. CLEAN CODE
+
+### Simplicity First
+- Only change what was asked
+- During strangler-fig migration, resist urge to refactor unrelated code
+- Extract only BPMN-related logic
+- Leave unrelated rendering code untouched
+
+### Meaningful Names
+- Use NotationPlugin not Plugin
+- Use BPMNTaskElement not BTE
+- Use renderBPMNShape not render()
+- File names: bpmn-task-renderer.ts not btr.ts
+
+### Single Responsibility
+- Each function does exactly one thing
+- If function needs comment to explain what it does, split it
+- Example: split handleElementCreate into:
+  - validateElementType()
+  - createElementFromPlugin()
+  - addToYjsDoc()
+
+### Smart Comments
+- Don't comment what code does — make code self-documenting
+- Comment why something is done a certain way
+- Example: "// Strangler-fig: dual-write for backward compat" not "// save element"
+- Example: "// WASM call — 10x faster than JS" not "// calculate intersection"
+
+---
+
+## 9. ERROR HANDLING
+
+### Operational vs Programmer Errors
+- Operational (expected): invalid input, timeout → handle gracefully, show user message
+- Programmer (bugs): null reference → crash in dev, log in prod, fix code
+- Translate File API errors to BoardLoadError at boundaries
+
+### Consistent Error Shape
+```typescript
+interface AppError {
+  code: string          // machine-readable
+  message: string       // user-friendly
+  context?: unknown     // debugging (dev only)
+}
+```
+Example: `{ code: "UNSUPPORTED_VERSION", message: "Cannot open file from version 0.x", context: { fileVersion, supportedVersions } }`
+
+---
+
+## 10. PHASE 2 WORKFLOW
+
+### Before Code
+1. Read existing patterns in 3-5 files from target module
+2. Match naming conventions, error handling, test structure
+3. Add characterization tests for code about to change
+
+### During Migration (Features 1a-1f)
+1. Add profileData alongside bpmn* fields (dual-write)
+2. Migrate call sites in batches with passing tests between each
+3. Remove deprecated fields only after all sites migrated
+4. Each PR: <300 lines, focused on one area (render / panel / model / events)
+
+### After Each Feature
+1. Run full test suite: `npm run test && npm run typecheck && npm run lint && cargo test`
+2. Profile performance if touching render path
+3. Update docs if changing public API
+
+---
+
+## Anti-Patterns to Avoid
+
+❌ Atomic big-bang BoardElement migration (breaks all tests)
+❌ Migrating 22 call sites in one PR
+❌ Adding eEPC to Phase 2 (scope creep — deferred to Phase 3)
+❌ Refactoring unrelated App.tsx code during BPMN extraction
+❌ Disabling eslint exhaustive-deps
+❌ .unwrap() in Rust WASM code
+❌ Testing implementation details instead of behavior
+❌ useMemo without profiling first
+❌ Breaking .mboard v1 backward compatibility
+
+---
+
+## Success Criteria
+
+✅ All 148 existing Vitest tests pass
+✅ All 88 existing Playwright tests pass
+✅ 32 Rust tests pass
+✅ TypeScript compiles with no errors
+✅ Can open Phase 1 .mboard files (automatic migration to .mboard2)
+✅ BPMN diagrams work identically before/after refactor
+✅ App.tsx reduced from 2531 to <500 lines
+✅ New src/notation/bpmn/ module with <150 line files
+✅ NotationPlugin interface documented and exported
