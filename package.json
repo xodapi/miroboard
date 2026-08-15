@@ -2,7 +2,7 @@
   "name": "miroboard",
   "private": false,
   "version": "0.15.0",
-  "description": "Single-file local whiteboard",
+  "description": "Offline-first BPMN editor with Monte Carlo simulation and built-in version history — single HTML file, no server",
   "license": "MIT",
   "type": "module",
   "engines": {

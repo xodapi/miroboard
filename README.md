@@ -4,6 +4,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)](https://www.typescriptlang.org/)
 [![Rust/WASM](https://img.shields.io/badge/Rust%2FWASM-1.97-orange)](https://www.rust-lang.org/)
 [![Offline-first](https://img.shields.io/badge/Offline--first-100%25-green)]()
+[![CI](https://github.com/xodapi/miroboard/actions/workflows/ci.yml/badge.svg)](https://github.com/xodapi/miroboard/actions/workflows/ci.yml)
 
 ---
 
@@ -75,9 +76,9 @@ npm run build
 
 ## Скриншоты
 
-<!-- screenshot: BPMN diagram with tasks, gateways, events -->
-<!-- screenshot: Monte Carlo simulation results panel (Min/Mean/P50/P90/P95/Max/SLA) -->
-<!-- screenshot: Timeline panel with checkpoint scrubber and restore-as-append -->
+![BPMN-редактор с задачами, шлюзами и событиями](screenshots/bpmn-editor.png)
+![Результаты Monte Carlo симуляции (Min/Mean/P50/P90/P95/Max/SLA)](screenshots/simulation-results.png)
+![Timeline с чекпоинтами и restore-as-append](screenshots/timeline-history.png)
 
 ---
 
@@ -128,6 +129,7 @@ MIT — используйте свободно, в том числе в ком�
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)](https://www.typescriptlang.org/)
 [![Rust/WASM](https://img.shields.io/badge/Rust%2FWASM-1.97-orange)](https://www.rust-lang.org/)
 [![Offline-first](https://img.shields.io/badge/Offline--first-100%25-green)]()
+[![CI](https://github.com/xodapi/miroboard/actions/workflows/ci.yml/badge.svg)](https://github.com/xodapi/miroboard/actions/workflows/ci.yml)
 
 ---
 
@@ -199,9 +201,9 @@ You're building a workflow application. You need a BPMN editor that exports `.mb
 
 ## Screenshots
 
-<!-- screenshot: BPMN diagram with tasks, gateways, events -->
-<!-- screenshot: Monte Carlo simulation results panel (Min/Mean/P50/P90/P95/Max/SLA) -->
-<!-- screenshot: Timeline panel with checkpoint scrubber and restore-as-append -->
+![BPMN editor with tasks, gateways, and events](screenshots/bpmn-editor.png)
+![Monte Carlo simulation results (Min/Mean/P50/P90/P95/Max/SLA)](screenshots/simulation-results.png)
+![Timeline panel with checkpoints and restore-as-append](screenshots/timeline-history.png)
 
 ---
 
