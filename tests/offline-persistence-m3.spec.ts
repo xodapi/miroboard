@@ -353,9 +353,6 @@ test('VAL-OFFLINE-079: Create and edit works fully offline', async ({ page }) =>
 test('VAL-OFFLINE-049: Open with clean state does not prompt guard', async ({ page }) => {
   await bootFileProtocol(page)
   
-  // Try to load a fixture without making edits
-  const exampleFile = resolve(process.cwd(), 'examples', 'freeform-board.mboard')
-  
   // Simulate file open (in real scenario this would be via File System Access API)
   // For this test, we verify the app state is clean on initial load
   const dirtyIndicators = await page.locator('text=/unsaved|несохраненные|modified/i').count()
@@ -502,7 +499,7 @@ test('VAL-OFFLINE-056: Edge geometry and waypoints round-trip', async ({ page })
 })
 
 // VAL-OFFLINE-057: Repeated round-trips produce stable output
-test('VAL-OFFLINE-057: Repeated round-trips produce stable output', async ({ page }) => {
+test('VAL-OFFLINE-057: Repeated round-trips produce stable output', async () => {
   const result: TestResult = {
     id: 'VAL-OFFLINE-057',
     status: 'blocked',
@@ -516,7 +513,7 @@ test('VAL-OFFLINE-057: Repeated round-trips produce stable output', async ({ pag
 })
 
 // VAL-OFFLINE-058: Every document app writes passes its own schema validation on load
-test('VAL-OFFLINE-058: Every document app writes passes schema validation', async ({ page }) => {
+test('VAL-OFFLINE-058: Every document app writes passes schema validation', async () => {
   const result: TestResult = {
     id: 'VAL-OFFLINE-058',
     status: 'blocked',
@@ -530,7 +527,7 @@ test('VAL-OFFLINE-058: Every document app writes passes schema validation', asyn
 })
 
 // VAL-OFFLINE-072: App loads over http:// with identical UI (requires running server)
-test('VAL-OFFLINE-072: App loads over http:// with identical UI', async ({ page, browser }) => {
+test('VAL-OFFLINE-072: App loads over http:// with identical UI', async () => {
   const result: TestResult = {
     id: 'VAL-OFFLINE-072',
     status: 'blocked',
