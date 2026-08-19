@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import './help-panel.css';
 
 export function HelpPanel() {
