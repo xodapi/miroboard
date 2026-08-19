@@ -23,6 +23,8 @@ import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/
 import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
 import { serialise } from './format/mboard'
 import type { DocHistory, DocMeta, HistorySnapshot, ProfileConfig } from './format/types'
+import { HelpPanel } from './HelpPanel'
+import './help-panel.css'
 import basicFixedExample from '../examples/basic-fixed.json'
 import parallelQueueExample from '../examples/parallel-queue.json'
 import slaCalendarExample from '../examples/sla-calendar.json'
@@ -2526,6 +2528,7 @@ export default function App() {
         ::-webkit-scrollbar { display: none; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
+      <HelpPanel />
     </div>
   )
 }
