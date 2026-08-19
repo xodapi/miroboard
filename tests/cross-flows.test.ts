@@ -1,4 +1,4 @@
-import { test, expect, Browser, BrowserContext, Page } from '@playwright/test';
+import { test, BrowserContext, Page } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -51,7 +51,7 @@ test.describe('VAL-CROSS Cross-Area Flows', () => {
       // Step 1: Create elements with fractional and negative coordinates
       await page.evaluate(() => {
         // Access the app state through window.__MIROBOARD_DEBUG__ if available
-        const consoleLog = (msg: any) => console.log(JSON.stringify(msg));
+        const consoleLog = (msg: unknown) => console.log(JSON.stringify(msg));
         consoleLog({ step: 1, action: 'Create elements', timestamp: new Date().toISOString() });
       });
 

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -51,7 +51,7 @@ async function takeScreenshot(page: import('@playwright/test').Page, filename: s
 
 // VAL-OFFLINE-071: App loads over file:// protocol
 test('VAL-OFFLINE-071: App loads over file:// protocol', async ({ page }) => {
-  const { errors } = await bootFileProtocol(page)
+  await bootFileProtocol(page)
   const screenshot = await takeScreenshot(page, 'VAL-OFFLINE-071-file-protocol-load.png')
   
   const result: TestResult = {
@@ -117,7 +117,7 @@ test('VAL-OFFLINE-077: No CORS or CSP failures under file://', async ({ page }) 
 
 // VAL-OFFLINE-073: No external network requests in default mode
 test('VAL-OFFLINE-073: No external network requests in default mode', async ({ page }) => {
-  const { errors, requests } = await bootFileProtocol(page)
+  const { requests } = await bootFileProtocol(page)
   const externalRequests = requests.filter(url => 
     !url.startsWith('file://') && 
     !url.startsWith('data:') && 
@@ -143,7 +143,7 @@ test('VAL-OFFLINE-073: No external network requests in default mode', async ({ p
 
 // VAL-OFFLINE-070: Offline status is not misreported (no "offline" banner shown)
 test('VAL-OFFLINE-070: Offline status is not misreported', async ({ page }) => {
-  const { errors } = await bootFileProtocol(page)
+  await bootFileProtocol(page)
   
   // Check for offline-related UI elements (banners, indicators)
   const offlineIndicators = await page.locator('text=/offline|оффлайн|нет соединения/i').count()
@@ -198,7 +198,7 @@ test('VAL-OFFLINE-074: App functions with network stack blocked', async ({ page 
   // Block all network requests
   await page.context().route(/^(?!file:|data:|blob:).*/, route => route.abort())
   
-  const { errors } = await bootFileProtocol(page)
+  await bootFileProtocol(page)
   
   // Try to create a node (basic edit operation)
   const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
@@ -248,7 +248,7 @@ test('VAL-OFFLINE-075: No failed/pending requests after idle', async ({ page }) 
     failedRequests.push(`${request.method()} ${request.url()}`)
   })
   
-  const { errors } = await bootFileProtocol(page)
+  await bootFileProtocol(page)
   
   // Wait for idle
   await page.waitForTimeout(2000)
@@ -276,7 +276,7 @@ test('VAL-OFFLINE-079: Create and edit works fully offline', async ({ page }) =>
   // Block all network requests
   await page.context().route(/^(?!file:|data:|blob:).*/, route => route.abort())
   
-  const { errors } = await bootFileProtocol(page)
+  await bootFileProtocol(page)
   
   const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
   
@@ -351,7 +351,7 @@ test('VAL-OFFLINE-079: Create and edit works fully offline', async ({ page }) =>
 
 // VAL-OFFLINE-049: Open with clean state does not prompt guard
 test('VAL-OFFLINE-049: Open with clean state does not prompt guard', async ({ page }) => {
-  const { errors } = await bootFileProtocol(page)
+  await bootFileProtocol(page)
   
   // Try to load a fixture without making edits
   const exampleFile = resolve(process.cwd(), 'examples', 'freeform-board.mboard')
@@ -380,7 +380,7 @@ test('VAL-OFFLINE-049: Open with clean state does not prompt guard', async ({ pa
 
 // VAL-OFFLINE-050, 051, 052, 053, 054: Document validation tests
 test('VAL-OFFLINE-050 through 054: Document validation scenarios', async ({ page }) => {
-  const { errors } = await bootFileProtocol(page)
+  await bootFileProtocol(page)
   
   // Create corrupted test files
   const testFiles = [
@@ -438,7 +438,7 @@ test('VAL-OFFLINE-050 through 054: Document validation scenarios', async ({ page
 
 // VAL-OFFLINE-055: Unknown extra fields preserved on round-trip
 test('VAL-OFFLINE-055: Unknown extra fields preserved on round-trip', async ({ page }) => {
-  const { errors } = await bootFileProtocol(page)
+  await bootFileProtocol(page)
   
   // This test would require save/open capability via File System Access API
   // Marking as blocked since file operations are not accessible via file:// in Playwright
@@ -457,7 +457,7 @@ test('VAL-OFFLINE-055: Unknown extra fields preserved on round-trip', async ({ p
 
 // VAL-OFFLINE-056: Edge geometry and waypoints round-trip
 test('VAL-OFFLINE-056: Edge geometry and waypoints round-trip', async ({ page }) => {
-  const { errors } = await bootFileProtocol(page)
+  await bootFileProtocol(page)
   
   // Create two nodes and a connection
   const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
