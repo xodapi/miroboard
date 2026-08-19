@@ -47,6 +47,38 @@
 
 ---
 
+## Часть 2.5 / Part 2.5: MiroBoard — Phase 2.1 (Mindmap Mode) - Q4 2026
+
+| Feature | Status |
+|---|---|
+| Node-based mindmap visualization (tree/radial layout) | 📋 Planned |
+| Click node → Markdown editor panel | 📋 Planned |
+| File attachments embedded in .mboard | 📋 Planned |
+| Collapsible branches | 📋 Planned |
+| Export to Markdown hierarchy | 📋 Planned |
+
+**RU:** Режим ментальных карт для структурирования идей. Каждый узел содержит Markdown-контент и вложения.
+
+**EN:** Mindmap mode for structuring ideas. Each node contains Markdown content and attachments.
+
+---
+
+## Часть 2.6 / Part 2.6: MiroBoard — Phase 2.2 (Digital Gardens) - Q1 2027
+
+| Feature | Status |
+|---|---|
+| Wiki-like pages with `[[wikilinks]]` | 📋 Planned |
+| Bidirectional backlinks | 📋 Planned |
+| Graph view of connected pages | 📋 Planned |
+| Full-text search across pages | 📋 Planned |
+| Export to static HTML wiki | 📋 Planned |
+
+**RU:** Цифровой сад — личная wiki для накопления знаний с визуализацией связей между страницами.
+
+**EN:** Digital garden — personal wiki for knowledge accumulation with page connection visualization.
+
+---
+
 ## Часть 3 / Part 3: ProcessGraph — Новый проект / New Project (Phase 3+)
 
 ### Почему отдельный репозиторий / Why a separate repository
@@ -137,10 +169,20 @@
 ```
 2026 Q2  ── MiroBoard Phase 1 complete ✅
 2026 Q3  ── MiroBoard Phase 2: plugin abstraction, .mboard2 format
-2026 Q4  ── ProcessGraph Phase 3: new repo, eEPC plugin, .pgraph format
-2027 Q1  ── ProcessGraph Phase 4: UML Activity, Petri Nets, VACD
+2026 Q4  ── MiroBoard Phase 2.1: Mindmap Mode
+2027 Q1  ── MiroBoard Phase 2.2: Digital Gardens
+2027 Q2  ── ProcessGraph Phase 3: new repo, eEPC plugin, .pgraph format
+2027 Q3  ── ProcessGraph Phase 4: UML Activity, Petri Nets, VACD
 2027+    ── Phase 5: process mining, collaboration, desktop, VS Code ext
 ```
+
+---
+
+## Часть 6 / Part 6: Vision: Unified Thinking Workspace
+
+**RU:** MiroBoard эволюционирует от специализированного BPMN-редактора к универсальному инструменту мышления — процессы (BPMN), идеи (mindmap), знания (wiki) в одном offline-first приложении.
+
+**EN:** MiroBoard evolves from a specialized BPMN editor into a universal thinking tool — processes (BPMN), ideas (mindmap), knowledge (wiki) in one offline-first application.
 
 ---
 
