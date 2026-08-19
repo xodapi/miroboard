@@ -7,7 +7,6 @@ const DIST_URL = `file://${path.resolve('dist/index.html').replace(/\\/g, '/')}`
 const EVIDENCE_DIR = 'C:\\Users\\d88u5\\.factory\\missions\\b4963a39-830d-42b1-8a97-f2d6f9ca084c\\evidence\\m4-history-system\\group-4';
 
 test.describe('VAL-CROSS Cross-Area Flows', () => {
-  let browser: Browser;
   let context: BrowserContext;
   let page: Page;
   let tempDir: string;
@@ -25,8 +24,7 @@ test.describe('VAL-CROSS Cross-Area Flows', () => {
     }
   });
 
-  test.beforeEach(async ({ browser: b, context: ctx, page: p }) => {
-    browser = b;
+  test.beforeEach(async ({ context: ctx, page: p }) => {
     context = ctx;
     page = p;
     
@@ -43,7 +41,7 @@ test.describe('VAL-CROSS Cross-Area Flows', () => {
   });
 
   test('VAL-CROSS-001: Board survives close-and-reopen cycle', async () => {
-    const evidence: any = {
+    const evidence: { id: string; title: string; steps: Array<{ action: string; expected: string; observed: string }> } = {
       id: 'VAL-CROSS-001',
       title: 'Board survives close-and-reopen cycle',
       steps: []
@@ -101,7 +99,7 @@ test.describe('VAL-CROSS Cross-Area Flows', () => {
 
   test('VAL-CROSS-025: Phase 1 demo sentence end-to-end', async () => {
     // This is the blocking gate - must be comprehensive
-    const evidence: any = {
+    const evidence: { id: string; title: string; steps: Array<{ step: number; action: string; expected: string; observed: string }>; consoleErrors: string[]; networkRequests: string[] } = {
       id: 'VAL-CROSS-025',
       title: 'Phase 1 demo sentence executed end to end',
       steps: [],

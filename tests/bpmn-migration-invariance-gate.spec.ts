@@ -58,7 +58,7 @@ async function debugModelAndValidation(page: Page): Promise<Pick<DebugPayload, '
   })
 }
 
-async function saveAndReopen(page: Page, suffix: string): Promise<void> {
+async function saveAndReopen(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Дополнительные инструменты' }).click()
   await page.getByRole('button').filter({ hasText: 'Сохранить' }).first().click()
   await page.waitForTimeout(200)
@@ -112,9 +112,9 @@ test.describe('BPMN migration invariance gate', () => {
       const original = await debug(page)
       expect(original).toEqual(expected)
 
-      await saveAndReopen(page, `${name}:cycle1`)
+      await saveAndReopen(page)
       expect(await debug(page)).toEqual(expected)
-      await saveAndReopen(page, `${name}:cycle2`)
+      await saveAndReopen(page)
       expect(await debug(page)).toEqual(expected)
     })
   }

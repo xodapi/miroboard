@@ -75,14 +75,6 @@ async function connect(page: Page, source: string, target: string) {
   await page.waitForTimeout(300)
 }
 
-async function flowIdsBetween(page: Page, source: string, target: string) {
-  const sourceId = source === 'X' ? await bpmnNodeId(page, 'xorGateway') : await elementId(page, source)
-  const targetId = await elementId(page, target)
-  return page.evaluate(({ sourceId, targetId }) => window.__MIROBOARD_DEBUG__!.getElements()
-    .filter(element => element.bpmnFlow?.sourceId === sourceId && element.bpmnFlow?.targetId === targetId)
-    .map(element => element.id), { sourceId, targetId })
-}
-
 async function createMissingEndPathGraph(page: Page) {
   await placeShortcut(page, 's', 360, 220)
   await placeShortcut(page, 'e', 700, 220)

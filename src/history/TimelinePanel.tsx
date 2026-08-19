@@ -1,5 +1,6 @@
 import type { HistorySnapshot } from '../format/types'
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function formatSnapshotTimestamp(timestamp: string): string {
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) return timestamp

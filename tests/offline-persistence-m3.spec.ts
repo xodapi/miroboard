@@ -2,7 +2,6 @@ import { test, expect } from '@playwright/test'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { randomBytes } from 'node:crypto'
 
 const artifact = resolve(process.cwd(), 'dist', 'index.html')
 const fileUrl = `file://${artifact.replaceAll('\\', '/')}`
