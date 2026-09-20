@@ -1,21 +1,39 @@
-import { defineConfig, devices } from '@playwright/test'
+import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
-  testDir: './tests',
-  testIgnore: ['**/baseline-capture.spec.ts', '**/bpmn-validation-regression-suite.spec.ts', '**/bpmn-token-execution-regression-suite.spec.ts', '**/bpmn-token-visibility.spec.ts', '**/bpmn-simulation-parameter-regression-suite.spec.ts', '**/bpmn-resource-metrics-regression-suite.spec.ts', '**/bpmn-topology-edge-case-suite.spec.ts', '**/bpmn-authoring-regression-suite.spec.ts', '**/bpmn-migration-invariance-gate.spec.ts', '**/cross-history-simulation-integration.spec.ts'],
+  testDir: "./tests",
+  testIgnore: [
+    "**/baseline-capture.spec.ts",
+    "**/bpmn-validation-regression-suite.spec.ts",
+    "**/bpmn-token-execution-regression-suite.spec.ts",
+    "**/bpmn-token-visibility.spec.ts",
+    "**/bpmn-simulation-parameter-regression-suite.spec.ts",
+    "**/bpmn-resource-metrics-regression-suite.spec.ts",
+    "**/bpmn-topology-edge-case-suite.spec.ts",
+    "**/bpmn-authoring-regression-suite.spec.ts",
+    "**/bpmn-migration-invariance-gate.spec.ts",
+    "**/cross-history-simulation-integration.spec.ts",
+  ],
   timeout: 60_000,
   workers: 1,
+  // The html report is self-contained, so CI can publish *which* tests failed
+  // without anyone having to open the job logs (see
+  // scripts/summarize-playwright-report.mjs). Both directories are gitignored.
+  reporter: [["list"], ["html", { open: "never" }]],
   // Playwright cannot reliably tear down its cmd.exe-owned Vite child on Windows.
   // Windows callers start and stop preview explicitly through services.yaml instead.
-  webServer: process.platform === 'win32' ? undefined : {
-    command: `${JSON.stringify(process.execPath)} node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173 --strictPort`,
-    url: 'http://127.0.0.1:4173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer:
+    process.platform === "win32"
+      ? undefined
+      : {
+          command: `${JSON.stringify(process.execPath)} node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173 --strictPort`,
+          url: "http://127.0.0.1:4173",
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
   use: {
-    baseURL: 'http://127.0.0.1:4173',
-    ...devices['Desktop Chrome'],
+    baseURL: "http://127.0.0.1:4173",
+    ...devices["Desktop Chrome"],
     headless: true,
   },
-})
+});
