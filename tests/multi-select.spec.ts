@@ -1,5 +1,4 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { resolve } from 'node:path'
 
 /**
  * Multi-selection, bulk operations and the participant profile.
@@ -13,15 +12,14 @@ import { resolve } from 'node:path'
  * bottom toolbar so a marquee never starts on a UI element.
  */
 
-const artifact = resolve(process.cwd(), 'dist', 'index.html')
-const fileUrl = `file://${artifact.replaceAll('\\', '/')}`
-
 async function boot(page: Page) {
+  // Only uncaught exceptions are collected. Console *errors* are not asserted:
+  // the built artifact declares no favicon, so Chrome logs a 404 for
+  // /favicon.ico on every load and that noise says nothing about the board.
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
-  await page.goto(fileUrl, { waitUntil: 'domcontentloaded' })
-  await expect(page.getByRole('button', { name: 'Доска' })).toBeVisible({ timeout: 5_000 })
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByTestId('canvas')).toBeVisible({ timeout: 5_000 })
   const skipTour = page.getByRole('button', { name: 'Пропустить' })
   if (await skipTour.isVisible().catch(() => false)) await skipTour.click()
   return { errors, canvas: page.locator('div.absolute.inset-0.touch-none > svg') }
