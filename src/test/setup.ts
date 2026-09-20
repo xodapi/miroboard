@@ -1,6 +1,11 @@
 // Shared Vitest setup for browser-shaped unit tests.
 import 'fake-indexeddb/auto'
 
+// Without this flag React's act() only warns ("The current testing environment
+// is not configured to support act(...)") and does not fully flush effects, so
+// the App smoke suite would assert against a half-rendered tree.
+;(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
+
 // jsdom ships MouseEvent but not PointerEvent, and the canvas is driven entirely
 // by pointer events. This is the minimal shape the app reads: coordinates,
 // button, shift/alt modifiers, and the touch-detection fields.
