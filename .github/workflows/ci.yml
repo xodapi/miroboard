@@ -53,3 +53,26 @@ jobs:
 
       - name: Run end-to-end tests
         run: npx playwright test
+
+      # The e2e suite is red on `main` already (run 32238922648, same step), so a
+      # failing check on a PR carries no information on its own. Publish which
+      # tests failed — as a job summary readable without downloading logs, and
+      # as the HTML report artifact for local inspection.
+      - name: Summarize end-to-end results
+        if: always()
+        run: |
+          {
+            echo '### Playwright results'
+            echo '```'
+            node scripts/summarize-playwright-report.mjs playwright-report
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
