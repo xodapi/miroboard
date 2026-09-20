@@ -18,7 +18,8 @@
     "test:watch": "node node_modules\\vitest\\vitest.mjs watch",
     "test:coverage": "node node_modules\\vitest\\vitest.mjs run --coverage",
     "test:e2e": "playwright test",
-    "test:rust": "cargo test --manifest-path wasm/board-core/Cargo.toml"
+    "test:rust": "cargo test --manifest-path wasm/board-core/Cargo.toml",
+    "probe": "vitest run --config docs/experiments/vitest.config.ts --reporter=verbose"
   },
   "dependencies": {
     "clsx": "2.1.1",
