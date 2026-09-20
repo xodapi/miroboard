@@ -484,7 +484,7 @@ BPMN XML, `.mboard` save/load, история с таймлайном, симу�
 | --- | --- | --- | --- |
 | 0.1 | Локальный профиль: имя + цвет вместо анонимного UUID | S | ✅ сделано: `src/collab/user-profile.ts`, кнопка-аватар и панель в топ-баре, миграция с `localStorage['miro-author-id']` |
 | 0.2 | Множественное выделение: `selectedIds: Set<string>`, marquee, Shift+клик | M | ✅ сделано: `src/collab/selection.ts`, `src/collab/marquee.ts`; marquee, Shift+клик, Shift+marquee, групповой drag, Delete/Ctrl+D/Ctrl+A/стрелки, счётчик выделения |
-| 0.3 | Буфер обмена: Ctrl+C/V/X, JSON в `clipboard`, дублировать несколько | S | ⬜ Ctrl+D уже дублирует всё выделение; полноценный буфер — следующий шаг |
+| 0.3 | Буфер обмена: Ctrl+C/V/X, JSON в `clipboard`, дублировать несколько | S | ✅ `src/collab/clipboard.ts`: формат `application/x-miroboard+json`, валидация чужого JSON, новые id + перепривязка `bpmnFlow`, вставка одной транзакцией с origin `LOCAL_CLIPBOARD`; стрелки теперь тоже двигают выделение одной транзакцией |
 | 0.4 | Явные origins транзакций (`LOCAL_EDIT`, `LOCAL_GESTURE`, `RECOVERY`, …) | M | ✅ сделано: `src/collab/origins.ts`, UndoManager переведён на allow-list локальных origins |
 | 0.5 | Декомпозиция `App.tsx`: canvas-render, tool-state-machine, selection, viewport, panels | XL | 🟡 начато: логика выделения и геометрия marquee вынесены в `src/collab/`; `App.tsx` ~2600 строк |
 | 0.6 | Командный слой: все мутации через `commands/*` с явной транзакцией | M | ⬜ origins уже проставлены во всех точках записи — командный слой можно вводить механически |

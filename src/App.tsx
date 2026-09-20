@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
-import { LOAD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE } from './collab/origins'
+import { LOAD, LOCAL_CLIPBOARD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE } from './collab/origins'
+import { PASTE_OFFSET, parseClipboard, preparePaste, serialiseSelection } from './collab/clipboard'
 import { PARTICIPANT_COLORS, initialsOf, readProfile, withColor, withName, writeProfile, type UserProfile } from './collab/user-profile'
 import {
   clearSelection, idsOf, isSelected as isIdSelected, primaryOf, removeFromSelection, retainExisting,
@@ -853,6 +854,74 @@ export default function App() {
     return created
   }, [elements, selectedIds, previewSnapshot, ydoc])
 
+  /**
+   * Nudges the whole selection in ONE transaction. Arrow keys used to commit
+   * per element, which made an 8-element nudge 8 undo steps and 8 checkpoints.
+   */
+  const moveSelection = useCallback((delta: { x: number; y: number }) => {
+    if (previewSnapshot) return
+    const picked = elements.filter(element => selectedIds.has(element.id))
+    if (!picked.length) return
+    ydoc.transact(() => {
+      for (const element of picked) {
+        commitElementUpdate(ydoc, yElements.current!, element.id, { x: element.x + delta.x, y: element.y + delta.y }, LOCAL_EDIT)
+      }
+    }, LOCAL_EDIT)
+  }, [elements, selectedIds, previewSnapshot, ydoc])
+
+  /**
+   * The in-memory clipboard. A `file://` deployment — the primary way this app
+   * is shipped — usually has no clipboard permission at all, so the internal
+   * copy is the source of truth and the system clipboard is what makes
+   * cross-tab paste work when it is available.
+   */
+  const internalClipboardRef = useRef<string | null>(null)
+
+  /** Ctrl+C. Returns how many elements were copied, so the caller knows whether to take over the shortcut. */
+  const copySelection = useCallback((): number => {
+    const picked = elements.filter(element => selectedIds.has(element.id))
+    if (!picked.length) return 0
+    const payload = serialiseSelection(picked)
+    internalClipboardRef.current = payload
+    void navigator.clipboard?.writeText(payload).catch(() => undefined)
+    return picked.length
+  }, [elements, selectedIds])
+
+  /** Ctrl+V: one transaction for the whole paste, labelled as a clipboard write. */
+  const pasteFromClipboard = useCallback(async () => {
+    if (previewSnapshot) return
+    let raw = internalClipboardRef.current
+    try {
+      const text = await navigator.clipboard?.readText()
+      // Another tab holds a newer payload than our in-memory copy.
+      if (text && parseClipboard(text)) raw = text
+    } catch {
+      // Denied or unavailable — the internal copy still works.
+    }
+    const parsed = parseClipboard(raw)
+    if (!parsed?.length) {
+      showToast('В буфере обмена нет объектов miroboard', 'info')
+      return
+    }
+    const created = preparePaste(parsed, {
+      makeId: () => genId(),
+      offset: { x: PASTE_OFFSET, y: PASTE_OFFSET },
+      createdBy: userProfile.id,
+    })
+    ydoc.transact(() => {
+      for (const element of created) yElements.current?.push([element])
+    }, LOCAL_CLIPBOARD)
+    setSelectedIds(selectMany(created.map(element => element.id)))
+    setAnchorId(created[created.length - 1]?.id ?? null)
+    showToast(`Вставлено объектов: ${created.length}`, 'success')
+  }, [previewSnapshot, ydoc, userProfile.id, showToast])
+
+  /** Ctrl+X: copy, then delete — the deletion stays a single undo step of its own. */
+  const cutSelection = useCallback(() => {
+    if (!copySelection()) return
+    deleteSelected()
+  }, [copySelection, deleteSelected])
+
   const handleContextMenuAction = useCallback((action: ContextMenuAction, id: string) => {
     // Right-clicking a member of a multi-selection applies to the selection,
     // which is what every canvas editor does and what users expect.
@@ -1575,6 +1644,24 @@ export default function App() {
         e.preventDefault()
         if (selectedIds.size) setSelectedIds(selectMany(duplicateSelection()))
       }
+      // Clipboard. Ctrl+C is only taken over when the canvas has a selection,
+      // so copying text anywhere else in the UI keeps working natively.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && !e.shiftKey) {
+        if (copySelection()) e.preventDefault()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'x') {
+        if (selectedIds.size) {
+          e.preventDefault()
+          cutSelection()
+        }
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        void pasteFromClipboard()
+        return
+      }
       // Ctrl+A selects the whole board; arrow keys nudge the selection.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
@@ -1587,10 +1674,7 @@ export default function App() {
         const delta = e.key === 'ArrowUp' ? { x: 0, y: -step }
           : e.key === 'ArrowDown' ? { x: 0, y: step }
             : e.key === 'ArrowLeft' ? { x: -step, y: 0 } : { x: step, y: 0 }
-        for (const id of selectedIds) {
-          const element = elements.find(candidate => candidate.id === id)
-          if (element) updateElement(id, { x: element.x + delta.x, y: element.y + delta.y })
-        }
+        moveSelection(delta)
         return
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
@@ -1619,7 +1703,7 @@ export default function App() {
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
-  }, [selectedIds, deleteSelected, editingText, handleUndo, handleRedo, duplicateSelection, elements, updateElement, selectElements, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
+  }, [selectedIds, deleteSelected, editingText, handleUndo, handleRedo, duplicateSelection, elements, moveSelection, copySelection, cutSelection, pasteFromClipboard, selectElements, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
   // ======================== RENDER ELEMENT ========================
   const isPreview = previewSnapshot !== null
   const liveElementIds = useMemo(() => new Set(elements.map(element => element.id)), [elements])

@@ -202,7 +202,7 @@ describe('App smoke', () => {
   // (tests/multi-select.spec.ts): Yjs' UndoManager relies on real timers, which
   // this jsdom harness cannot drive faithfully. The invariant that makes it one
   // undo step — a single Yjs transaction — is unit-tested in
-  // src/collab/selection.test.ts.
+  // src/collab/bulk-operations.test.ts.
 
 
   it('edits and persists the participant profile', async () => {
@@ -232,5 +232,79 @@ describe('App smoke', () => {
     const after = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY)!)
     expect(after.id).toBe(before.id)
     expect(after.color).toBe(before.color)
+  })
+
+  describe('clipboard', () => {
+    /** Ctrl+V awaits the (usually unavailable) system clipboard, so it needs an async act. */
+    async function keyAsync(k: string, init: KeyboardEventInit = {}) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }))
+      })
+    }
+
+    function ids(): string[] {
+      return [...container.querySelectorAll('g[data-id]')].map(node => (node as HTMLElement).dataset.id!)
+    }
+
+    function selectAll() {
+      key('v')
+      key('a', { ctrlKey: true })
+    }
+
+    it('copies the selection with Ctrl+C and pastes it back under new ids', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      const before = ids()
+      selectAll()
+
+      key('c', { ctrlKey: true })
+      await keyAsync('v', { ctrlKey: true })
+
+      const after = ids()
+      expect(after).toHaveLength(4)
+      expect(after.slice(0, 2)).toEqual(before) // the sources are untouched
+      expect(after.slice(2).every(id => !before.includes(id))).toBe(true)
+      expect(new Set(after.slice(2)).size).toBe(2) // and the copies are distinct
+      expect(byTestId('selection-count')!.textContent).toContain('2') // the paste is what ends up selected
+    })
+
+    it('offsets pasted copies so they do not land exactly on their source', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      selectAll()
+      const source = transforms()[0]
+
+      key('c', { ctrlKey: true })
+      await keyAsync('v', { ctrlKey: true })
+
+      expect(transforms()).toEqual([source, shift(source, 20, 20)])
+    })
+
+    it('cuts with Ctrl+X: the board empties but the clipboard keeps the content', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      selectAll()
+
+      key('x', { ctrlKey: true })
+      expect(ids()).toHaveLength(0)
+
+      await keyAsync('v', { ctrlKey: true })
+      expect(ids()).toHaveLength(2)
+    })
+
+    it('pasting with nothing of ours on the clipboard changes nothing and says so', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      const before = transforms()
+
+      await keyAsync('v', { ctrlKey: true })
+
+      expect(transforms()).toEqual(before)
+      expect(container.textContent).toContain('В буфере обмена нет объектов miroboard')
+    })
+
+    it('leaves native copying alone when nothing is selected', () => {
+      const event = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true })
+      act(() => { window.dispatchEvent(event) })
+      expect(event.defaultPrevented).toBe(false)
+    })
   })
 })
