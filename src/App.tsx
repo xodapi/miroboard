@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
+import { LOAD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE } from './collab/origins'
 import { useFileDrop } from './hooks/useFileDrop'
 import { DropTargetCue } from './components/DropTargetCue'
 import { MiniMap } from './components/MiniMap'
@@ -488,7 +489,12 @@ export default function App() {
     // UndoManager
     const undoManager = new Y.UndoManager(yarray, {
       captureTimeout: 500,
-      trackedOrigins: new Set([null, HISTORY_RESTORE_ORIGIN]),
+      // Only this user's own intent is undoable. Remote updates arrive with
+      // the provider instance as origin and stay out of the stack; loads and
+      // recovery replays are excluded by NON_EDIT_ORIGINS semantics.
+      // HISTORY_RESTORE_ORIGIN stays tracked so restore-as-append remains
+      // reversible, which is the documented behaviour of the timeline.
+      trackedOrigins: new Set<unknown>([...LOCAL_ORIGINS, HISTORY_RESTORE_ORIGIN]),
     })
     undoManagerRef.current = undoManager
     const updateUndoState = () => setUndoState({
@@ -561,7 +567,7 @@ export default function App() {
     const encoded = JSON.stringify(config)
     if (encoded === profileConfigJsonRef.current) return
     profileConfigJsonRef.current = encoded
-    ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn))
+    ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn), LOCAL_EDIT)
   }, [bpmnProfileActive, simulationProfile, ydoc])
   const activateBpmnProfile = useCallback(() => {
     if (profileConfigRef.current && !bpmnProfileActive) {
@@ -570,7 +576,7 @@ export default function App() {
       // defaults, so fixture arrival classes and role policies survive activation.
       const config = withBpmnSimulation({}, simulationProfile)
       profileConfigJsonRef.current = JSON.stringify(config)
-      ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn))
+      ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn), LOCAL_EDIT)
     }
     setBpmnProfileActive(true)
     setWorkspaceMode('bpmn')
@@ -664,7 +670,10 @@ export default function App() {
       profileConfigJsonRef.current = JSON.stringify(outcome.file.profileConfig); profileConfig.clear()
       Object.entries(outcome.file.profileConfig).forEach(([key, value]) => profileConfig.set(key, value))
       setRecoverySession(meta, createRecoverySession(outcome.session.name ?? outcome.file.meta.title, yElements.current?.toJSON() ?? loadedElements, profileConfig.toJSON()))
-    }, RECOVERY_ORIGIN)
+      // LOAD rather than RECOVERY_ORIGIN: opening a file is not a recovery.
+      // Both are non-edit origins, but the distinction is what authorship and
+      // remote sync will key off later.
+    }, LOAD)
     setFileSession(outcome.session); setRecoveryNotice(null)
     const snapshots = reconstructed.historyLost ? [] : outcome.file.history.snapshots
     historySnapshotsRef.current = snapshots
@@ -729,23 +738,23 @@ export default function App() {
       y: (sy - rect.top - transform.y) / transform.scale
     }
   }, [transform])
-  const addElement = useCallback((el: BoardElement) => {
+  const addElement = useCallback((el: BoardElement, origin: unknown = LOCAL_EDIT) => {
     if (previewSnapshot) return
     if (!yElements.current) return
-    ydoc.transact(() => { yElements.current!.push([el]) })
+    ydoc.transact(() => { yElements.current!.push([el]) }, origin)
     if ('vibrate' in navigator) navigator.vibrate(10)
   }, [previewSnapshot, ydoc])
 
-  const updateElement = useCallback((id: string, updates: Partial<BoardElement>) => {
+  const updateElement = useCallback((id: string, updates: Partial<BoardElement>, origin: unknown = LOCAL_EDIT) => {
     if (previewSnapshot) return
     if (!yElements.current) return
-    commitElementUpdate(ydoc, yElements.current, id, updates)
+    commitElementUpdate(ydoc, yElements.current, id, updates, origin)
   }, [previewSnapshot, ydoc])
   const deleteElement = useCallback((id: string) => {
     if (previewSnapshot) return
     if (!yElements.current) return
     const idx = yElements.current.toArray().findIndex(e => e.id === id)
-    if (idx >= 0) ydoc.transact(() => { yElements.current!.delete(idx, 1) })
+    if (idx >= 0) ydoc.transact(() => { yElements.current!.delete(idx, 1) }, LOCAL_EDIT)
     setSelectedId(null)
     setContextMenu(null)
   }, [previewSnapshot, ydoc])
@@ -761,7 +770,7 @@ export default function App() {
       ydoc.transact(() => {
         yElements.current!.delete(idx, 1)
         yElements.current!.push([{ ...el, zIndex }])
-      })
+      }, LOCAL_EDIT)
     }
   }, [previewSnapshot, ydoc])
   const sendToBack = useCallback((id: string) => {
@@ -859,7 +868,7 @@ export default function App() {
         t.push({ id: genId(), type: 'arrow', x: 430, y: 208, w: 80, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id, bpmnFlow: { sourceId: taskId, targetId: endId } })
       }
       t.forEach(el => yElements.current!.push([el]))
-    })
+    }, LOCAL_TEMPLATE)
     setShowTemplates(false)
     setTransform({ x: 0, y: 0, scale: 1 })
   }, [ydoc, user.id])
@@ -1016,7 +1025,7 @@ export default function App() {
       ydoc.transact(() => {
         if (yElements.current!.length) yElements.current!.delete(0, yElements.current!.length)
         yElements.current!.push(replacement)
-      })
+      }, LOCAL_TEMPLATE)
       setSelectedId(null)
       setTransform({ x: 0, y: 0, scale: 1 })
     } catch (error) {
@@ -1050,7 +1059,7 @@ export default function App() {
         id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: user.id,
         bpmnFlow: { sourceId: flow.sourceId, targetId: flow.targetId, flowType: flow.flowType || 'sequence', condition: flow.condition, probability: flow.probability, isDefault: flow.isDefault },
       }])
-    })
+    }, LOCAL_TEMPLATE)
     // Load arrival classes if provided
     if (example.model.arrivalClasses) {
       setArrivalClasses(
@@ -1358,7 +1367,9 @@ export default function App() {
       })
     }
     const frame = transientFrameRef.current
-    if (frame) updateElement(frame.id, frame.updates)
+    // One commit per gesture, labelled as such: the drag itself stays local
+    // (transientFrame) so a 3-second drag is a single undo step, not 180.
+    if (frame) updateElement(frame.id, frame.updates, LOCAL_GESTURE)
     transientFrameRef.current = null
     setTransientFrame(null)
     setIsDrawing(false)
