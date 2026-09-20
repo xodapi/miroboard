@@ -480,14 +480,18 @@ BPMN XML, `.mboard` save/load, история с таймлайном, симу�
 
 Без этого этапа любая фича совместной работы стоит вдвое дороже и ломает тесты.
 
-| # | Задача | Оценка | Заметки |
+| # | Задача | Оценка | Статус |
 | --- | --- | --- | --- |
-| 0.1 | Локальный профиль: имя + цвет вместо анонимного UUID | S | расширить `src/App.tsx:442-448`, хранить в `localStorage`, показывать в UI |
-| 0.2 | Множественное выделение: `selectedIds: Set<string>`, marquee, Shift+клик | M | предусловие для групп, presence, блокировок |
-| 0.3 | Буфер обмена: Ctrl+C/V/X, JSON в `clipboard`, дублировать несколько | S | |
-| 0.4 | Явные origins транзакций (`LOCAL_EDIT`, `LOCAL_GESTURE`, `RECOVERY`, …) | M | предусловие для undo и атрибуции; сейчас origin не проставляется |
-| 0.5 | Декомпозиция `App.tsx`: canvas-render, tool-state-machine, selection, viewport, panels | XL | цель из `.cursorrules` — `<500` строк; делать strangler-fig, батчами <150 строк |
-| 0.6 | Командный слой: все мутации через `commands/*` с явной транзакцией | M | даёт тестируемость и единую точку для origin/undo |
+| 0.1 | Локальный профиль: имя + цвет вместо анонимного UUID | S | ✅ сделано: `src/collab/user-profile.ts`, кнопка-аватар и панель в топ-баре, миграция с `localStorage['miro-author-id']` |
+| 0.2 | Множественное выделение: `selectedIds: Set<string>`, marquee, Shift+клик | M | ✅ сделано: `src/collab/selection.ts`, `src/collab/marquee.ts`; marquee, Shift+клик, Shift+marquee, групповой drag, Delete/Ctrl+D/Ctrl+A/стрелки, счётчик выделения |
+| 0.3 | Буфер обмена: Ctrl+C/V/X, JSON в `clipboard`, дублировать несколько | S | ⬜ Ctrl+D уже дублирует всё выделение; полноценный буфер — следующий шаг |
+| 0.4 | Явные origins транзакций (`LOCAL_EDIT`, `LOCAL_GESTURE`, `RECOVERY`, …) | M | ✅ сделано: `src/collab/origins.ts`, UndoManager переведён на allow-list локальных origins |
+| 0.5 | Декомпозиция `App.tsx`: canvas-render, tool-state-machine, selection, viewport, panels | XL | 🟡 начато: логика выделения и геометрия marquee вынесены в `src/collab/`; `App.tsx` ~2600 строк |
+| 0.6 | Командный слой: все мутации через `commands/*` с явной транзакцией | M | ⬜ origins уже проставлены во всех точках записи — командный слой можно вводить механически |
+
+Покрытие Этапа 0 (на момент выполнения): 197 unit-тестов, включая jsdom-smoke
+всего приложения (`src/app-smoke.test.tsx`) и browser-level набор
+`tests/multi-select.spec.ts` (9 сценариев, запускается в CI).
 
 **Критерий готовности:** 148 unit + 88 e2e тестов зелёные; `App.tsx < 800` строк;
 выделение множественное; копирование/вставка работают; в консоли нет дубликатов

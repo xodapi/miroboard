@@ -3,6 +3,12 @@ import * as Y from 'yjs'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
 import { LOAD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE } from './collab/origins'
+import { PARTICIPANT_COLORS, initialsOf, readProfile, withColor, withName, writeProfile, type UserProfile } from './collab/user-profile'
+import {
+  clearSelection, idsOf, isSelected as isIdSelected, primaryOf, removeFromSelection, retainExisting,
+  selectMany, selectOnly, toggleInSelection, unionSelection, type Selection,
+} from './collab/selection'
+import { normaliseRect, selectInRect, type Bounds } from './collab/marquee'
 import { useFileDrop } from './hooks/useFileDrop'
 import { DropTargetCue } from './components/DropTargetCue'
 import { MiniMap } from './components/MiniMap'
@@ -186,7 +192,11 @@ export default function App() {
   const [color, setColor] = useState('#000000')
   const [strokeWidth, setStrokeWidth] = useState(3)
   const [elements, setElements] = useState<BoardElement[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Selection>(clearSelection)
+  /** The element property panels and resize handles act on: single selection only. */
+  const selectedElementId = primaryOf(selectedIds)
+  /** Shift-marquee anchor: the selection a Shift drag extends or shrinks. */
+  const [anchorId, setAnchorId] = useState<string | null>(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [currentPath, setCurrentPath] = useState<Point[]>([])
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
@@ -249,9 +259,10 @@ export default function App() {
       setFlowPreviewPoint(null)
     }
   }, [])
-  // Drag state
+  // Drag state. One gesture moves the whole selection, so it carries the start
+  // frame of every dragged element instead of a single one.
   const [dragInfo, setDragInfo] = useState<{
-    id: string; startX: number; startY: number; elStartX: number; elStartY: number
+    startX: number; startY: number; items: { id: string; x: number; y: number }[]
   } | null>(null)
   // Resize state
   const [resizeInfo, setResizeInfo] = useState<{
@@ -260,8 +271,11 @@ export default function App() {
   } | null>(null)
   // Gesture frames stay local until pointer-up, preventing one Yjs item rewrite
   // (and one gc:false tombstone) per pointer event.
-  const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> } | null>(null)
-  const transientFrameRef = useRef<{ id: string; updates: Partial<BoardElement> } | null>(null)
+  const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> }[] | null>(null)
+  const transientFrameRef = useRef<{ id: string; updates: Partial<BoardElement> }[] | null>(null)
+  // Marquee selection in world coordinates; Shift extends the current selection.
+  const [marquee, setMarquee] = useState<Bounds | null>(null)
+  const marqueeRef = useRef<{ from: Point; shift: boolean } | null>(null)
   const longPressRef = useRef<{ timer: number | null; x: number; y: number; startedAt: number } | null>(null)
   const bpmnImportRef = useRef<HTMLInputElement>(null)
   const bpmnRunTimersRef = useRef<number[]>([])
@@ -287,7 +301,7 @@ export default function App() {
   const exitPreview = useCallback(() => {
     setPreviewSnapshot(null)
     setPreviewElements(null)
-    setSelectedId(null)
+    setSelectedIds(clearSelection())
     setEditingText(null)
     transientFrameRef.current = null
     setTransientFrame(null)
@@ -301,7 +315,7 @@ export default function App() {
     setPreviewSnapshot(snapshot)
     setPreviewElements(historical)
     setShowSimulationPanel(false)
-    setSelectedId(null)
+    setSelectedIds(clearSelection())
     setEditingText(null)
     setShowMore(false)
     setShowColorPicker(false)
@@ -429,23 +443,29 @@ export default function App() {
     return [...roles.entries()].sort(([left], [right]) => left.localeCompare(right))
   }, [elements])
   const selectedBpmnTask = useMemo(
-    () => elements.find((element) => element.id === selectedId && element.bpmnNodeType === 'task') ?? null,
-    [elements, selectedId],
+    () => elements.find((element) => element.id === selectedElementId && element.bpmnNodeType === 'task') ?? null,
+    [elements, selectedElementId],
   )
   const selectedBpmnFlow = useMemo(
-    () => elements.find((element) => element.id === selectedId && element.bpmnFlow) ?? null,
-    [elements, selectedId],
+    () => elements.find((element) => element.id === selectedElementId && element.bpmnFlow) ?? null,
+    [elements, selectedElementId],
   )
   const selectedBpmnFlowIsXor = useMemo(
     () => selectedBpmnFlow?.bpmnFlow && elements.find((element) => element.id === selectedBpmnFlow.bpmnFlow!.sourceId)?.bpmnNodeType === 'xorGateway',
     [elements, selectedBpmnFlow],
   )
-  const user = useMemo(() => {
-    const saved = localStorage.getItem('miro-author-id')
-    if (saved) return { id: saved }
-    const id = genId()
-    try { localStorage.setItem('miro-author-id', id) } catch { /* author id is optional metadata */ }
-    return { id }
+  // Local participant profile. Device-scoped and fail-soft: it carries the
+  // author id that `createdBy` on every node already stores, plus the name and
+  // colour a collaboration session will publish through awareness.
+  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+    const profile = readProfile(localStorage, genId)
+    writeProfile(localStorage, profile)
+    return profile
+  })
+  const [showProfile, setShowProfile] = useState(false)
+  const updateUserProfile = useCallback((next: UserProfile) => {
+    setUserProfile(next)
+    writeProfile(localStorage, next)
   }, [])
   useEffect(() => {
     const yarray = ydoc.getArray<BoardElement>('elements')
@@ -528,7 +548,15 @@ export default function App() {
     }
     void attachPersistence()
     // Sync
-    const updateElements = () => setElements(yarray.toArray())
+    const updateElements = () => {
+      const next = yarray.toArray()
+      setElements(next)
+      // Elements can vanish without this component asking: undo/redo, a file
+      // load, a history restore and (later) a remote peer's delete. Drop stale
+      // ids so panels and gestures never point at a missing element.
+      const ids = new Set(next.map(element => element.id))
+      setSelectedIds(current => retainExisting(current, ids))
+    }
     yarray.observe(updateElements)
     updateElements()
     return () => {
@@ -650,7 +678,7 @@ export default function App() {
     setFileSession({ handle: null, name: null, isUntitled: true }); setRecoveryNotice(null)
     historySnapshotsRef.current = []
     setHistorySnapshots([])
-    setSelectedId(null)
+    setSelectedIds(clearSelection())
     setWorkspaceMode('board')
     setBpmnProfileActive(false)
     dirtyTrackerRef.current?.markSaved()
@@ -678,7 +706,7 @@ export default function App() {
     const snapshots = reconstructed.historyLost ? [] : outcome.file.history.snapshots
     historySnapshotsRef.current = snapshots
     setHistorySnapshots(snapshots)
-    setSelectedId(null)
+    setSelectedIds(clearSelection())
     dirtyTrackerRef.current?.markSaved()
     showToast(
       outcome.migratedFrom === undefined
@@ -750,14 +778,42 @@ export default function App() {
     if (!yElements.current) return
     commitElementUpdate(ydoc, yElements.current, id, updates, origin)
   }, [previewSnapshot, ydoc])
+  /** Selection helpers. Defined next to the mutators they drive. */
+  const selectElement = useCallback((id: string) => setSelectedIds(selectOnly(id)), [])
+  const clearSelectionState = useCallback(() => setSelectedIds(clearSelection()), [])
+  const selectElements = useCallback((ids: string[]) => setSelectedIds(ids.length ? selectMany(ids) : clearSelection()), [])
+  const removeIdFromSelection = useCallback((id: string) => {
+    setSelectedIds(current => removeFromSelection(current, id))
+    setAnchorId(current => (current === id ? null : current))
+  }, [])
   const deleteElement = useCallback((id: string) => {
     if (previewSnapshot) return
     if (!yElements.current) return
-    const idx = yElements.current.toArray().findIndex(e => e.id === id)
-    if (idx >= 0) ydoc.transact(() => { yElements.current!.delete(idx, 1) }, LOCAL_EDIT)
-    setSelectedId(null)
+    const array = yElements.current
+    const idx = array.toArray().findIndex(e => e.id === id)
+    if (idx < 0) return
+    ydoc.transact(() => { array.delete(idx, 1) }, LOCAL_EDIT)
+    removeIdFromSelection(id)
     setContextMenu(null)
-  }, [previewSnapshot, ydoc])
+  }, [previewSnapshot, ydoc, removeIdFromSelection])
+  /** Deletes the whole selection in one transaction: one undo step, one checkpoint. */
+  const deleteSelected = useCallback(() => {
+    if (previewSnapshot) return
+    if (!yElements.current) return
+    const array = yElements.current
+    const ids = new Set(selectedIds)
+    if (!ids.size) return
+    ydoc.transact(() => {
+      for (let index = array.length - 1; index >= 0; index -= 1) {
+        if (ids.has(array.get(index).id)) array.delete(index, 1)
+      }
+    }, LOCAL_EDIT)
+    clearSelectionState()
+    setContextMenu(null)
+  }, [previewSnapshot, ydoc, selectedIds, clearSelectionState])
+  const updateSelected = useCallback((updates: Partial<BoardElement>, origin: unknown = LOCAL_EDIT) => {
+    for (const id of selectedIds) updateElement(id, updates, origin)
+  }, [selectedIds, updateElement])
 
   const bringToFront = useCallback((id: string) => {
     if (previewSnapshot) return
@@ -776,15 +832,31 @@ export default function App() {
   const sendToBack = useCallback((id: string) => {
     updateElement(id, { zIndex: 0 })
   }, [updateElement])
-  const duplicateElement = useCallback((id: string) => {
-    const el = elements.find(e => e.id === id)
-    if (el) {
-      const newEl = { ...el, id: genId(), x: el.x + 20, y: el.y + 20 }
-      addElement(newEl)
-    }
-  }, [elements, addElement])
+  /**
+   * Duplicates the whole selection. The offset grows with the copy index so
+   * duplicating three overlapping objects does not stack them into one.
+   * Returns the new ids so callers can select the copies.
+   */
+  const duplicateSelection = useCallback((origin?: unknown): string[] => {
+    if (previewSnapshot) return []
+    const picked = elements.filter(element => selectedIds.has(element.id))
+    if (!picked.length) return []
+    const created: string[] = []
+    ydoc.transact(() => {
+      picked.forEach((element, index) => {
+        const offset = 20 * (index + 1)
+        const id = genId()
+        created.push(id)
+        yElements.current?.push([{ ...element, id, x: element.x + offset, y: element.y + offset }])
+      })
+    }, origin ?? LOCAL_EDIT)
+    return created
+  }, [elements, selectedIds, previewSnapshot, ydoc])
 
   const handleContextMenuAction = useCallback((action: ContextMenuAction, id: string) => {
+    // Right-clicking a member of a multi-selection applies to the selection,
+    // which is what every canvas editor does and what users expect.
+    const targets = selectedIds.has(id) ? idsOf(selectedIds) : [id]
     if (action === 'edit') {
       const element = elements.find(candidate => candidate.id === id)
       if (element) {
@@ -792,16 +864,19 @@ export default function App() {
         setEditValue(element.text || '')
       }
     } else if (action === 'duplicate') {
-      duplicateElement(id)
+      if (targets.length > 1) setSelectedIds(selectMany(duplicateSelection()))
+      else duplicateSelection()
     } else if (action === 'front') {
-      bringToFront(id)
+      targets.forEach(bringToFront)
     } else if (action === 'back') {
-      sendToBack(id)
+      targets.forEach(sendToBack)
+    } else if (targets.length > 1) {
+      deleteSelected()
     } else {
       deleteElement(id)
     }
     setContextMenu(null)
-  }, [elements, duplicateElement, bringToFront, sendToBack, deleteElement])
+  }, [elements, selectedIds, duplicateSelection, bringToFront, sendToBack, deleteElement, deleteSelected])
 
   const { canUndo, canRedo } = undoState
 
@@ -822,7 +897,7 @@ export default function App() {
       while (yElements.current!.length > 0) yElements.current!.delete(0, 1)
       const t: BoardElement[] = []
       const s = (text: string, x: number, y: number, w = 160, h = 60, fill = '#FFD93D') =>
-        ({ id: genId(), type: 'sticky' as const, x, y, w, h, text, color: fill, fill, createdBy: user.id })
+        ({ id: genId(), type: 'sticky' as const, x, y, w, h, text, color: fill, fill, createdBy: userProfile.id })
 
       if (name === 'kanban') {
         t.push(s('📋 Сделать', 40, 30, 200, 55, '#FFD93D'))
@@ -851,27 +926,27 @@ export default function App() {
         t.push(s('', 500, 90, 220, 100, '#FFFFFF'))
       } else if (name === 'flowchart') {
         t.push(s('Старт', 250, 20, 120, 50, '#6BCB77'))
-        t.push({ id: genId(), type: 'arrow', x: 310, y: 70, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id })
+        t.push({ id: genId(), type: 'arrow', x: 310, y: 70, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id })
         t.push(s('Шаг 1', 230, 140, 160, 60, '#4D96FF'))
-        t.push({ id: genId(), type: 'arrow', x: 310, y: 200, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id })
+        t.push({ id: genId(), type: 'arrow', x: 310, y: 200, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id })
         t.push(s('Шаг 2', 230, 270, 160, 60, '#FFD93D'))
-        t.push({ id: genId(), type: 'arrow', x: 310, y: 330, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id })
+        t.push({ id: genId(), type: 'arrow', x: 310, y: 330, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id })
         t.push(s('Результат', 230, 400, 160, 60, '#9D65C9'))
       } else if (name === 'bpmn') {
         const startId = genId()
         const taskId = genId()
         const endId = genId()
-        t.push({ id: startId, type: 'sticky', x: 80, y: 180, w: 86, h: 56, text: 'Старт', color: '#6BCB77', fill: '#6BCB77', createdBy: user.id, bpmnNodeType: 'startEvent' })
-        t.push({ id: taskId, type: 'sticky', x: 250, y: 170, w: 180, h: 76, text: 'Выполнить задачу', color: '#4D96FF', fill: '#4D96FF', createdBy: user.id, bpmnNodeType: 'task' })
-        t.push({ id: endId, type: 'sticky', x: 510, y: 180, w: 86, h: 56, text: 'Конец', color: '#FF5D5D', fill: '#FF5D5D', createdBy: user.id, bpmnNodeType: 'endEvent' })
-        t.push({ id: genId(), type: 'arrow', x: 166, y: 208, w: 84, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id, bpmnFlow: { sourceId: startId, targetId: taskId } })
-        t.push({ id: genId(), type: 'arrow', x: 430, y: 208, w: 80, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id, bpmnFlow: { sourceId: taskId, targetId: endId } })
+        t.push({ id: startId, type: 'sticky', x: 80, y: 180, w: 86, h: 56, text: 'Старт', color: '#6BCB77', fill: '#6BCB77', createdBy: userProfile.id, bpmnNodeType: 'startEvent' })
+        t.push({ id: taskId, type: 'sticky', x: 250, y: 170, w: 180, h: 76, text: 'Выполнить задачу', color: '#4D96FF', fill: '#4D96FF', createdBy: userProfile.id, bpmnNodeType: 'task' })
+        t.push({ id: endId, type: 'sticky', x: 510, y: 180, w: 86, h: 56, text: 'Конец', color: '#FF5D5D', fill: '#FF5D5D', createdBy: userProfile.id, bpmnNodeType: 'endEvent' })
+        t.push({ id: genId(), type: 'arrow', x: 166, y: 208, w: 84, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id, bpmnFlow: { sourceId: startId, targetId: taskId } })
+        t.push({ id: genId(), type: 'arrow', x: 430, y: 208, w: 80, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id, bpmnFlow: { sourceId: taskId, targetId: endId } })
       }
       t.forEach(el => yElements.current!.push([el]))
     }, LOCAL_TEMPLATE)
     setShowTemplates(false)
     setTransform({ x: 0, y: 0, scale: 1 })
-  }, [ydoc, user.id])
+  }, [ydoc, userProfile.id])
 
   const exportToPNG = useCallback(() => {
     const svg = svgRef.current
@@ -1001,7 +1076,7 @@ export default function App() {
         return [node.id, {
           id: node.id, type: 'sticky' as const, x: node.x ?? 100 + column * 260, y: node.y ?? 130 + row * 180,
           w: node.width ?? width, h: node.height ?? height, text: node.name || (type === 'task' ? 'Задача' : ''),
-          color: colorForType(type), fill: colorForType(type), createdBy: user.id, bpmnNodeType: type,
+          color: colorForType(type), fill: colorForType(type), createdBy: userProfile.id, bpmnNodeType: type,
           bpmnDurationMs: type === 'task' ? 1000 : undefined,
         }]
       }))
@@ -1011,7 +1086,7 @@ export default function App() {
           if (!nodeById.has(flow.sourceId) || !nodeById.has(flow.targetId)) continue
           replacement.push({
             id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2,
-            fill: 'transparent', createdBy: user.id,
+            fill: 'transparent', createdBy: userProfile.id,
             bpmnFlow: {
               sourceId: flow.sourceId,
               targetId: flow.targetId,
@@ -1026,14 +1101,14 @@ export default function App() {
         if (yElements.current!.length) yElements.current!.delete(0, yElements.current!.length)
         yElements.current!.push(replacement)
       }, LOCAL_TEMPLATE)
-      setSelectedId(null)
+      setSelectedIds(clearSelection())
       setTransform({ x: 0, y: 0, scale: 1 })
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Не удалось импортировать BPMN-файл.', 'error')
     } finally {
       event.target.value = ''
     }
-  }, [user.id, ydoc, showToast])
+  }, [userProfile.id, ydoc, showToast])
 
   const loadEducationalExample = useCallback((example: EducationalExample) => {
     if (!yElements.current) return
@@ -1049,14 +1124,14 @@ export default function App() {
         const color = colorForType(type)
         yElements.current!.push([{
           id: node.id, type: 'sticky', x: node.x ?? 100, y: node.y ?? 100, w: node.width ?? (type === 'task' ? 176 : 78), h: node.height ?? (type === 'task' ? 76 : 78),
-          text: node.name || (type === 'task' ? 'Задача' : ''), color, fill: color, createdBy: user.id, bpmnNodeType: type,
+          text: node.name || (type === 'task' ? 'Задача' : ''), color, fill: color, createdBy: userProfile.id, bpmnNodeType: type,
           bpmnDurationMs: node.durationMs, bpmnDurationDistribution: node.durationDistribution, bpmnDurationMinMs: node.durationMinMs, bpmnDurationModeMs: node.durationModeMs, bpmnDurationMaxMs: node.durationMaxMs,
           bpmnResourceRole: node.resourceRole, bpmnCostPerHour: node.costPerHour, bpmnResourceCapacity: node.resourceCapacity,
           bpmnPriority: node.priority,
         }])
       }
       for (const flow of example.model.flows) yElements.current!.push([{
-        id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: user.id,
+        id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: userProfile.id,
         bpmnFlow: { sourceId: flow.sourceId, targetId: flow.targetId, flowType: flow.flowType || 'sequence', condition: flow.condition, probability: flow.probability, isDefault: flow.isDefault },
       }])
     }, LOCAL_TEMPLATE)
@@ -1085,10 +1160,10 @@ export default function App() {
     } else {
       setRolePolicies({})
     }
-    setSelectedId(null)
+    setSelectedIds(clearSelection())
     setTransform({ x: 0, y: 0, scale: 1 })
     showToast(`Загружен модуль: ${example.title}. Откройте Симуляцию для проверки.`, 'success')
-  }, [user.id, ydoc, showToast])
+  }, [userProfile.id, ydoc, showToast])
 
   // ======================== POINTER HANDLERS ========================
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -1098,6 +1173,7 @@ export default function App() {
     setContextMenu(null)
     setShowTemplates(false)
     setShowMore(false)
+    setShowProfile(false)
 
     const point = screenToWorld(e.clientX, e.clientY)
     if (previewSnapshot) {
@@ -1130,7 +1206,7 @@ export default function App() {
     if (tool === 'emoji') {
       addElement({
         id: genId(), type: 'emoji', x: point.x - 24, y: point.y - 24,
-        w: 48, h: 48, emoji: selectedEmoji, color: 'transparent', createdBy: user.id
+        w: 48, h: 48, emoji: selectedEmoji, color: 'transparent', createdBy: userProfile.id
       })
       return
     }
@@ -1144,11 +1220,11 @@ export default function App() {
     if (tool === 'select') {
       // Check resize handle
       const resizeHandle = target.closest('[data-resize]') as HTMLElement
-      if (resizeHandle && selectedId) {
-        const el = elements.find(e => e.id === selectedId)
+      if (resizeHandle && selectedElementId) {
+        const el = elements.find(candidate => candidate.id === selectedElementId)
         if (el) {
           setResizeInfo({
-            id: selectedId, corner: resizeHandle.dataset.resize!,
+            id: selectedElementId, corner: resizeHandle.dataset.resize!,
             startX: point.x, startY: point.y,
             elX: el.x, elY: el.y, elW: el.w || 0, elH: el.h || 0
           })
@@ -1159,23 +1235,43 @@ export default function App() {
       const el = target.closest('[data-id]') as HTMLElement
       if (el) {
         const elId = el.dataset.id!
-        const boardEl = elements.find(e2 => e2.id === elId)
-        setSelectedId(elId)
-        if (boardEl) {
+        if (e.shiftKey) {
+          // Shift-click toggles membership and never starts a drag: the user is
+          // building a set, not moving it.
+          setSelectedIds(current => toggleInSelection(current, elId))
+          setAnchorId(elId)
+          return
+        }
+        // Clicking inside an existing multi-selection keeps it, so the whole
+        // group can be dragged. Clicking outside replaces it.
+        if (!selectedIds.has(elId)) {
+          setSelectedIds(selectOnly(elId))
+          setAnchorId(elId)
+        }
+        const dragged = (selectedIds.has(elId) ? idsOf(selectedIds) : [elId])
+          .map(id => elements.find(candidate => candidate.id === id))
+          .filter((candidate): candidate is BoardElement => Boolean(candidate))
+        if (dragged.length) {
           setDragInfo({
-            id: elId, startX: point.x, startY: point.y,
-            elStartX: boardEl.x, elStartY: boardEl.y
+            startX: point.x, startY: point.y,
+            items: dragged.map(item => ({ id: item.id, x: item.x, y: item.y })),
           })
         }
         const longPress = { timer: null as number | null, x: e.clientX, y: e.clientY, startedAt: performance.now() }
         longPress.timer = window.setTimeout(() => {
           if (longPressRef.current === longPress) longPressRef.current = null
+          // A long press outside the current selection retargets it, so the
+          // context menu never acts on a set the user cannot see.
+          if (!selectedIds.has(elId)) selectElement(elId)
           setContextMenu({ x: point.x, y: point.y, id: elId })
           if ('vibrate' in navigator) navigator.vibrate(30)
         }, 500)
         longPressRef.current = longPress
       } else {
-        setSelectedId(null)
+        // Empty canvas: start a marquee. Shift extends the anchored selection.
+        marqueeRef.current = { from: point, shift: e.shiftKey }
+        setAnchorId(current => (e.shiftKey ? current : null))
+        setMarquee(normaliseRect(point, point))
       }
       return
     }
@@ -1191,7 +1287,7 @@ export default function App() {
       if (!targetNode) return
       if (!bpmnFlowSourceId) {
         setBpmnFlowSourceId(targetNode.id)
-        setSelectedId(targetNode.id)
+        selectElement(targetNode.id)
         setFlowPreviewPoint({ x: targetNode.x + (targetNode.w || 0) / 2, y: targetNode.y + (targetNode.h || 0) / 2 })
         showToast('Источник выбран. Теперь выберите целевой BPMN-узел.', 'info')
         return
@@ -1217,12 +1313,12 @@ export default function App() {
         color: '#334155',
         stroke: 2,
         fill: 'transparent',
-        createdBy: user.id,
+        createdBy: userProfile.id,
         bpmnFlow: { sourceId: sourceNode.id, targetId: targetNode.id, flowType: 'sequence' },
       })
       setBpmnFlowSourceId(null)
       setFlowPreviewPoint(null)
-      setSelectedId(flowId)
+      setSelectedIds(selectOnly(flowId))
       chooseTool('select')
       showToast('Sequence flow создан.', 'success')
       return
@@ -1247,12 +1343,12 @@ export default function App() {
         text: bpmnNode.text,
         color: bpmnNode.color,
         fill: bpmnNode.color,
-        createdBy: user.id,
+        createdBy: userProfile.id,
         bpmnNodeType: bpmnNode.type,
         bpmnDurationMs: bpmnNode.durationMs,
       }
       addElement(newEl)
-      setSelectedId(id)
+      setSelectedIds(selectOnly(id))
       chooseTool('select')
       return
     }
@@ -1264,10 +1360,10 @@ export default function App() {
         text: tool === 'sticky' ? 'Заметка' : 'Текст',
         color: tool === 'sticky' ? STICKY_COLORS[0] : '#000000',
         fill: tool === 'sticky' ? STICKY_COLORS[0] : 'transparent',
-        createdBy: user.id
+        createdBy: userProfile.id
       }
       addElement(newEl)
-      setSelectedId(id)
+      setSelectedIds(selectOnly(id))
       setEditingText(id)
       setEditValue(newEl.text || '')
       chooseTool('select')
@@ -1277,9 +1373,9 @@ export default function App() {
       const id = genId()
       addElement({
         id, type: tool, x: point.x, y: point.y, w: 0, h: 0,
-        color, stroke: strokeWidth, fill: 'transparent', createdBy: user.id
+        color, stroke: strokeWidth, fill: 'transparent', createdBy: userProfile.id
       })
-      setSelectedId(id)
+      setSelectedIds(selectOnly(id))
       setIsDrawing(true)
       return
     }
@@ -1287,7 +1383,7 @@ export default function App() {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, showBpmnPalette, previewSnapshot])
+  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, userProfile.id, selectedIds, selectedElementId, selectElement, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, showBpmnPalette, previewSnapshot])
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
     const isLaser = tool === 'laser'
@@ -1304,6 +1400,11 @@ export default function App() {
       setTransform(t => ({ ...t, x: e.clientX - panStart.x, y: e.clientY - panStart.y }))
       return
     }
+    // Marquee
+    if (marqueeRef.current) {
+      setMarquee(normaliseRect(marqueeRef.current.from, point))
+      return
+    }
     // Resize
     if (resizeInfo) {
       const dx = point.x - resizeInfo.startX
@@ -1316,17 +1417,19 @@ export default function App() {
       else if (c === 'ne') { newY = resizeInfo.elY + dy; newW = Math.max(30, resizeInfo.elW + dx); newH = Math.max(30, resizeInfo.elH - dy) }
       else if (c === 'nw') { newX = resizeInfo.elX + dx; newY = resizeInfo.elY + dy; newW = Math.max(30, resizeInfo.elW - dx); newH = Math.max(30, resizeInfo.elH - dy) }
       if (snapGrid) { newX = snapVal(newX); newY = snapVal(newY); newW = snapVal(newW); newH = snapVal(newH) }
-      const frame = { id: resizeInfo.id, updates: { x: newX, y: newY, w: newW, h: newH } }
+      const frame = [{ id: resizeInfo.id, updates: { x: newX, y: newY, w: newW, h: newH } }]
       transientFrameRef.current = frame
       setTransientFrame(frame)
       return
     }
-    // Drag
+    // Drag: one delta applied to every dragged element, so a multi-selection
+    // moves as a group and stays internally consistent.
     if (dragInfo) {
-      let newX = dragInfo.elStartX + (point.x - dragInfo.startX)
-      let newY = dragInfo.elStartY + (point.y - dragInfo.startY)
-      if (snapGrid) { newX = snapVal(newX); newY = snapVal(newY) }
-      const frame = { id: dragInfo.id, updates: { x: newX, y: newY } }
+      const rawX = point.x - dragInfo.startX
+      const rawY = point.y - dragInfo.startY
+      const deltaX = snapGrid ? snapVal(dragInfo.items[0].x + rawX) - dragInfo.items[0].x : rawX
+      const deltaY = snapGrid ? snapVal(dragInfo.items[0].y + rawY) - dragInfo.items[0].y : rawY
+      const frame = dragInfo.items.map(item => ({ id: item.id, updates: { x: item.x + deltaX, y: item.y + deltaY } }))
       transientFrameRef.current = frame
       setTransientFrame(frame)
       return
@@ -1336,15 +1439,15 @@ export default function App() {
       setCurrentPath(prev => [...prev, point])
       return
     }
-    if (selectedId && (tool === 'rect' || tool === 'circle' || tool === 'arrow' || tool === 'line')) {
-      const el = elements.find(e => e.id === selectedId)
+    if (selectedElementId && (tool === 'rect' || tool === 'circle' || tool === 'arrow' || tool === 'line')) {
+      const el = elements.find(e => e.id === selectedElementId)
       if (el) {
         let w = point.x - el.x, h = point.y - el.y
         if (snapGrid) { w = snapVal(w); h = snapVal(h) }
-        updateElement(selectedId, { w, h })
+        updateElement(selectedElementId, { w, h })
       }
     }
-  }, [isPanning, panStart, isDrawing, tool, selectedId, elements, screenToWorld, updateElement, dragInfo, resizeInfo, snapGrid, bpmnFlowSourceId])
+  }, [isPanning, panStart, isDrawing, tool, selectedElementId, elements, screenToWorld, updateElement, dragInfo, resizeInfo, snapGrid, bpmnFlowSourceId])
   const handlePointerUp = useCallback(() => {
     // Cancel long press
     if (longPressRef.current) {
@@ -1363,15 +1466,29 @@ export default function App() {
         points: simplified.map(p => ({ x: p.x - minX, y: p.y - minY })),
         color: tool === 'marker' ? color + '80' : color,
         stroke: tool === 'marker' ? strokeWidth * 3 : strokeWidth,
-        createdBy: user.id
+        createdBy: userProfile.id
       })
     }
     const frame = transientFrameRef.current
     // One commit per gesture, labelled as such: the drag itself stays local
     // (transientFrame) so a 3-second drag is a single undo step, not 180.
-    if (frame) updateElement(frame.id, frame.updates, LOCAL_GESTURE)
+    if (frame?.length) {
+      const frames = frame
+      ydoc.transact(() => {
+        for (const item of frames) commitElementUpdate(ydoc, yElements.current!, item.id, item.updates)
+      }, LOCAL_GESTURE)
+    }
     transientFrameRef.current = null
     setTransientFrame(null)
+    // Finish the marquee: select what the rect covers.
+    const pendingMarquee = marqueeRef.current
+    if (pendingMarquee && marquee) {
+      const picked = selectInRect(elements, marquee, 'intersect')
+      setSelectedIds(current => (pendingMarquee.shift ? unionSelection(current, picked) : selectMany(picked)))
+      if (!pendingMarquee.shift) setAnchorId(picked.length ? picked[picked.length - 1] : null)
+    }
+    marqueeRef.current = null
+    setMarquee(null)
     setIsDrawing(false)
     setCurrentPath([])
     setIsPanning(false)
@@ -1379,7 +1496,7 @@ export default function App() {
     setLastPinchDist(null)
     setDragInfo(null)
     setResizeInfo(null)
-  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, user.id, updateElement])
+  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, userProfile.id, marquee, elements, ydoc])
   // Touch pinch
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -1440,7 +1557,7 @@ export default function App() {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && previewSnapshot) { e.preventDefault(); closeTimeline(); return }
-      if (e.key === 'Escape') { e.preventDefault(); setSelectedId(null); setContextMenu(null); setShowBpmnPalette(false); setWorkspaceMode('board'); return }
+      if (e.key === 'Escape') { e.preventDefault(); setSelectedIds(clearSelection()); setContextMenu(null); setShowBpmnPalette(false); setWorkspaceMode('board'); return }
       if (editingText) return
       if (showSimulationPanel && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
@@ -1451,10 +1568,31 @@ export default function App() {
       if (showSimulationPanel) return
       const target = (e.target as HTMLElement | null) || document.activeElement as HTMLElement | null
       if (target?.isContentEditable || (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
-      if (e.key === 'Delete' || e.key === 'Backspace') { if (selectedId) deleteElement(selectedId) }
+      if (e.key === 'Delete' || e.key === 'Backspace') { if (selectedIds.size) deleteSelected() }
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo() }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); handleRedo() }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'd') { e.preventDefault(); if (selectedId) duplicateElement(selectedId) }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
+        e.preventDefault()
+        if (selectedIds.size) setSelectedIds(selectMany(duplicateSelection()))
+      }
+      // Ctrl+A selects the whole board; arrow keys nudge the selection.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        selectElements(elements.map(element => element.id))
+        return
+      }
+      if (!e.metaKey && !e.ctrlKey && selectedIds.size && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault()
+        const step = e.shiftKey ? 10 : 1
+        const delta = e.key === 'ArrowUp' ? { x: 0, y: -step }
+          : e.key === 'ArrowDown' ? { x: 0, y: step }
+            : e.key === 'ArrowLeft' ? { x: -step, y: 0 } : { x: step, y: 0 }
+        for (const id of selectedIds) {
+          const element = elements.find(candidate => candidate.id === id)
+          if (element) updateElement(id, { x: element.x + delta.x, y: element.y + delta.y })
+        }
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         void saveBoard(e.shiftKey ? 'saveAs' : 'save')
@@ -1481,19 +1619,22 @@ export default function App() {
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
-  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
+  }, [selectedIds, deleteSelected, editingText, handleUndo, handleRedo, duplicateSelection, elements, updateElement, selectElements, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
   // ======================== RENDER ELEMENT ========================
   const isPreview = previewSnapshot !== null
   const liveElementIds = useMemo(() => new Set(elements.map(element => element.id)), [elements])
   const baseRenderedElements = previewElements ?? elements
   const renderedElements = useMemo(() => {
     if (!transientFrame || isPreview) return baseRenderedElements
-    return baseRenderedElements.map(element => element.id === transientFrame.id
-      ? { ...element, ...transientFrame.updates }
-      : element)
+    const frames = new Map(transientFrame.map(frame => [frame.id, frame.updates]))
+    return baseRenderedElements.map(element => {
+      const updates = frames.get(element.id)
+      return updates ? { ...element, ...updates } : element
+    })
   }, [baseRenderedElements, isPreview, transientFrame])
+  const selectionCount = selectedIds.size
   const renderElement = (el: BoardElement) => {
-    const isSelected = selectedId === el.id
+    const isSelected = isIdSelected(selectedIds, el.id)
     const invS = 1 / transform.scale
     const isChangedInPreview = isPreview && !liveElementIds.has(el.id)
     if (el.bpmnNodeType) {
@@ -1572,10 +1713,10 @@ export default function App() {
                 )}
               </div>
             </foreignObject>
-            {isSelected && <>
+            {isSelected && selectionCount === 1 && <>
               <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
                 fill="none" stroke="#4D96FF" strokeWidth={2 * invS} rx={12} />
-              {/* Resize handles */}
+              {/* Resize handles: single selection only, multi-resize needs an anchor */}
               {([['nw', -6, -6], ['ne', (el.w || 0) - 2, -6], ['sw', -6, (el.h || 0) - 2], ['se', (el.w || 0) - 2, (el.h || 0) - 2]] as [string, number, number][]).map(([c, cx, cy]) => (
                 <circle key={c} data-resize={c} cx={cx} cy={cy} r={7 * invS}
                   fill="white" stroke="#4D96FF" strokeWidth={2 * invS} className="cursor-nwse-resize" style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.2))' }} />
@@ -1788,6 +1929,15 @@ export default function App() {
           </button>
         </div>
         <div className="flex items-center gap-2">
+          {selectionCount > 1 && !isPreview && (
+            <div
+              className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-slate-700 text-slate-100' : 'bg-slate-100 text-slate-700'}`}
+              data-testid="selection-count"
+              title="Выделено объектов. Delete — удалить, Esc — снять выделение"
+            >
+              Выделено: {selectionCount}
+            </div>
+          )}
           {tool === 'bpmnSequence' && (
             <div className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-violet-900 text-violet-100' : 'bg-violet-100 text-violet-700'}`}>
               {bpmnFlowSourceId ? 'Поток: выберите цель' : 'Поток: выберите источник'}
@@ -1832,8 +1982,66 @@ export default function App() {
           <button onClick={() => setShowMiniMap(!showMiniMap)} className={`size-8 grid place-items-center rounded-lg transition ${hoverBg} ${textSec}`} title="Мини-карта">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18" /></svg>
           </button>
+          {/* Participant profile */}
+          <button
+            onClick={() => setShowProfile(value => !value)}
+            data-testid="profile-button"
+            aria-label="Профиль участника"
+            aria-expanded={showProfile}
+            className={`size-8 grid place-items-center rounded-full text-[12px] font-bold text-white shadow-sm transition ring-2 ring-black/5 hover:ring-black/20 ${showProfile ? 'ring-black/30' : ''}`}
+            style={{ backgroundColor: userProfile.color }}
+            title={`Профиль: ${userProfile.name}`}
+          >
+            {initialsOf(userProfile.name)}
+          </button>
         </div>
       </div>
+      {showProfile && (
+        <div
+          className={`absolute right-4 top-14 z-[60] w-72 rounded-2xl border p-3 shadow-xl ${dk ? 'border-slate-600 bg-slate-800' : 'border-black/5 bg-white'}`}
+          data-ui
+          data-testid="profile-panel"
+        >
+          <div className="flex items-center gap-2">
+            <span className="grid size-9 place-items-center rounded-full text-[14px] font-bold text-white shadow-sm" style={{ backgroundColor: userProfile.color }}>
+              {initialsOf(userProfile.name)}
+            </span>
+            <div className="min-w-0">
+              <div className={`truncate text-[13px] font-semibold ${dk ? 'text-slate-100' : 'text-slate-800'}`}>{userProfile.name}</div>
+              <div className={`truncate text-[10px] ${textSec}`}>Локальный профиль · {userProfile.id.slice(0, 8)}</div>
+            </div>
+          </div>
+          <label className={`mt-3 block text-[11px] font-medium ${textSec}`} htmlFor="profile-name">Имя участника</label>
+          <input
+            id="profile-name"
+            data-testid="profile-name-input"
+            value={userProfile.name}
+            maxLength={40}
+            onChange={event => updateUserProfile(withName(userProfile, event.target.value))}
+            className={`mt-1 h-8 w-full rounded-lg border px-2 text-[12px] outline-none focus:border-violet-400 ${dk ? 'border-slate-600 bg-slate-900 text-slate-100' : 'border-black/10 bg-white text-slate-800'}`}
+            placeholder="Как вас подписывать"
+          />
+          <div className={`mt-3 text-[11px] font-medium ${textSec}`}>Цвет</div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {PARTICIPANT_COLORS.map(candidate => (
+              <button
+                key={candidate}
+                data-testid={`profile-color-${candidate.slice(1)}`}
+                onClick={() => updateUserProfile(withColor(userProfile, candidate))}
+                aria-label={`Цвет ${candidate}`}
+                aria-pressed={userProfile.color === candidate}
+                className={`size-6 rounded-full transition ring-2 ${userProfile.color === candidate ? (dk ? 'ring-white' : 'ring-slate-800') : 'ring-black/5 hover:ring-black/20'}`}
+                style={{ backgroundColor: candidate }}
+              />
+            ))}
+          </div>
+          <p className={`mt-3 text-[10px] leading-relaxed ${textSec}`}>
+            Имя и цвет хранятся только на этом устройстве и используются для подписи
+            созданных объектов (<code>createdBy</code>). В файл документа попадает
+            идентификатор автора; обезличить его можно при экспорте.
+          </p>
+        </div>
+      )}
       {toast && (
         <div className={`absolute right-4 top-16 z-[60] max-w-sm rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${toast.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-violet-200 bg-violet-50 text-violet-800'}`} data-ui aria-live="polite">
           <div className="flex items-start gap-3"><span>{toast.tone === 'error' ? '!' : toast.tone === 'success' ? '✓' : 'i'}</span><span>{toast.message}</span><button onClick={() => setToast(null)} className="ml-auto text-base leading-none">×</button></div>
@@ -1929,6 +2137,29 @@ export default function App() {
           <rect width="100%" height="100%" fill="url(#grid-large)" />
           <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
             {renderedElements.map(renderElement)}
+            {selectionCount > 1 && anchorId && (() => {
+              const anchor = elements.find(element => element.id === anchorId)
+              if (!anchor) return null
+              return (
+                <circle
+                  data-testid="selection-anchor"
+                  cx={anchor.x} cy={anchor.y} r={4 / transform.scale}
+                  fill="#7C3AED" pointerEvents="none"
+                />
+              )
+            })()}
+            {marquee && (
+              <rect
+                data-testid="marquee"
+                x={marquee.minX} y={marquee.minY}
+                width={Math.max(0, marquee.maxX - marquee.minX)}
+                height={Math.max(0, marquee.maxY - marquee.minY)}
+                fill="#4D96FF" fillOpacity={0.08}
+                stroke="#4D96FF" strokeWidth={1.5 / transform.scale}
+                strokeDasharray={`${4 / transform.scale}`}
+                pointerEvents="none"
+              />
+            )}
             {bpmnFlowSourceId && flowPreviewPoint && (() => {
               const source = elements.find(element => element.id === bpmnFlowSourceId)
               if (!source) return null
@@ -2347,10 +2578,10 @@ export default function App() {
           </div>
         </aside>
       )}
-      {selectedId && elements.find(e => e.id === selectedId && (e.type === 'sticky' || e.type === 'rect' || e.type === 'circle')) && !contextMenu && (
+      {selectedElementId && elements.find(e => e.id === selectedElementId && (e.type === 'sticky' || e.type === 'rect' || e.type === 'circle')) && !contextMenu && (
         <div className={`absolute left-1/2 -translate-x-1/2 bottom-[104px] z-30 flex items-center gap-1 p-1.5 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
           {STICKY_COLORS.map(c => (
-            <button key={c} onClick={() => updateElement(selectedId, { color: c, fill: c })}
+            <button key={c} onClick={() => updateSelected({ color: c, fill: c })}
               className="size-7 rounded-full ring-1 ring-black/10 active:scale-90 transition" style={{ background: c }} />
           ))}
         </div>

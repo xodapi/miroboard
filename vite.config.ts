@@ -47,6 +47,13 @@ export default defineConfig({
     __MIROBOARD_DEBUG_HOOK__: JSON.stringify(debugHook),
   },
   plugins: [react(), tailwindcss(), viteSingleFile()],
+  server: {
+    // Sandbox/preview hosts are dynamic, so allow any host header for the dev
+    // server only. The shipped artifact is a single file opened over file://
+    // and is unaffected by this setting.
+    host: "0.0.0.0",
+    allowedHosts: true,
+  },
   build: {
     assetsInlineLimit: 100_000,
   },
@@ -58,7 +65,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["./src/test/setup.ts"],
     coverage: {
       provider: "v8",
