@@ -502,8 +502,28 @@ export default function App() {
     setShowBpmnPalette(true)
   }, [bpmnProfileActive, simulationProfile, ydoc])
   const openSimulation = useCallback(() => { if (previewSnapshot) return void showToast('Симуляция недоступна во время просмотра истории.', 'info'); if (!bpmnProfileActive) activateBpmnProfile(); setWorkspaceMode('simulation'); setShowSimulationPanel(true) }, [activateBpmnProfile, bpmnProfileActive, previewSnapshot, showToast])
+  /**
+   * Writes an in-flight gesture to the document.
+   *
+   * A drag or resize lives in `transientFrame` until pointerup, so anything
+   * that reads the document mid-gesture sees the pre-drag position. Saving is
+   * the case that matters: Ctrl+S during a drag wrote the old coordinates to
+   * disk while the screen showed the new ones.
+   */
+  const flushGesture = useCallback(() => {
+    const frame = transientFrameRef.current
+    if (!frame?.length || !yElements.current) return
+    ydoc.transact(() => {
+      for (const item of frame) commitElementUpdate(ydoc, yElements.current!, item.id, item.updates)
+    }, LOCAL_GESTURE)
+    transientFrameRef.current = null
+    setTransientFrame(null)
+  }, [ydoc])
+
   const saveBoard = useCallback(async (mode: 'save' | 'saveAs'): Promise<boolean> => {
     if (previewSnapshot) { showToast('Недоступно во время просмотра истории.', 'info'); return false }
+    // Land any in-flight drag first, so the file matches the screen.
+    flushGesture()
     const metaMap = ydoc.getMap<unknown>('meta')
     const metaId = metaMap.get('id')
     const metaTitle = metaMap.get('title')
@@ -555,7 +575,7 @@ export default function App() {
       showToast('Не удалось сохранить документ. Проверьте доступ к файлу.', 'error')
     }
     return false
-  }, [elements, fileSession, previewSnapshot, showToast, ydoc])
+  }, [elements, fileSession, flushGesture, previewSnapshot, showToast, ydoc])
   const resetDocument = useCallback(() => { if (isDirty && !window.confirm('Несохраненные изменения будут потеряны. Продолжить?')) return
     const meta = ydoc.getMap<unknown>('meta')
     const profileConfig = ydoc.getMap<unknown>('profileConfig')

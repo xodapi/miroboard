@@ -318,6 +318,49 @@ describe('App smoke', () => {
       return () => written
     }
 
+    it('does not commit a flushed drag twice when the pointer is released', async () => {
+      const written = stubFileSession('board.mboard', '')
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+
+      const element = container.querySelector('g[data-id]')!
+      pointer(element, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 300, clientY: 300 })
+
+      // Saving lands the drag. Releasing afterwards recomputes the frame from
+      // the release point, so it must agree rather than shift the element on.
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 300, clientY: 300 })
+
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(280,280)')
+      expect(JSON.parse(written()).nodes[0].frame).toMatchObject({ x: 280, y: 280 })
+    })
+
+    it('saves what is on screen when a drag is still in progress', async () => {
+      const written = stubFileSession('board.mboard', '')
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+
+      // Begin a drag and move, but never release: the new position lives only
+      // in transientFrame until pointerup commits it to the document.
+      const element = container.querySelector('g[data-id]')!
+      pointer(element, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 300, clientY: 300 })
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(280,280)')
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+
+      // Ctrl+S serialises the document, so an uncommitted drag would be saved
+      // at the position the user had already dragged away from.
+      const saved = JSON.parse(written())
+      const frame = saved.nodes[0].frame
+      expect([frame.x, frame.y]).toEqual([280, 280])
+    })
+
     /**
      * The cross-* specs save a live document and then reopen the saved file,
      * which carries `history.yjsState`. Reopening such a file takes the
