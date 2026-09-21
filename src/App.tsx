@@ -1141,7 +1141,19 @@ export default function App() {
   // ======================== POINTER HANDLERS ========================
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     const target = e.target as Element
-    if (target.closest('[data-ui]')) return
+    // TEMPORARY CI DIAGNOSTIC — REMOVE BEFORE MERGE
+    const blocker = target.closest('[data-ui]')
+    diagLog({
+      kind: 'pointerdown',
+      tool,
+      clientX: Math.round(e.clientX), clientY: Math.round(e.clientY),
+      targetTag: target.tagName,
+      targetTestId: (target as HTMLElement).dataset?.testid ?? null,
+      onElement: Boolean(target.closest('[data-id]')),
+      blockedBy: blocker ? (blocker.className?.toString().slice(0, 60) ?? 'data-ui') : null,
+      isTrusted: e.isTrusted, button: e.button, pointerType: e.pointerType,
+    })
+    if (blocker) return
     e.preventDefault()
     setContextMenu(null)
     setShowTemplates(false)
@@ -1457,10 +1469,12 @@ export default function App() {
     // Finish the marquee: select what the rect covers, measured to the release
     // point for the same reason as the frame above.
     const pendingMarquee = marqueeRef.current
+    diagLog({ kind: 'pointerup', hasMarquee: Boolean(pendingMarquee), hasReleasePoint: Boolean(releasedAt), elementCount: elements.length }) // TEMPORARY CI DIAGNOSTIC
     if (pendingMarquee) {
       const rect = releasedAt ? normaliseRect(pendingMarquee.from, releasedAt) : marquee
       if (rect) {
         const picked = selectInRect(elements, rect, 'intersect')
+        diagLog({ kind: 'marquee-result', rect, picked: picked.length, shift: pendingMarquee.shift }) // TEMPORARY CI DIAGNOSTIC
         setSelectedIds(current => (pendingMarquee.shift ? unionSelection(current, picked) : selectMany(picked)))
         if (!pendingMarquee.shift) setAnchorId(picked.length ? picked[picked.length - 1] : null)
       }

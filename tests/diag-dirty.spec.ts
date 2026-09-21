@@ -144,3 +144,41 @@ test('DIAG-C reopen: a saved file opens clean', async ({ page }) => {
     throw new Error(`DIAG C-reopen: status="${status}" log=${JSON.stringify(diag.slice(-80))}`)
   }
 })
+
+test('DIAG-D marquee: why does the selection counter not appear', async ({ page }) => {
+  test.setTimeout(120_000)
+  await boot(page)
+  const box = await page.getByTestId('canvas').boundingBox()
+  if (!box) throw new Error('canvas has no bounding box')
+
+  // Two rectangles, exactly as tests/multi-select.spec.ts draws them.
+  for (const [from, to] of [[{ x: 120, y: 140 }, { x: 240, y: 220 }], [{ x: 420, y: 320 }, { x: 540, y: 400 }]] as const) {
+    await page.keyboard.press('r')
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2)
+    await page.mouse.move(to.x, to.y)
+    await page.mouse.up()
+    await page.keyboard.press('v')
+  }
+  const drawn = await page.locator('svg g[data-id]').count()
+
+  // What is actually under the marquee's start point?
+  const atStart = await page.evaluate(() => {
+    const el = document.elementFromPoint(60, 80)
+    return el ? `${el.tagName}.${String(el.className).slice(0, 50)} dataUi=${Boolean(el.closest('[data-ui]'))}` : 'none'
+  })
+
+  await page.mouse.move(60, 80)
+  await page.mouse.down()
+  await page.mouse.move(340, 270)
+  await page.mouse.move(620, 460)
+  await page.mouse.up()
+
+  const counter = await page.getByTestId('selection-count').count()
+  if (counter === 0) {
+    const diag = await readDiag(page)
+    const relevant = diag.filter(entry => ['pointerdown', 'pointerup', 'marquee-result'].includes(entry.kind))
+    throw new Error(`DIAG D-marquee: drawn=${drawn} counter=0 atStart=${atStart} canvasBox=${JSON.stringify(box)} events=${JSON.stringify(relevant.slice(-14))}`)
+  }
+})
