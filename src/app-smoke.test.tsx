@@ -8,6 +8,8 @@
  *
  * The Rust/WASM core is stubbed: this file tests the shell, not the engine.
  */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -238,6 +240,45 @@ describe('App smoke', () => {
     function status(): string | null {
       return container.querySelector('[role="status"]')?.textContent ?? null
     }
+
+    /**
+     * The four cross-* e2e specs that went red all follow the same shape: open a
+     * saved document, then save it again and expect the toolbar to read
+     * "Сохранено". Reproduced here without a browser.
+     */
+    function stubFileSession(fileName: string, contents: string) {
+      let written = ''
+      const handle = {
+        kind: 'file',
+        name: fileName,
+        async createWritable() {
+          return { write: async (value: string) => { written = value }, close: async () => undefined }
+        },
+        async getFile() {
+          return { name: fileName, type: 'application/json', size: contents.length, text: async () => contents }
+        },
+      }
+      Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: async () => handle })
+      Object.defineProperty(window, 'showOpenFilePicker', { configurable: true, value: async () => [handle] })
+      return () => written
+    }
+
+    it('keeps a reopened document clean after saving it again', async () => {
+      const fixture = readFileSync(resolve('examples', 'freeform-board.mboard'), 'utf8')
+      const written = stubFileSession('freeform-board.mboard', fixture)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      expect(container.querySelectorAll('[data-id]').length).toBeGreaterThan(0)
+      expect(status()).toBe('Сохранено')
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      expect(written().length).toBeGreaterThan(0)
+      expect(status()).toBe('Сохранено')
+    })
 
     it('marks the document dirty after an edit and clean after a save', async () => {
       // The File System Access API is absent in jsdom, so saveDocument() takes

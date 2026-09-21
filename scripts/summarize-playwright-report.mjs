@@ -9,7 +9,7 @@
  * run. Used by the 'Summarize end-to-end results' step in
  * `.github/workflows/ci.yml`.
  *
- * Usage: node scripts/summarize-playwright-report.mjs [reportDir] [--annotations]
+ * Usage: node scripts/summarize-playwright-report.mjs [reportDir] [--annotations] [--contexts] [--page=N]
  *
  * With --annotations it prints GitHub workflow commands (`::error::`) instead of
  * prose. That is not a convenience: annotations are the only CI channel this
@@ -25,6 +25,10 @@ import { inflateRawSync } from 'node:zlib'
 
 const args = process.argv.slice(2)
 const annotationsOnly = args.includes('--annotations')
+// --contexts prints the aria snapshot Playwright attaches to a failure, which is
+// the closest thing to "what did the page look like" that survives without log
+// access: it shows the toolbar state and any toast next to the failed expect.
+const contextsOnly = args.includes('--contexts')
 // GitHub keeps at most 10 annotations of a level per step, so CI runs this
 // script once per page from a step of its own.
 const pageArg = args.find(arg => arg.startsWith('--page='))
@@ -124,6 +128,22 @@ function firstErrorOf(test, detailedTests) {
   return ''
 }
 
+/** Path of the error-context attachment (an aria snapshot) for a failed test, if any. */
+function findContextAttachment(test, detailedTests) {
+  const detailed = detailedTests.find(candidate => candidate.testId === test.testId)
+  for (const result of detailed?.results ?? []) {
+    for (const attachment of result.attachments ?? []) {
+      if (attachment.contentType === 'text/markdown' && attachment.path) return attachment.path
+    }
+  }
+  for (const result of test.results ?? []) {
+    for (const attachment of result.attachments ?? []) {
+      if (attachment.contentType === 'text/markdown' && attachment.path) return attachment.path
+    }
+  }
+  return undefined
+}
+
 const failures = []
 let passed = 0
 let skipped = 0
@@ -150,7 +170,12 @@ for (const file of index.files ?? []) {
       passed += 1
       continue
     }
-    failures.push({ label, error: firstErrorOf(test, loadDetails()), outcome: test.outcome })
+    failures.push({
+      label,
+      error: firstErrorOf(test, loadDetails()),
+      outcome: test.outcome,
+      context: findContextAttachment(test, loadDetails()),
+    })
   }
 }
 
@@ -169,6 +194,26 @@ function escapeMessage(value) {
 }
 
 const ANNOTATION_LIMIT = 10
+
+if (contextsOnly) {
+  for (const failure of failures.slice(0, ANNOTATION_LIMIT)) {
+    if (!failure.context) continue
+    let text
+    try {
+      text = readFileSync(join(reportDir, failure.context), 'utf8')
+    } catch {
+      continue
+    }
+    // The attachment starts with boilerplate (instructions, error, test source);
+    // the aria snapshot of the page at the moment of failure is at the end and is
+    // the part worth spending annotation characters on.
+    const snapshotAt = text.indexOf('# Page snapshot')
+    const useful = snapshotAt >= 0 ? text.slice(snapshotAt) : text
+    const trimmed = useful.split('\n').filter(line => line.trim().length > 0).join(' | ').slice(0, 1_200)
+    if (trimmed) console.log(`::notice title=CONTEXT ${escapeProperty(failure.label.slice(0, 110))}::${escapeMessage(trimmed)}`)
+  }
+  process.exit(0)
+}
 
 if (annotationsOnly) {
   if (!failures.length) {

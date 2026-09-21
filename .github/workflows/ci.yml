@@ -78,6 +78,10 @@ jobs:
         if: always()
         run: node scripts/summarize-playwright-report.mjs playwright-report --annotations --page=2
 
+      - name: Annotate the page state at each failure
+        if: always()
+        run: node scripts/summarize-playwright-report.mjs playwright-report --contexts
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
@@ -127,11 +131,19 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Build the app from ${{ matrix.leg }} (${{ matrix.sha }})
+      - name: Restore app sources at ${{ matrix.leg }}
         run: |
           git checkout "${{ matrix.sha }}" -- src
-          node -e "console.log('src at', require('child_process').execSync('git log -1 --format=%h %s -- src').toString().trim())"
-          npm run build
+          git log -1 --format='src restored from %h %s' "${{ matrix.sha }}"
+
+      # Build failures have to be reported through annotations too: the job log
+      # that would normally explain them is not readable from a sandbox.
+      - name: Build the app from ${{ matrix.leg }}
+        run: |
+          if ! npm run build > /tmp/build.log 2>&1; then
+            tail -n 25 /tmp/build.log | tr '\n' '|' | sed -e 's/%/%25/g' -e 's/^/::error title=BISECT-${{ matrix.leg }} build failed::/'
+            exit 1
+          fi
 
       - name: Run the four failing specs
         continue-on-error: true
