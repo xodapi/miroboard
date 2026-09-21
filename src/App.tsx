@@ -1921,8 +1921,11 @@ export default function App() {
             </div>}
           </aside>
         )}
-        {/* Empty state */}
-        {elements.length === 0 && !showTemplates && (
+        {/* Empty state. Reads what is on screen, not the live document: a
+            preview of an earlier snapshot draws its own elements, and an
+            emptied live board would otherwise cover them with "start creating"
+            and an inviting template button. */}
+        {renderedElements.length === 0 && !showTemplates && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingTop: '52px' }}>
             <div className={`text-center px-6 -mt-20 ${textC}`}>
               <div className={`inline-flex size-16 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white shadow-xl shadow-black/5 border border-black/5'} items-center justify-center mb-4 border`}>

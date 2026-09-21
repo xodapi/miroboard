@@ -517,22 +517,49 @@ describe('App smoke', () => {
    * copied them.
    */
   describe('history preview', () => {
-    /** Marks a checkpoint, opens the timeline and previews the first snapshot. */
-    function previewFirstSnapshot() {
+    /** Marks a named checkpoint of the board as it stands. */
+    function markSnapshot() {
       vi.spyOn(window, 'prompt').mockReturnValue('точка')
       const more = [...container.querySelectorAll('button')]
         .find(b => b.getAttribute('aria-label') === 'Дополнительные инструменты')!
       act(() => { more.click() })
       const mark = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('Отметить состояние'))!
       act(() => { mark.click() })
+    }
+
+    /** Opens the timeline and previews the most recent checkpoint. */
+    function openSnapshot() {
       const openHistory = [...container.querySelectorAll('button')]
         .find(b => b.textContent?.trim() === 'Контрольные точки')!
       act(() => { openHistory.click() })
       const panel = container.querySelector('[aria-label="История доски"]')!
-      const snapshot = panel.querySelector('li button') as HTMLElement
-      act(() => { snapshot.click() })
-      return snapshot
+      const entry = panel.querySelector('li button') as HTMLElement
+      act(() => { entry.click() })
     }
+
+    /** Marks a checkpoint and immediately previews it. */
+    function previewFirstSnapshot() {
+      markSnapshot()
+      openSnapshot()
+    }
+
+    it('does not cover a previewed snapshot with the empty-board prompt', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      markSnapshot()
+
+      // Empty the live board, then look back at the snapshot that still has it.
+      key('v')
+      key('a', { ctrlKey: true })
+      key('Delete')
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
+
+      openSnapshot()
+
+      // The snapshot's element is on screen, so the "start creating" prompt —
+      // and its template button — must not be.
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(1)
+      expect(container.textContent).not.toContain('Начните творить')
+    })
 
     it('does not let Ctrl+A select the live document while previewing history', () => {
       placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
