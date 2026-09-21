@@ -23,8 +23,9 @@ import { ProjectHistoryModal } from './components/ProjectHistoryModal'
 import { BpmnTaskProperties } from './components/BpmnTaskProperties'
 import { BpmnFlowProperties } from './components/BpmnFlowProperties'
 import { ColorPicker } from './components/ColorPicker'
+import { BoardHeader } from './components/BoardHeader'
 import { BottomToolbar } from './components/BottomToolbar'
-import { ProfileButton, ProfilePanel } from './components/ProfilePanel'
+import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingTour } from './components/OnboardingTour'
 import { Toast, type ToastTone } from './components/Toast'
 import { MoreMenu } from './components/MoreMenu'
@@ -1854,117 +1855,44 @@ export default function App() {
     <div className={`fixed inset-0 overflow-hidden select-none ${dk ? 'bg-slate-900 text-white' : 'bg-[#F7F7F5] text-black'}`}>
       <input ref={bpmnImportRef} type="file" accept=".bpmn,.xml,application/xml,text/xml" className="hidden" onChange={importFromBpmn} />
       {/* ===== HEADER ===== */}
-      <div className={`absolute top-0 left-0 right-0 z-30 h-[52px] flex items-center justify-between px-3 ${dk ? 'bg-slate-900/90' : 'bg-white/90'} backdrop-blur-xl border-b ${borderC}`} data-ui>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <div className="size-7 rounded-lg bg-gradient-to-br from-violet-500 to-blue-500 grid place-items-center">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-            </div>
-            <span className={`text-[15px] font-bold tracking-tight ${textC}`}>{fileSession.name ?? 'Новый документ'}</span>
-            <span role="status" aria-live="polite" className={`text-[11px] font-semibold ${isDirty ? 'text-amber-700' : textSec}`}>{isDirty ? 'Не сохранено' : 'Сохранено'}</span>
-            {recoveryNotice && <RecoveryDivergenceNotice message={recoveryNotice} />}
-            <span className="select-text rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600" title="Build version: можно выделить и скопировать">{__MIROBOARD_VERSION__}</span>
-            <div className="ml-1 hidden rounded-lg bg-slate-100 p-0.5 sm:flex">
-              {([
-                ['board', 'Доска'],
-                ['bpmn', 'BPMN'],
-                ['simulation', 'Симуляция'],
-              ] as [WorkspaceMode, string][]).map(([mode, label]) => (
-                <button key={mode} onClick={() => mode === 'simulation' ? openSimulation() : (mode === 'bpmn' && !bpmnProfileActive ? activateBpmnProfile() : setWorkspaceMode(mode))} disabled={mode === 'simulation' && isPreview} className={`rounded-md px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${workspaceMode === mode ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowProjectHistory(true)}
-              className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`}
-              title="История проекта"
-            >
-              История
-            </button>
-            <button
-              onClick={() => setShowTimeline(true)}
-              className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${showTimeline ? 'bg-violet-100 text-violet-700' : `${hoverBg} ${textSec}`}`}
-              title="Контрольные точки документа"
-            >
-              Контрольные точки
-            </button>
-            <button onClick={() => setTourStep(0)} className={`grid size-7 place-items-center rounded-lg text-[12px] font-bold transition ${hoverBg} ${textSec}`} title="Краткий тур по интерфейсу">
-              ?
-            </button>
-            <button onClick={() => setShowLearningModules(true)} className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`} title="Учебные BPMN-примеры">
-              Примеры
-            </button>
-          </div>
-          <div className={`h-4 w-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
-          {/* Undo/Redo */}
-          <button onClick={handleUndo} disabled={!canUndo || isPreview}
-            className={`size-8 grid place-items-center rounded-lg transition ${canUndo ? hoverBg + ' ' + textSec : 'opacity-25 cursor-default'}`} title="Отменить (Ctrl+Z)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 10h13a4 4 0 0 1 0 8H9M3 10l5-5M3 10l5 5" /></svg>
-          </button>
-          <button onClick={handleRedo} disabled={!canRedo || isPreview}
-            className={`size-8 grid place-items-center rounded-lg transition ${canRedo ? hoverBg + ' ' + textSec : 'opacity-25 cursor-default'}`} title="Вернуть (Ctrl+Shift+Z)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10H8a4 4 0 0 0 0 8h7M21 10l-5-5M21 10l-5 5" /></svg>
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          {selectionCount > 1 && !isPreview && (
-            <div
-              className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-slate-700 text-slate-100' : 'bg-slate-100 text-slate-700'}`}
-              data-testid="selection-count"
-              title="Выделено объектов. Delete — удалить, Esc — снять выделение"
-            >
-              Выделено: {selectionCount}
-            </div>
-          )}
-          {tool === 'bpmnSequence' && (
-            <div className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-violet-900 text-violet-100' : 'bg-violet-100 text-violet-700'}`}>
-              {bpmnFlowSourceId ? 'Поток: выберите цель' : 'Поток: выберите источник'}
-            </div>
-          )}
-          {elements.some(element => element.bpmnNodeType) && (
-            <>
-              <div
-                className={`h-7 px-2 rounded-lg text-[11px] font-semibold flex items-center gap-1 ${bpmnIssues.some(issue => issue.severity === 'error') ? 'bg-red-100 text-red-700' : bpmnIssues.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}
-                title={bpmnIssues.map(issue => issue.message).join('\n') || 'BPMN-модель корректна'}
-              >
-                <span>{bpmnIssues.some(issue => issue.severity === 'error') ? '!' : '✓'}</span>
-                BPMN {bpmnIssues.length || 'OK'}
-              </div>
-              <button onClick={openSimulation} disabled={isPreview} className="h-7 rounded-lg bg-fuchsia-500 px-2.5 text-[11px] font-bold text-white shadow-sm hover:bg-fuchsia-600 disabled:cursor-not-allowed disabled:opacity-50" title="Открыть Monte Carlo симуляцию">
-                Симуляция
-              </button>
-              {bpmnRunSummary && (
-                <div className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-indigo-950 text-indigo-200' : 'bg-indigo-50 text-indigo-700'}`}>
-                  {bpmnRunSummary}
-                </div>
-              )}
-              {visibleSimulationSummary && (
-                <div className={`h-7 max-w-[340px] truncate px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-fuchsia-950 text-fuchsia-200' : 'bg-fuchsia-50 text-fuchsia-700'}`} title={visibleSimulationSummary}>
-                  {visibleSimulationSummary}
-                </div>
-              )}
-            </>
-          )}
-          {/* Snap */}
-          <button onClick={() => setSnapGrid(!snapGrid)}
-            className={`h-7 px-2 rounded-lg text-[11px] font-medium flex items-center gap-1 transition ${snapGrid ? (dk ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-700') : (dk ? 'text-slate-400 hover:bg-slate-700' : 'text-black/40 hover:bg-black/5')}`} title="Привязка к сетке">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>
-            Сетка
-          </button>
-          {/* Dark mode */}
-          <button onClick={() => setDarkMode(!dk)} className={`size-8 grid place-items-center rounded-lg transition ${hoverBg} ${textSec}`} title="Тёмная тема">
-            {dk ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>}
-          </button>
-          {/* Minimap toggle */}
-          <button onClick={() => setShowMiniMap(!showMiniMap)} className={`size-8 grid place-items-center rounded-lg transition ${hoverBg} ${textSec}`} title="Мини-карта">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18" /></svg>
-          </button>
-          {/* Participant profile */}
-          <ProfileButton profile={userProfile} expanded={showProfile} onToggle={() => setShowProfile(value => !value)} />
-        </div>
-      </div>
+      <BoardHeader
+        theme={theme}
+        documentName={fileSession.name ?? null}
+        isDirty={isDirty}
+        version={__MIROBOARD_VERSION__}
+        workspaceMode={workspaceMode}
+        isPreview={isPreview}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        showTimeline={showTimeline}
+        snapGrid={snapGrid}
+        tool={tool}
+        bpmnFlowSourceId={bpmnFlowSourceId}
+        selectionCount={selectionCount}
+        hasBpmnNodes={elements.some(element => element.bpmnNodeType)}
+        bpmnIssues={bpmnIssues}
+        bpmnRunSummary={bpmnRunSummary}
+        simulationSummary={visibleSimulationSummary}
+        userProfile={userProfile}
+        showProfile={showProfile}
+        recoveryNotice={recoveryNotice ? <RecoveryDivergenceNotice message={recoveryNotice} /> : null}
+        onSelectMode={mode => {
+          if (mode === 'simulation') openSimulation()
+          else if (mode === 'bpmn' && !bpmnProfileActive) activateBpmnProfile()
+          else setWorkspaceMode(mode)
+        }}
+        onOpenProjectHistory={() => setShowProjectHistory(true)}
+        onOpenTimeline={() => setShowTimeline(true)}
+        onStartTour={() => setTourStep(0)}
+        onOpenLearningModules={() => setShowLearningModules(true)}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onOpenSimulation={openSimulation}
+        onToggleSnapGrid={() => setSnapGrid(!snapGrid)}
+        onToggleDarkMode={() => setDarkMode(!dk)}
+        onToggleMiniMap={() => setShowMiniMap(!showMiniMap)}
+        onToggleProfile={() => setShowProfile(value => !value)}
+      />
       {showProfile && <ProfilePanel profile={userProfile} theme={theme} onChange={updateUserProfile} />}
       {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
       <HistoryPreviewBanner darkMode={dk} snapshot={previewSnapshot} onRestore={restorePreview} onClose={closeTimeline} />
