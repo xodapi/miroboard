@@ -25,6 +25,7 @@ import { BpmnFlowProperties } from './components/BpmnFlowProperties'
 import { ColorPicker } from './components/ColorPicker'
 import { BoardHeader } from './components/BoardHeader'
 import { ZoomControls, ElementCount } from './components/ZoomControls'
+import { CanvasBackground } from './components/CanvasBackground'
 import { BottomToolbar } from './components/BottomToolbar'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingTour } from './components/OnboardingTour'
@@ -1847,7 +1848,6 @@ export default function App() {
   const dk = darkMode
   // Extracted panels take the whole theme rather than five separate props.
   const theme = createTheme(darkMode)
-  const bgMain = '#F7F8FC'
   const textC = 'text-slate-900'
   const textSec = 'text-slate-500'
   const hoverBg = 'hover:bg-slate-100'
@@ -1937,28 +1937,7 @@ export default function App() {
               setEditValue(element.text || '')
             }
           }}>
-          <defs>
-            <pattern id="grid" width={40} height={40} patternUnits="userSpaceOnUse"
-              patternTransform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
-              <circle cx="0" cy="0" r={snapGrid ? 1.5 : 1} fill={dk ? '#fff' : '#000'} fillOpacity={snapGrid ? (dk ? 0.12 : 0.1) : (dk ? 0.05 : 0.06)} />
-            </pattern>
-            <pattern id="grid-large" width={200} height={200} patternUnits="userSpaceOnUse"
-              patternTransform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
-              <circle cx="0" cy="0" r={1.8} fill={dk ? '#fff' : '#000'} fillOpacity={dk ? 0.08 : 0.1} />
-            </pattern>
-            {/* Snap grid lines */}
-            {snapGrid && (
-              <pattern id="snap-grid" width={40} height={40} patternUnits="userSpaceOnUse"
-                patternTransform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
-                <line x1={0} y1={0} x2={40} y2={0} stroke={dk ? '#fff' : '#000'} strokeOpacity={0.04} strokeWidth={0.5} />
-                <line x1={0} y1={0} x2={0} y2={40} stroke={dk ? '#fff' : '#000'} strokeOpacity={0.04} strokeWidth={0.5} />
-              </pattern>
-            )}
-          </defs>
-          <rect width="100%" height="100%" fill={bgMain} />
-          {snapGrid && <rect width="100%" height="100%" fill="url(#snap-grid)" />}
-          <rect width="100%" height="100%" fill="url(#grid)" />
-          <rect width="100%" height="100%" fill="url(#grid-large)" />
+          <CanvasBackground dark={dk} snapGrid={snapGrid} transform={transform} />
           <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
             {renderedElements.map(renderElement)}
             {selectionCount > 1 && anchorId && (() => {
