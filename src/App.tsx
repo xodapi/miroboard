@@ -700,8 +700,8 @@ export default function App() {
    */
   const duplicateSelection = useCallback((origin?: unknown): string[] => {
     if (previewSnapshot || !yElements.current) return []
-    return commands.duplicateElements(ydoc, yElements.current, selectedIds, genId, origin ?? LOCAL_EDIT)
-  }, [selectedIds, previewSnapshot, ydoc])
+    return commands.duplicateElements(ydoc, yElements.current, selectedIds, genId, origin ?? LOCAL_EDIT, userProfile.id)
+  }, [selectedIds, previewSnapshot, ydoc, userProfile.id])
 
   /**
    * Nudges the whole selection in ONE transaction. Arrow keys used to commit

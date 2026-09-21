@@ -132,6 +132,13 @@ export function moveElements(
  * The growing offset is deliberate: duplicating three stacked elements with a
  * fixed offset lands all three copies on the same spot. Returns the new ids in
  * source order so the caller can select the copies.
+ *
+ * `createdBy` names whoever made the copy, not the author of the original.
+ * Duplicating is creating — the profile panel tells the user their id signs the
+ * objects they create — and pasting (`preparePaste`) already re-stamps the same
+ * way. Without this, duplicating something out of a colleague's file credited
+ * the new object to them. Callers that genuinely want to keep the original
+ * author simply omit the option.
  */
 export function duplicateElements(
   doc: Y.Doc,
@@ -139,6 +146,7 @@ export function duplicateElements(
   ids: Iterable<string>,
   nextId: () => string,
   origin: unknown = LOCAL_EDIT,
+  createdBy?: string,
 ): string[] {
   const wanted = new Set(ids)
   const picked = elements.toArray().filter(element => wanted.has(element.id))
@@ -150,7 +158,9 @@ export function duplicateElements(
       const offset = DUPLICATE_OFFSET * (index + 1)
       const id = nextId()
       created.push(id)
-      elements.push([{ ...element, id, x: element.x + offset, y: element.y + offset }])
+      const copy: BoardElement = { ...element, id, x: element.x + offset, y: element.y + offset }
+      if (createdBy !== undefined) copy.createdBy = createdBy
+      elements.push([copy])
     })
   }, origin)
   return created

@@ -212,6 +212,22 @@ describe('duplicateElements', () => {
     expect(copy).toMatchObject({ text: 'привет', color: '#0f0', bpmnNodeType: 'task' })
   })
 
+  it('credits the copy to whoever duplicated it', () => {
+    // Duplicating is creating, and the profile panel promises the local id
+    // signs what you create. Pasting already re-stamps the same way, so
+    // Ctrl+D and Ctrl+C/Ctrl+V agree about authorship.
+    const { doc, elements } = board([element('a', { createdBy: 'colleague' })])
+    duplicateElements(doc, elements, ['a'], () => 'copy', undefined, 'me')
+    expect(elements.toArray().find(e => e.id === 'copy')!.createdBy).toBe('me')
+    expect(elements.toArray().find(e => e.id === 'a')!.createdBy).toBe('colleague')
+  })
+
+  it('keeps the original author when no one is named', () => {
+    const { doc, elements } = board([element('a', { createdBy: 'colleague' })])
+    duplicateElements(doc, elements, ['a'], () => 'copy')
+    expect(elements.toArray().find(e => e.id === 'copy')!.createdBy).toBe('colleague')
+  })
+
   it('returns nothing and writes nothing for an empty selection', () => {
     const { doc, elements } = board([element('a')])
     const updates = countUpdates(doc)
