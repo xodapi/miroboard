@@ -234,6 +234,27 @@ describe('App smoke', () => {
     expect(after.color).toBe(before.color)
   })
 
+  describe('dirty state and saving', () => {
+    function status(): string | null {
+      return container.querySelector('[role="status"]')?.textContent ?? null
+    }
+
+    it('marks the document dirty after an edit and clean after a save', async () => {
+      // The File System Access API is absent in jsdom, so saveDocument() takes
+      // its download branch — which also reports { kind: 'saved' }, exactly the
+      // path the e2e suites exercise through a stubbed showSaveFilePicker.
+      expect(status()).toBe('Сохранено')
+
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      expect(status()).toBe('Не сохранено')
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      expect(status()).toBe('Сохранено')
+    })
+  })
+
   describe('clipboard', () => {
     /** Ctrl+V awaits the (usually unavailable) system clipboard, so it needs an async act. */
     async function keyAsync(k: string, init: KeyboardEventInit = {}) {
