@@ -24,6 +24,7 @@ import { BpmnTaskProperties } from './components/BpmnTaskProperties'
 import { BpmnFlowProperties } from './components/BpmnFlowProperties'
 import { ColorPicker } from './components/ColorPicker'
 import { BoardHeader } from './components/BoardHeader'
+import { ZoomControls, ElementCount } from './components/ZoomControls'
 import { BottomToolbar } from './components/BottomToolbar'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingTour } from './components/OnboardingTour'
@@ -1847,7 +1848,6 @@ export default function App() {
   // Extracted panels take the whole theme rather than five separate props.
   const theme = createTheme(darkMode)
   const bgMain = '#F7F8FC'
-  const borderC = 'border-slate-200'
   const textC = 'text-slate-900'
   const textSec = 'text-slate-500'
   const hoverBg = 'hover:bg-slate-100'
@@ -2195,36 +2195,15 @@ export default function App() {
         />
       )}
       {/* ===== ZOOM CONTROLS ===== */}
-      <div className="absolute right-3 bottom-[120px] z-20 flex flex-col gap-1.5" data-ui>
-        <div className={`flex flex-col rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC} overflow-hidden`}>
-          <button onClick={() => setTransform(t => ({ ...t, scale: clamp_scale(t.scale * 1.2) }))}
-            className={`size-10 grid place-items-center ${hoverBg} ${textSec}`}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14" /></svg>
-          </button>
-          <div className={`h-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
-          <button onClick={() => setTransform(t => ({ ...t, scale: Math.max(t.scale / 1.2, 0.15) }))}
-            className={`size-10 grid place-items-center ${hoverBg} ${textSec}`}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14" /></svg>
-          </button>
-          <div className={`h-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
-          <button onClick={fitToContent} title="Подогнать содержимое (0)" className={`size-10 grid place-items-center ${hoverBg} ${textSec}`}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
-          </button>
-        </div>
-        <div className={`h-8 px-2.5 grid place-items-center rounded-xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC} text-[11px] font-medium ${dk ? 'text-slate-300' : 'text-black/60'} tabular-nums`}>
-          {Math.round(transform.scale * 100)}%
-        </div>
-      </div>
+      <ZoomControls
+        theme={theme}
+        scale={transform.scale}
+        onZoomIn={() => setTransform(t => ({ ...t, scale: clamp_scale(t.scale * 1.2) }))}
+        onZoomOut={() => setTransform(t => ({ ...t, scale: clamp_scale(t.scale / 1.2) }))}
+        onFitToContent={fitToContent}
+      />
       {/* ===== ELEMENT COUNT ===== */}
-      {elements.length > 0 && (
-        // pointer-events-none: this badge is a read-out, not a control, and it
-        // floats over the top-left of the canvas — where a marquee naturally
-        // starts. Without it the badge swallowed the pointerdown and the drag
-        // began on a UI element, so the rubber band never appeared.
-        <div className={`pointer-events-none absolute top-[60px] left-3 z-10 h-6 px-2.5 rounded-full ${dk ? 'bg-slate-800/80 border-slate-600' : 'bg-white/80 border-black/5'} border backdrop-blur-sm text-[11px] font-medium ${dk ? 'text-slate-400' : 'text-black/40'} flex items-center gap-1`} data-testid="element-count">
-          {elements.length} элем.
-        </div>
-      )}
+      {elements.length > 0 && <ElementCount theme={theme} count={elements.length} />}
       <style>{`
         * { -webkit-tap-highlight-color: transparent; }
         html, body { overscroll-behavior: none; position: fixed; overflow: hidden; width: 100%; height: 100%; }
