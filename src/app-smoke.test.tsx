@@ -221,6 +221,24 @@ describe('App smoke', () => {
     expect(transforms()).toEqual([shift(before[0], 50, 20), shift(before[1], 50, 20)])
   })
 
+  it('starts a marquee under the element-count badge', () => {
+    // The badge floats at the top-left of the canvas, exactly where a marquee
+    // naturally starts, and it appears only once the board is non-empty — so it
+    // could swallow the pointerdown that begins a rubber-band selection. It is a
+    // read-out, not a control, and must stay transparent to pointer input.
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+
+    const badge = byTestId('element-count')
+    expect(badge).not.toBeNull()
+    expect(badge!.className).toContain('pointer-events-none')
+    expect(badge!.closest('[data-ui]')).toBeNull()
+
+    // A marquee whose start point sits on the badge still selects both elements.
+    dragMarquee({ x: 16, y: 62 }, { x: 600, y: 500 })
+    expect(byTestId('selection-count')!.textContent).toContain('2')
+  })
+
   it('clears a multi-selection on Escape', () => {
     placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
     placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
@@ -357,6 +375,46 @@ describe('App smoke', () => {
       })
       await flush()
       expect(written().length).toBeGreaterThan(0)
+      expect(status()).toBe('Сохранено')
+    })
+
+    /**
+     * The regression that six cross-* suites caught and jsdom did not: all of
+     * them load an educational example before saving. Loading one calls
+     * setArrivalClasses/setRolePolicies, which feed simulationProfile, which
+     * drives the effect that writes profileConfig back into the document. That
+     * write lands after the save completes and re-dirties a document the user
+     * just saved.
+     *
+     * The hydration guard is what suppresses the echo, and it recognises a
+     * document-borne config by its transaction origin.
+     *
+     * Honest caveat: this test passes with the bug still in place. jsdom runs
+     * the whole flow synchronously enough that the echoing write lands before
+     * the save rather than after it, which is exactly why six browser suites
+     * caught this and the unit suite did not. It is kept as a cheap guard on
+     * the flow, not as proof of the fix — the proof is the cross-* suites.
+     */
+    it('stays clean after saving a document loaded from an example', async () => {
+      act(() => {
+        [...container.querySelectorAll('button')]
+          .find(button => button.getAttribute('title') === 'Учебные BPMN-примеры')!
+          .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      act(() => {
+        [...container.querySelectorAll('button')]
+          .find(button => button.textContent?.includes('Загрузить'))!
+          .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flush()
+      expect(container.querySelectorAll('[data-id]').length).toBeGreaterThan(0)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      // Let every queued effect — including the profileConfig echo — settle.
+      await flush()
       expect(status()).toBe('Сохранено')
     })
 
