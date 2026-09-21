@@ -365,7 +365,11 @@ export default function App() {
     captureTriggersRef.current = createCaptureTriggers({
       ydoc,
       capture: appendCheckpoint,
-      ignoredOrigins: new Set([RECOVERY_ORIGIN, HISTORY_RESTORE_ORIGIN]),
+      // The same rule as the dirty tracker above, from the same place: opening
+      // a file is not an edit. This set used to be spelled out by hand without
+      // LOAD, so opening a document counted as an edit and the interval timer
+      // then wrote an "Авто" checkpoint for a board nobody had touched.
+      ignoredOrigins: NON_EDIT_ORIGINS,
     })
     profileConfigRef.current = profileConfig
     if (!meta.has('id')) {
