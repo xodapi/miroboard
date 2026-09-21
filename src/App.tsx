@@ -26,6 +26,7 @@ import { ColorPicker } from './components/ColorPicker'
 import { BoardHeader } from './components/BoardHeader'
 import { ZoomControls, ElementCount } from './components/ZoomControls'
 import { CanvasBackground } from './components/CanvasBackground'
+import { useSimulationSettings } from './board/use-simulation-settings'
 import { BottomToolbar } from './components/BottomToolbar'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingTour } from './components/OnboardingTour'
@@ -44,7 +45,7 @@ import { HistoryRetentionControls } from './history/HistoryRetentionControls'
 import { attachRecoveryCache } from './persistence/indexeddb'
 import { createRecoverySession, inspectRecoverySession, setRecoverySession } from './persistence/recovery-session'
 import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/legacy-adoption'
-import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
+import { bpmnSimulationFromProfileConfig, withBpmnSimulation } from './format/profile-config'
 import { serialise } from './format/mboard'
 import type { DocHistory, DocMeta, HistorySnapshot, ProfileConfig } from './format/types'
 import { HelpPanel } from './HelpPanel'
@@ -54,8 +55,8 @@ import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeIn
 import { genId } from './board/id'
 import { STICKY_COLORS } from './board/palette'
 import type {
-  ArrivalClassDraft, BoardElement, BpmnNodeType, BpmnSimulationResult, ContextMenuAction, EducationalExample,
-  ImportedBpmnModel, PendingOpen, Point, RolePolicyDraft, Tool, WorkspaceMode,
+  BoardElement, BpmnNodeType, BpmnSimulationResult, ContextMenuAction, EducationalExample,
+  ImportedBpmnModel, PendingOpen, Point, Tool, WorkspaceMode,
 } from './board/types'
 declare global {
   interface Window {
@@ -116,15 +117,10 @@ export default function App() {
   const [bpmnSimulationResult, setBpmnSimulationResult] = useState<BpmnSimulationResult | null>(null)
   const [bottleneckRole, setBottleneckRole] = useState<string | null>(null)
   const [simulationResultFingerprint, setSimulationResultFingerprint] = useState<string | null>(null)
-  const [simulationSeed, setSimulationSeed] = useState('42')
-  const [simulationRuns, setSimulationRuns] = useState('500')
-  const [simulationTarget, setSimulationTarget] = useState('')
-  const [simulationInstances, setSimulationInstances] = useState('1')
-  const [arrivalInterval, setArrivalInterval] = useState('0')
-  const [arrivalClasses, setArrivalClasses] = useState<ArrivalClassDraft[]>([])
-  const [rolePolicies, setRolePolicies] = useState<Record<string, RolePolicyDraft>>({})
-  const [calendarStart, setCalendarStart] = useState('')
-  const [calendarEnd, setCalendarEnd] = useState('')
+  const simulation = useSimulationSettings()
+  // Stable across renders (it is the raw setState), so the long-lived
+  // profileConfig observer can capture it without re-subscribing.
+  const replaceSimulation = simulation.replace
   const [bpmnProfileActive, setBpmnProfileActive] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
@@ -258,7 +254,7 @@ export default function App() {
     // Only emit roles the user actually configured. An empty list keeps the
     // engine on the per-node `resourceCapacity` fallback, so untouched boards
     // simulate exactly as before.
-    const resourceRoles = Object.entries(rolePolicies)
+    const resourceRoles = Object.entries(simulation.rolePolicies)
       .filter(([name]) => nodes.some((node) => node.resourceRole === name))
       .map(([name, policy]) => ({
         name,
@@ -268,19 +264,19 @@ export default function App() {
     return {
       nodes,
       flows,
-      slaTargetMs: simulationTarget ? Number(simulationTarget) * 1000 : undefined,
-      calendarWorkStartMs: calendarStart ? Number(calendarStart) * 3_600_000 : undefined,
-      calendarWorkEndMs: calendarEnd ? Number(calendarEnd) * 3_600_000 : undefined,
-      simulationInstances: Number(simulationInstances) || 1,
-      arrivalIntervalMs: Math.max(0, Number(arrivalInterval) || 0) * 1000,
-      arrivalClasses: arrivalClasses.map((arrivalClass) => ({
+      slaTargetMs: simulation.slaTargetSec ? Number(simulation.slaTargetSec) * 1000 : undefined,
+      calendarWorkStartMs: simulation.calendarStartHour ? Number(simulation.calendarStartHour) * 3_600_000 : undefined,
+      calendarWorkEndMs: simulation.calendarEndHour ? Number(simulation.calendarEndHour) * 3_600_000 : undefined,
+      simulationInstances: Number(simulation.instances) || 1,
+      arrivalIntervalMs: Math.max(0, Number(simulation.arrivalIntervalSec) || 0) * 1000,
+      arrivalClasses: simulation.arrivalClasses.map((arrivalClass) => ({
         count: Math.max(1, Number(arrivalClass.count) || 1),
         intervalMs: Math.max(0, Number(arrivalClass.intervalSec) || 0) * 1000,
         priority: Number(arrivalClass.priority) || 0,
       })),
       resourceRoles,
     }
-  }, [elements, simulationTarget, calendarStart, calendarEnd, simulationInstances, arrivalInterval, arrivalClasses, rolePolicies])
+  }, [elements, simulation.slaTargetSec, simulation.calendarStartHour, simulation.calendarEndHour, simulation.instances, simulation.arrivalIntervalSec, simulation.arrivalClasses, simulation.rolePolicies])
   const createSimulationBpmnModel = useCallback(() => {
     const model = createBpmnModel()
     return {
@@ -299,8 +295,8 @@ export default function App() {
   // immediately after an edit, without scheduling synchronous state updates from
   // an effect.
   const simulationFingerprint = useMemo(
-    () => JSON.stringify({ model: createSimulationBpmnModel(), seed: simulationSeed, runs: simulationRuns }),
-    [createSimulationBpmnModel, simulationSeed, simulationRuns],
+    () => JSON.stringify({ model: createSimulationBpmnModel(), seed: simulation.seed, runs: simulation.runs }),
+    [createSimulationBpmnModel, simulation.seed, simulation.runs],
   )
   const bpmnIssues = useMemo(() => {
     const model = createBpmnModel()
@@ -377,9 +373,9 @@ export default function App() {
     const applyProfileConfig = (_event?: unknown, transaction?: Y.Transaction) => {
       const config = profileConfig.toJSON() as ProfileConfig
       profileConfigJsonRef.current = JSON.stringify(config)
-      const simulation = bpmnSimulationFromProfileConfig(config)
-      setBpmnProfileActive(simulation !== null)
-      if (!simulation) {
+      const incoming = bpmnSimulationFromProfileConfig(config)
+      setBpmnProfileActive(incoming !== null)
+      if (!incoming) {
         setWorkspaceMode('board')
         setShowSimulationPanel(false)
         return
@@ -394,13 +390,7 @@ export default function App() {
       // opens were relabelled LOAD; NON_EDIT_ORIGINS keeps the rule in one place
       // (src/collab/origins.ts) so the next origin added cannot miss this site.
       profileConfigHydratingRef.current = NON_EDIT_ORIGINS.has(transaction?.origin)
-      setSimulationSeed(simulation.seed); setSimulationRuns(simulation.runs)
-      setSimulationTarget(simulation.slaTargetSec); setSimulationInstances(simulation.instances)
-      setArrivalInterval(simulation.arrivalIntervalSec)
-      setArrivalClasses(simulation.arrivalClasses)
-      setRolePolicies(simulation.rolePolicies)
-      setCalendarStart(simulation.calendarStartHour)
-      setCalendarEnd(simulation.calendarEndHour)
+      replaceSimulation(incoming)
     }
     profileConfig.observe(applyProfileConfig)
     applyProfileConfig()
@@ -470,22 +460,13 @@ export default function App() {
       persistence?.destroy()
       ydoc.destroy()
     }
-  }, [appendCheckpoint, showToast, ydoc])
+  }, [appendCheckpoint, replaceSimulation, showToast, ydoc])
   useEffect(() => {
     return addBeforeUnloadGuard(isDirty)
   }, [isDirty])
-  const simulationProfile = useMemo(() => ({
-    ...DEFAULT_BPMN_SIMULATION,
-    seed: simulationSeed,
-    runs: simulationRuns,
-    slaTargetSec: simulationTarget,
-    instances: simulationInstances,
-    arrivalIntervalSec: arrivalInterval,
-    calendarStartHour: calendarStart,
-    calendarEndHour: calendarEnd,
-    arrivalClasses,
-    rolePolicies,
-  }), [simulationSeed, simulationRuns, simulationTarget, simulationInstances, arrivalInterval, calendarStart, calendarEnd, arrivalClasses, rolePolicies])
+  // Identical to the draft by construction: SimulationSettings holds exactly the
+  // SimulationDraft shape, so there is nothing left to assemble here.
+  const simulationProfile = simulation.draft
   useEffect(() => {
     if (!bpmnProfileActive || !profileConfigRef.current) return
     if (profileConfigHydratingRef.current) { profileConfigHydratingRef.current = false; return }
@@ -985,9 +966,9 @@ export default function App() {
   const simulateBpmn = useCallback(() => {
     if (previewSnapshot) return void showToast('Симуляция недоступна во время просмотра истории.', 'info')
     try {
-      const runs = Number(simulationRuns)
+      const runs = Number(simulation.runs)
       if (!Number.isInteger(runs) || runs < 1 || runs > 10000) throw new Error('Количество прогонов должно быть целым числом от 1 до 10000.')
-      const result = JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createSimulationBpmnModel()), simulationSeed, runs)) as BpmnSimulationResult
+      const result = JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createSimulationBpmnModel()), simulation.seed, runs)) as BpmnSimulationResult
       const seconds = (value: number) => `${(value / 1000).toFixed(1)}с`
       setBpmnSimulationResult(result)
       setBottleneckRole(result.roleUtilization[0]?.role ?? null)
@@ -999,7 +980,7 @@ export default function App() {
       setSimulationResultFingerprint(null)
       showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.', 'error')
     }
-  }, [createSimulationBpmnModel, previewSnapshot, simulationFingerprint, simulationRuns, simulationSeed, showToast])
+  }, [createSimulationBpmnModel, previewSnapshot, simulationFingerprint, simulation.runs, simulation.seed, showToast])
   const visibleSimulationResult = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationResult : null
   const visibleSimulationSummary = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationSummary : null
   const visibleBottleneckRole = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bottleneckRole : null
@@ -1101,35 +1082,27 @@ export default function App() {
         bpmnFlow: { sourceId: flow.sourceId, targetId: flow.targetId, flowType: flow.flowType || 'sequence', condition: flow.condition, probability: flow.probability, isDefault: flow.isDefault },
       }])
     }, LOCAL_TEMPLATE)
-    // Load arrival classes if provided
-    if (example.model.arrivalClasses) {
-      setArrivalClasses(
-        example.model.arrivalClasses.map((ac) => ({
-          count: String(ac.count),
-          intervalSec: String(ac.intervalMs / 1000),
-          priority: String(ac.priority),
-        }))
-      )
-    } else {
-      setArrivalClasses([])
-    }
-    // Load role policies if provided
-    if (example.model.resourceRoles) {
-      const policies: Record<string, RolePolicyDraft> = {}
-      for (const role of example.model.resourceRoles) {
-        policies[role.name] = {
-          capacity: String(role.capacity),
-          queuePolicy: role.queuePolicy ?? 'fifo',
-        }
-      }
-      setRolePolicies(policies)
-    } else {
-      setRolePolicies({})
-    }
+    // Only the two collections the example actually carries. Seed, runs and the
+    // SLA target deliberately survive a module load — the original code left
+    // them alone, and changing that is a behaviour decision, not a refactor.
+    replaceSimulation(current => ({
+      ...current,
+      arrivalClasses: (example.model.arrivalClasses ?? []).map(arrivalClass => ({
+        count: String(arrivalClass.count),
+        intervalSec: String(arrivalClass.intervalMs / 1000),
+        priority: String(arrivalClass.priority),
+      })),
+      rolePolicies: Object.fromEntries(
+        (example.model.resourceRoles ?? []).map(role => [
+          role.name,
+          { capacity: String(role.capacity), queuePolicy: role.queuePolicy ?? 'fifo' },
+        ]),
+      ),
+    }))
     setSelectedIds(clearSelection())
     setTransform({ x: 0, y: 0, scale: 1 })
     showToast(`Загружен модуль: ${example.title}. Откройте Симуляцию для проверки.`, 'success')
-  }, [userProfile.id, ydoc, showToast])
+  }, [userProfile.id, ydoc, showToast, replaceSimulation])
 
   // ======================== POINTER HANDLERS ========================
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -2123,27 +2096,27 @@ export default function App() {
       {/* ===== SIMULATION MODAL ===== */}
       {showSimulationPanel && !isPreview && (
         <SimulationModal
-        arrivalClasses={arrivalClasses}
-        arrivalInterval={arrivalInterval}
-        calendarEnd={calendarEnd}
-        calendarStart={calendarStart}
+        arrivalClasses={simulation.arrivalClasses}
+        arrivalInterval={simulation.arrivalIntervalSec}
+        calendarEnd={simulation.calendarEndHour}
+        calendarStart={simulation.calendarStartHour}
         detectedRoles={detectedRoles}
         dk={dk}
         hoverBg={hoverBg}
-        rolePolicies={rolePolicies}
-        setArrivalClasses={setArrivalClasses}
-        setArrivalInterval={setArrivalInterval}
-        setCalendarEnd={setCalendarEnd}
-        setCalendarStart={setCalendarStart}
-        setRolePolicies={setRolePolicies}
-        setSimulationInstances={setSimulationInstances}
-        setSimulationRuns={setSimulationRuns}
-        setSimulationSeed={setSimulationSeed}
-        setSimulationTarget={setSimulationTarget}
-        simulationInstances={simulationInstances}
-        simulationRuns={simulationRuns}
-        simulationSeed={simulationSeed}
-        simulationTarget={simulationTarget}
+        rolePolicies={simulation.rolePolicies}
+        setArrivalClasses={simulation.setArrivalClasses}
+        setArrivalInterval={simulation.setArrivalIntervalSec}
+        setCalendarEnd={simulation.setCalendarEndHour}
+        setCalendarStart={simulation.setCalendarStartHour}
+        setRolePolicies={simulation.setRolePolicies}
+        setSimulationInstances={simulation.setInstances}
+        setSimulationRuns={simulation.setRuns}
+        setSimulationSeed={simulation.setSeed}
+        setSimulationTarget={simulation.setSlaTargetSec}
+        simulationInstances={simulation.instances}
+        simulationRuns={simulation.runs}
+        simulationSeed={simulation.seed}
+        simulationTarget={simulation.slaTargetSec}
         simulateBpmn={simulateBpmn}
         textSec={textSec}
         visibleBottleneckRole={visibleBottleneckRole}
