@@ -13,12 +13,20 @@ export function isShallowSubset<T extends object>(
   ))
 }
 
-/** Apply one field-level element update, avoiding no-op Yjs transactions. */
+/**
+ * Apply one field-level element update, avoiding no-op Yjs transactions.
+ *
+ * `origin` labels the write for the UndoManager, the dirty tracker and the
+ * checkpoint triggers. It defaults to `undefined` (Yjs's "unlabelled local
+ * write") so existing call sites and tests keep working while they migrate to
+ * the explicit origins in `src/collab/origins.ts`.
+ */
 export function commitElementUpdate<T extends ElementRecord>(
   doc: Y.Doc,
   elements: Y.Array<T>,
   id: string,
   updates: Partial<T>,
+  origin?: unknown,
 ): boolean {
   const index = elements.toArray().findIndex(element => element.id === id)
   if (index < 0) return false
@@ -27,6 +35,6 @@ export function commitElementUpdate<T extends ElementRecord>(
   doc.transact(() => {
     elements.delete(index, 1)
     elements.insert(index, [{ ...current, ...updates } as T])
-  })
+  }, origin)
   return true
 }

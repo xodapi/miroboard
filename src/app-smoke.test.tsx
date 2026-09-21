@@ -1,0 +1,693 @@
+/**
+ * Browser-shaped smoke test for the whole App.
+ *
+ * The repo's interaction coverage lives in Playwright, but this suite runs in
+ * jsdom so the wiring that unit tests cannot see — pointer handlers, keyboard
+ * shortcuts, the selection lifecycle, the profile panel — is verified on every
+ * `npm test` instead of only in CI with a browser.
+ *
+ * The Rust/WASM core is stubbed: this file tests the shell, not the engine.
+ */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('./wasm/board-core/board_core', () => ({
+  clamp_scale: (value: number) => Math.min(Math.max(value, 0.1), 8),
+  snap_to_grid: (value: number, grid: number) => Math.round(value / grid) * grid,
+  validate_bpmn: () => JSON.stringify({ issues: [] }),
+  run_bpmn: () => JSON.stringify({}),
+  simulate_bpmn: () => JSON.stringify({}),
+  simulate_bpmn_seed_string: () => JSON.stringify({}),
+  export_bpmn_xml: () => '',
+  import_bpmn_xml: () => JSON.stringify({ nodes: [], flows: [] }),
+}))
+
+import App from './App'
+import { PROFILE_STORAGE_KEY } from './collab/user-profile'
+
+let container: HTMLDivElement
+let root: Root
+
+function mount() {
+  container = document.createElement('div')
+  document.body.appendChild(container)
+  root = createRoot(container)
+  act(() => { root.render(<App />) })
+}
+
+async function remount() {
+  await act(async () => { root.unmount() })
+  container.remove()
+  mount()
+}
+
+function q(selector: string): Element | null {
+  return container.querySelector(selector)
+}
+
+function byTestId(id: string): HTMLElement | null {
+  return container.querySelector(`[data-testid="${id}"]`) as HTMLElement | null
+}
+
+function key(k: string, init: KeyboardEventInit = {}) {
+  act(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }))
+  })
+}
+
+function pointer(el: Element, type: string, init: PointerEventInit = {}) {
+  act(() => {
+    el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 1, isPrimary: true, pointerType: 'mouse', ...init }))
+  })
+}
+
+/**
+ * Drag out a rectangle. Rects are used instead of stickies because creating a
+ * sticky immediately opens its text editor, and an open editor swallows tool
+ * hotkeys (by design — see the `editingText` guard in the keydown handler).
+ */
+function placeRect(from: { x: number; y: number }, to: { x: number; y: number }) {
+  key('r')
+  const canvas = byTestId('canvas')!
+  pointer(canvas, 'pointerdown', { clientX: from.x, clientY: from.y })
+  pointer(canvas, 'pointermove', { clientX: to.x, clientY: to.y })
+  pointer(canvas, 'pointerup', { clientX: to.x, clientY: to.y })
+}
+
+/** World positions of every element, in render order. */
+function transforms(): string[] {
+  return [...container.querySelectorAll('g[data-id]')].map(g => g.getAttribute('transform') ?? '')
+}
+
+function shift(transform: string, dx: number, dy: number): string {
+  const match = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(transform)
+  if (!match) throw new Error(`unexpected transform ${transform}`)
+  return `translate(${Number(match[1]) + dx},${Number(match[2]) + dy})`
+}
+
+function dragMarquee(from: { x: number; y: number }, to: { x: number; y: number }, shift = false) {
+  // Drawing tools stay armed after they create an element, so a marquee always
+  // starts by switching back to Select — exactly what a user does.
+  key('v')
+  const canvas = byTestId('canvas')!
+  pointer(canvas, 'pointerdown', { clientX: from.x, clientY: from.y, shiftKey: shift })
+  pointer(canvas, 'pointermove', { clientX: (from.x + to.x) / 2, clientY: (from.y + to.y) / 2, shiftKey: shift })
+  pointer(canvas, 'pointermove', { clientX: to.x, clientY: to.y, shiftKey: shift })
+  pointer(canvas, 'pointerup', { clientX: to.x, clientY: to.y, shiftKey: shift })
+}
+
+beforeEach(() => {
+  localStorage.clear()
+  // Skip the onboarding tour so the canvas is directly interactive.
+  localStorage.setItem('miro-onboarding-seen', '1')
+  document.body.innerHTML = ''
+  mount()
+})
+
+afterEach(async () => {
+  await act(async () => { root.unmount() })
+  container.remove()
+  vi.restoreAllMocks()
+})
+
+describe('App smoke', () => {
+  it('renders the canvas, the toolbar and the participant profile', () => {
+    expect(byTestId('canvas')).not.toBeNull()
+    expect(byTestId('profile-button')).not.toBeNull()
+    expect(q('svg')).not.toBeNull()
+  })
+
+  it('creates elements with the tool hotkeys', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+    expect(container.querySelectorAll('[data-id]').length).toBe(2)
+  })
+
+  it('selects one element on click and clears on Escape', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    const element = container.querySelector('[data-id]')!
+    pointer(element, 'pointerdown', { clientX: 110, clientY: 110 })
+    pointer(element, 'pointerup', { clientX: 110, clientY: 110 })
+    expect(byTestId('selection-count')).toBeNull() // single selection has no badge
+
+    key('Escape')
+    expect(byTestId('selection-count')).toBeNull()
+  })
+
+  it('marquee-selects several elements and reports the count', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+    expect(byTestId('selection-count')).toBeNull()
+
+    // The drag starts on empty canvas: (5,5) is outside both rects.
+    dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+
+    const badge = byTestId('selection-count')
+    expect(badge).not.toBeNull()
+    expect(badge!.textContent).toContain('2')
+  })
+
+  it('deletes the whole selection with one Delete press', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+    placeRect({ x: 900, y: 900 }, { x: 950, y: 950 })
+
+    dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+    expect(byTestId('selection-count')!.textContent).toContain('2')
+
+    key('Delete')
+    expect(container.querySelectorAll('[data-id]').length).toBe(1)
+    expect(byTestId('selection-count')).toBeNull()
+  })
+
+  it('extends the selection with a Shift marquee', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 900, y: 900 }, { x: 950, y: 950 })
+
+    dragMarquee({ x: 5, y: 5 }, { x: 300, y: 300 })
+    expect(byTestId('selection-count')).toBeNull() // one element: no badge
+
+    dragMarquee({ x: 800, y: 800 }, { x: 1000, y: 1000 }, true)
+    expect(byTestId('selection-count')!.textContent).toContain('2')
+  })
+
+  it('moves the whole selection as one group', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+    dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+    expect(byTestId('selection-count')!.textContent).toContain('2')
+
+    const before = transforms()
+    const first = container.querySelector('g[data-id]')!
+    pointer(first, 'pointerdown', { clientX: 120, clientY: 120 })
+    pointer(first, 'pointermove', { clientX: 170, clientY: 140 })
+    pointer(first, 'pointerup', { clientX: 170, clientY: 140 })
+
+    expect(transforms()).toEqual([shift(before[0], 50, 20), shift(before[1], 50, 20)])
+  })
+
+  // The two tests below are the reason gesture geometry lives in
+  // src/board/gesture.ts. Both dispatch pointerdown and pointerup with nothing
+  // in between, which is what a flick is: React has rendered nothing since the
+  // press, so a handler that finishes the gesture from state would use the
+  // geometry captured at pointerdown — a zero-size marquee that selects nothing,
+  // and no drag frame at all.
+  it('finishes a flicked marquee that never rendered an intermediate move', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+
+    key('v')
+    const canvas = byTestId('canvas')!
+    pointer(canvas, 'pointerdown', { clientX: 5, clientY: 5 })
+    pointer(canvas, 'pointerup', { clientX: 600, clientY: 500 })
+
+    expect(byTestId('selection-count')!.textContent).toContain('2')
+  })
+
+  it('finishes a flicked group drag at the release point', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+    dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+    expect(byTestId('selection-count')!.textContent).toContain('2')
+
+    const before = transforms()
+    const first = container.querySelector('g[data-id]')!
+    pointer(first, 'pointerdown', { clientX: 120, clientY: 120 })
+    pointer(first, 'pointerup', { clientX: 170, clientY: 140 })
+
+    expect(transforms()).toEqual([shift(before[0], 50, 20), shift(before[1], 50, 20)])
+  })
+
+  it('starts a marquee under the element-count badge', () => {
+    // The badge floats at the top-left of the canvas, exactly where a marquee
+    // naturally starts, and it appears only once the board is non-empty — so it
+    // could swallow the pointerdown that begins a rubber-band selection. It is a
+    // read-out, not a control, and must stay transparent to pointer input.
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+
+    const badge = byTestId('element-count')
+    expect(badge).not.toBeNull()
+    expect(badge!.className).toContain('pointer-events-none')
+    expect(badge!.closest('[data-ui]')).toBeNull()
+
+    // A marquee whose start point sits on the badge still selects both elements.
+    dragMarquee({ x: 16, y: 62 }, { x: 600, y: 500 })
+    expect(byTestId('selection-count')!.textContent).toContain('2')
+  })
+
+  it('clears a multi-selection on Escape', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+    dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+    expect(byTestId('selection-count')).not.toBeNull()
+
+    key('Escape')
+    expect(byTestId('selection-count')).toBeNull()
+    expect(container.querySelectorAll('[data-id]').length).toBe(2) // nothing deleted
+  })
+
+  // Undo of a bulk delete is asserted in the browser suite
+  // (tests/multi-select.spec.ts): Yjs' UndoManager relies on real timers, which
+  // this jsdom harness cannot drive faithfully. The invariant that makes it one
+  // undo step — a single Yjs transaction — is unit-tested in
+  // src/collab/bulk-operations.test.ts.
+
+
+  it('edits and persists the participant profile', async () => {
+    act(() => { byTestId('profile-button')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    const panel = byTestId('profile-panel')
+    expect(panel).not.toBeNull()
+
+    const input = byTestId('profile-name-input') as HTMLInputElement
+    act(() => {
+      // React tracks controlled inputs through the native value setter.
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'Алиса')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(byTestId('profile-panel')!.textContent).toContain('Алиса')
+
+    const stored = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY)!)
+    expect(stored.name).toBe('Алиса')
+    expect(stored.color).toMatch(/^#/)
+
+    await remount()
+    expect(byTestId('profile-button')!.getAttribute('title')).toContain('Алиса')
+  })
+
+  it('keeps the profile author id stable across a reload', async () => {
+    const before = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY)!)
+    await remount()
+    const after = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY)!)
+    expect(after.id).toBe(before.id)
+    expect(after.color).toBe(before.color)
+  })
+
+  describe('dirty state and saving', () => {
+    function status(): string | null {
+      return container.querySelector('[role="status"]')?.textContent ?? null
+    }
+
+    /** File operations run through a queue, so a macrotask has to pass before their effects are visible. */
+    async function flush() {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    }
+
+    /**
+     * The four cross-* e2e specs that went red all follow the same shape: open a
+     * saved document, then save it again and expect the toolbar to read
+     * "Сохранено". Reproduced here without a browser.
+     */
+    function stubFileSession(fileName: string, contents: string) {
+      let written = ''
+      const handle = {
+        kind: 'file',
+        name: fileName,
+        async createWritable() {
+          return { write: async (value: string) => { written = value }, close: async () => undefined }
+        },
+        async getFile() {
+          return { name: fileName, type: 'application/json', size: contents.length, text: async () => contents }
+        },
+      }
+      Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: async () => handle })
+      Object.defineProperty(window, 'showOpenFilePicker', { configurable: true, value: async () => [handle] })
+      return () => written
+    }
+
+    it('does not commit a flushed drag twice when the pointer is released', async () => {
+      const written = stubFileSession('board.mboard', '')
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+
+      const element = container.querySelector('g[data-id]')!
+      pointer(element, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 300, clientY: 300 })
+
+      // Saving lands the drag. Releasing afterwards recomputes the frame from
+      // the release point, so it must agree rather than shift the element on.
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 300, clientY: 300 })
+
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(280,280)')
+      expect(JSON.parse(written()).nodes[0].frame).toMatchObject({ x: 280, y: 280 })
+    })
+
+    it('duplicates from where a dragged element is now, not where it started', () => {
+      stubFileSession('board.mboard', '')
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+
+      const element = container.querySelector('g[data-id]')!
+      pointer(element, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 300, clientY: 300 })
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(280,280)')
+
+      key('d', { ctrlKey: true })
+
+      // The copy is offset from the source. Without flushing the gesture the
+      // source is still at its pre-drag position in the document, so the copy
+      // landed at (120,120) — beside a rectangle the user had already dragged
+      // away from.
+      const placed = [...container.querySelectorAll('g[data-id]')].map(g => g.getAttribute('transform'))
+      expect(placed).toEqual(['translate(280,280)', 'translate(300,300)'])
+    })
+
+    it('saves what is on screen when a drag is still in progress', async () => {
+      const written = stubFileSession('board.mboard', '')
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+
+      // Begin a drag and move, but never release: the new position lives only
+      // in transientFrame until pointerup commits it to the document.
+      const element = container.querySelector('g[data-id]')!
+      pointer(element, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 300, clientY: 300 })
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(280,280)')
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+
+      // Ctrl+S serialises the document, so an uncommitted drag would be saved
+      // at the position the user had already dragged away from.
+      const saved = JSON.parse(written())
+      const frame = saved.nodes[0].frame
+      expect([frame.x, frame.y]).toEqual([280, 280])
+    })
+
+    /**
+     * The cross-* specs save a live document and then reopen the saved file,
+     * which carries `history.yjsState`. Reopening such a file takes the
+     * `Y.applyUpdate(..., RECOVERY_ORIGIN)` branch nested inside the LOAD
+     * transaction of applyOpenOutcome — the path the four failing e2e specs
+     * exercise and the one a fixture without yjsState never reaches.
+     */
+    it('reopens a saved document with a clean dirty state', async () => {
+      const fixture = readFileSync(resolve('examples', 'freeform-board.mboard'), 'utf8')
+      let written = stubFileSession('freeform-board.mboard', fixture)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      expect(container.querySelectorAll('[data-id]').length).toBeGreaterThan(0)
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      const saved = written()
+      expect(saved.length).toBeGreaterThan(0)
+      expect(JSON.parse(saved).history.yjsState).toBeTruthy()
+      expect(status()).toBe('Сохранено')
+
+      // Reopen exactly what was written, the way the e2e specs do. Opening is
+      // labelled LOAD, which must not report unsaved changes.
+      //
+      // Only the dirty state is asserted here: rendering a document restored
+      // from `history.yjsState` yields no elements under jsdom, and it does so
+      // identically on the base commit, so that part is a limitation of this
+      // harness rather than behaviour. The browser path is covered by the
+      // cross-* e2e suites.
+      written = stubFileSession('freeform-board.mboard', saved)
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      expect(status()).toBe('Сохранено')
+    })
+
+    it('keeps a reopened document clean after saving it again', async () => {
+      const fixture = readFileSync(resolve('examples', 'freeform-board.mboard'), 'utf8')
+      const written = stubFileSession('freeform-board.mboard', fixture)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      expect(container.querySelectorAll('[data-id]').length).toBeGreaterThan(0)
+      expect(status()).toBe('Сохранено')
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      expect(written().length).toBeGreaterThan(0)
+      expect(status()).toBe('Сохранено')
+    })
+
+    /**
+     * The regression that six cross-* suites caught and jsdom did not: all of
+     * them load an educational example before saving. Loading one calls
+     * setArrivalClasses/setRolePolicies, which feed simulationProfile, which
+     * drives the effect that writes profileConfig back into the document. That
+     * write lands after the save completes and re-dirties a document the user
+     * just saved.
+     *
+     * The hydration guard is what suppresses the echo, and it recognises a
+     * document-borne config by its transaction origin.
+     *
+     * Honest caveat: this test passes with the bug still in place. jsdom runs
+     * the whole flow synchronously enough that the echoing write lands before
+     * the save rather than after it, which is exactly why six browser suites
+     * caught this and the unit suite did not. It is kept as a cheap guard on
+     * the flow, not as proof of the fix — the proof is the cross-* suites.
+     */
+    it('stays clean after saving a document loaded from an example', async () => {
+      act(() => {
+        [...container.querySelectorAll('button')]
+          .find(button => button.getAttribute('title') === 'Учебные BPMN-примеры')!
+          .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      act(() => {
+        [...container.querySelectorAll('button')]
+          .find(button => button.textContent?.includes('Загрузить'))!
+          .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      await flush()
+      expect(container.querySelectorAll('[data-id]').length).toBeGreaterThan(0)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      // Let every queued effect — including the profileConfig echo — settle.
+      await flush()
+      expect(status()).toBe('Сохранено')
+    })
+
+    it('marks the document dirty after an edit and clean after a save', async () => {
+      // The File System Access API is absent in jsdom, so saveDocument() takes
+      // its download branch — which also reports { kind: 'saved' }, exactly the
+      // path the e2e suites exercise through a stubbed showSaveFilePicker.
+      expect(status()).toBe('Сохранено')
+
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      expect(status()).toBe('Не сохранено')
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      expect(status()).toBe('Сохранено')
+    })
+  })
+
+  describe('clipboard', () => {
+    /** Ctrl+V awaits the (usually unavailable) system clipboard, so it needs an async act. */
+    async function keyAsync(k: string, init: KeyboardEventInit = {}) {
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }))
+      })
+    }
+
+    function ids(): string[] {
+      return [...container.querySelectorAll('g[data-id]')].map(node => (node as HTMLElement).dataset.id!)
+    }
+
+    function selectAll() {
+      key('v')
+      key('a', { ctrlKey: true })
+    }
+
+    it('copies the selection with Ctrl+C and pastes it back under new ids', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      const before = ids()
+      selectAll()
+
+      key('c', { ctrlKey: true })
+      await keyAsync('v', { ctrlKey: true })
+
+      const after = ids()
+      expect(after).toHaveLength(4)
+      expect(after.slice(0, 2)).toEqual(before) // the sources are untouched
+      expect(after.slice(2).every(id => !before.includes(id))).toBe(true)
+      expect(new Set(after.slice(2)).size).toBe(2) // and the copies are distinct
+      expect(byTestId('selection-count')!.textContent).toContain('2') // the paste is what ends up selected
+    })
+
+    it('offsets pasted copies so they do not land exactly on their source', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      selectAll()
+      const source = transforms()[0]
+
+      key('c', { ctrlKey: true })
+      await keyAsync('v', { ctrlKey: true })
+
+      expect(transforms()).toEqual([source, shift(source, 20, 20)])
+    })
+
+    it('cuts with Ctrl+X: the board empties but the clipboard keeps the content', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      selectAll()
+
+      key('x', { ctrlKey: true })
+      expect(ids()).toHaveLength(0)
+
+      await keyAsync('v', { ctrlKey: true })
+      expect(ids()).toHaveLength(2)
+    })
+
+    it('pasting with nothing of ours on the clipboard changes nothing and says so', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      const before = transforms()
+
+      await keyAsync('v', { ctrlKey: true })
+
+      expect(transforms()).toEqual(before)
+      expect(container.textContent).toContain('В буфере обмена нет объектов miroboard')
+    })
+
+    it('leaves native copying alone when nothing is selected', () => {
+      const event = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true })
+      act(() => { window.dispatchEvent(event) })
+      expect(event.defaultPrevented).toBe(false)
+    })
+  })
+
+  /**
+   * A history preview renders `previewElements`, a read-only snapshot, while
+   * `elements` still holds the live document. Every mutator refuses to run
+   * during a preview, but selection is not a mutation — and Ctrl+A read from
+   * the live list, so it selected objects that were not on screen. Ctrl+C then
+   * copied them.
+   */
+  /**
+   * Elements can vanish without the user asking: undo, a history restore, a
+   * file load — and, once collaboration lands, a peer's delete. Anything
+   * holding an element id has to cope.
+   */
+  describe('stale element references', () => {
+    it('closes a context menu whose element was undone away', () => {
+      vi.useFakeTimers()
+      try {
+        placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+        const element = container.querySelector('g[data-id]')!
+        key('v') // the long press is a Select-tool gesture
+
+        // A long press opens the menu anchored to that element.
+        pointer(element, 'pointerdown', { clientX: 120, clientY: 120 })
+        act(() => { vi.advanceTimersByTime(600) })
+        expect(byTestId('context-menu')).not.toBeNull()
+
+        // Undo removes the element out from under the open menu.
+        key('z', { ctrlKey: true })
+        expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
+
+        // The menu is positioned in world coordinates and its actions are
+        // refused by the command layer, so leaving it open would show a live
+        // menu over empty canvas whose every item quietly does nothing.
+        expect(byTestId('context-menu')).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
+  describe('history preview', () => {
+    /** Marks a named checkpoint of the board as it stands. */
+    function markSnapshot() {
+      vi.spyOn(window, 'prompt').mockReturnValue('точка')
+      const more = [...container.querySelectorAll('button')]
+        .find(b => b.getAttribute('aria-label') === 'Дополнительные инструменты')!
+      act(() => { more.click() })
+      const mark = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('Отметить состояние'))!
+      act(() => { mark.click() })
+    }
+
+    /** Opens the timeline and previews the most recent checkpoint. */
+    function openSnapshot() {
+      const openHistory = [...container.querySelectorAll('button')]
+        .find(b => b.textContent?.trim() === 'Контрольные точки')!
+      act(() => { openHistory.click() })
+      const panel = container.querySelector('[aria-label="История доски"]')!
+      const entry = panel.querySelector('li button') as HTMLElement
+      act(() => { entry.click() })
+    }
+
+    /** Marks a checkpoint and immediately previews it. */
+    function previewFirstSnapshot() {
+      markSnapshot()
+      openSnapshot()
+    }
+
+    it('does not cover a previewed snapshot with the empty-board prompt', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      markSnapshot()
+
+      // Empty the live board, then look back at the snapshot that still has it.
+      key('v')
+      key('a', { ctrlKey: true })
+      key('Delete')
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
+
+      openSnapshot()
+
+      // The snapshot's element is on screen, so the "start creating" prompt —
+      // and its template button — must not be.
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(1)
+      expect(container.textContent).not.toContain('Начните творить')
+    })
+
+    it('hides the BPMN validity badge, which describes the live document', () => {
+      // The BPMN template creates real bpmnNodeType elements, which is what
+      // makes the badge appear at all.
+      const openTemplates = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('Начать с шаблона'))!
+      act(() => { openTemplates.click() })
+      const bpmn = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('BPMN 2.0'))!
+      act(() => { bpmn.click() })
+      expect(byTestId('bpmn-status')).not.toBeNull()
+
+      markSnapshot()
+      openSnapshot()
+
+      // The badge reports on the live document; the canvas is showing a
+      // snapshot. Rather than describe the wrong board, it steps aside — as
+      // the simulation summaries beside it already do.
+      expect(byTestId('bpmn-status')).toBeNull()
+    })
+
+    it('does not let Ctrl+A select the live document while previewing history', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      previewFirstSnapshot()
+
+      key('a', { ctrlKey: true })
+
+      // The selection badge is deliberately hidden during a preview, so it
+      // cannot show whether a selection exists. Ctrl+C can: it only takes over
+      // the shortcut when it has something to copy, so a prevented default
+      // means the live document got selected behind the snapshot.
+      const copy = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true })
+      act(() => { window.dispatchEvent(copy) })
+      expect(copy.defaultPrevented).toBe(false)
+    })
+  })
+})

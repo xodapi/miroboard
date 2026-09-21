@@ -6,6 +6,15 @@ import { HISTORY_RESTORE_ORIGIN } from '../history/snapshots'
 /** Marks Yjs writes that replay the local recovery cache rather than user intent. */
 export const RECOVERY_ORIGIN = Symbol('recovery')
 
+/**
+ * Origins that express no content edit: the recovery cache replaying itself and
+ * an applied history restore. Kept as the default so existing callers and tests
+ * are unaffected; App passes `NON_EDIT_ORIGINS` from src/collab/origins.ts, which
+ * adds `LOAD` — opening a file is not an edit either, and labelling it as one
+ * left freshly opened documents reporting "Не сохранено".
+ */
+const DEFAULT_IGNORED_ORIGINS: ReadonlySet<unknown> = new Set([RECOVERY_ORIGIN, HISTORY_RESTORE_ORIGIN])
+
 export interface DirtyTracker {
   isDirty(): boolean
   markDirty(): void
@@ -20,17 +29,14 @@ export interface DirtyTracker {
 export function createDirtyTracker(
   ydoc: Y.Doc,
   onChange: (dirty: boolean) => void,
+  ignoredOrigins: ReadonlySet<unknown> = DEFAULT_IGNORED_ORIGINS,
 ): DirtyTracker {
   let dirty = false
   const handler = (_update: Uint8Array, origin: unknown) => {
     // y-indexeddb applies its startup replay in a transaction whose origin is
     // the persistence instance. Treat that library-originated write like an
     // explicit recovery transaction, while still tracking all user updates.
-    if (
-      origin === RECOVERY_ORIGIN
-      || origin === HISTORY_RESTORE_ORIGIN
-      || origin instanceof IndexeddbPersistence
-    ) return
+    if (ignoredOrigins.has(origin) || origin instanceof IndexeddbPersistence) return
     if (!dirty) {
       dirty = true
       onChange(true)

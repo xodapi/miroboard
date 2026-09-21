@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
-import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
+import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
+import { LOAD, LOCAL_CLIPBOARD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE, NON_EDIT_ORIGINS } from './collab/origins'
+import { PASTE_OFFSET, parseClipboard, preparePaste, serialiseSelection } from './collab/clipboard'
+import { readProfile, writeProfile, type UserProfile } from './collab/user-profile'
+import {
+  clearSelection, idsOf, isSelected as isIdSelected, primaryOf, removeFromSelection, retainExisting,
+  selectMany, selectOnly, toggleInSelection, unionSelection, type Selection,
+} from './collab/selection'
+import { normaliseRect, selectInRect, type Bounds } from './collab/marquee'
 import { useFileDrop } from './hooks/useFileDrop'
 import { DropTargetCue } from './components/DropTargetCue'
 import { MiniMap } from './components/MiniMap'
@@ -9,6 +17,27 @@ import { RecoveryDivergenceNotice } from './components/RecoveryDivergenceNotice'
 import { openDocument, openDroppedDocument, saveDocument, type FileSession, type OpenOutcome } from './persistence/files'
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
+import { TemplatesModal } from './components/TemplatesModal'
+import { LearningModulesModal } from './components/LearningModulesModal'
+import { ProjectHistoryModal } from './components/ProjectHistoryModal'
+import { BpmnTaskProperties } from './components/BpmnTaskProperties'
+import { BpmnFlowProperties } from './components/BpmnFlowProperties'
+import { ColorPicker } from './components/ColorPicker'
+import { BoardHeader } from './components/BoardHeader'
+import { ZoomControls, ElementCount } from './components/ZoomControls'
+import { CanvasBackground } from './components/CanvasBackground'
+import { ChangedInPreview, ResizeHandles } from './components/element-chrome'
+import { ElementTextEditor } from './components/ElementTextEditor'
+import { useSimulationSettings } from './board/use-simulation-settings'
+import { elementsInScope, fitTransform, screenToWorld as toWorld, wheelZoomFactor, zoomAround } from './board/viewport'
+import * as commands from './board/commands'
+import { BottomToolbar } from './components/BottomToolbar'
+import { ProfilePanel } from './components/ProfilePanel'
+import { OnboardingTour } from './components/OnboardingTour'
+import { Toast, type ToastTone } from './components/Toast'
+import { MoreMenu } from './components/MoreMenu'
+import { ContextMenu } from './components/ContextMenu'
+import { createTheme } from './board/theme'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
 import { captureSnapshot, fromBase64, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot, toBase64 } from './history/snapshots'
 import { loadIntoDoc } from './history/state'
@@ -20,163 +49,29 @@ import { HistoryRetentionControls } from './history/HistoryRetentionControls'
 import { attachRecoveryCache } from './persistence/indexeddb'
 import { createRecoverySession, inspectRecoverySession, setRecoverySession } from './persistence/recovery-session'
 import { adoptLegacyRooms, legacyDocumentIdFromCurrentUrl } from './persistence/legacy-adoption'
-import { bpmnSimulationFromProfileConfig, DEFAULT_BPMN_SIMULATION, withBpmnSimulation } from './format/profile-config'
+import { bpmnSimulationFromProfileConfig, withBpmnSimulation } from './format/profile-config'
 import { serialise } from './format/mboard'
 import type { DocHistory, DocMeta, HistorySnapshot, ProfileConfig } from './format/types'
 import { HelpPanel } from './HelpPanel'
 import './help-panel.css'
-import basicFixedExample from '../examples/basic-fixed.json'
-import parallelQueueExample from '../examples/parallel-queue.json'
-import slaCalendarExample from '../examples/sla-calendar.json'
-import batchWorkloadExample from '../examples/batch-workload.json'
-import priorityQueueExample from '../examples/priority-queue.json'
-import fifoPriorityExample from '../examples/fifo-vs-priority.json'
+import { bpmnEdgeAnchor, simplifyPath, smoothPathD, snapVal } from './board/geometry'
+import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeInfo } from './board/gesture'
+import { genId } from './board/id'
+import { STICKY_COLORS } from './board/palette'
+import type {
+  BoardElement, BpmnNodeType, BpmnSimulationResult, ContextMenuAction, EducationalExample,
+  ImportedBpmnModel, PendingOpen, Point, Tool, WorkspaceMode,
+} from './board/types'
 declare global {
   interface Window {
     __MIROBOARD_DEBUG__?: { version: string; createBpmnModel: () => unknown; validateBpmn: () => unknown; exportBpmnXml: () => string; runBpmn: () => unknown; simulateBpmn: (seed: number | string | bigint, runs: number) => BpmnSimulationResult; getElements: () => BoardElement[] }
   }
 }
-type Point = { x: number; y: number }
-type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
-type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
-type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
 declare const __MIROBOARD_VERSION__: string
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 declare const __MIROBOARD_DEBUG_HOOK__: boolean
-type ImportedBpmnModel = {
-  nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number; priority?: number }[]
-  flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }[]
-  arrivalClasses?: { count: number; intervalMs: number; priority: number }[]
-  resourceRoles?: { name: string; capacity: number; queuePolicy?: QueuePolicy }[]
-}
-type QueuePolicy = 'fifo' | 'priority'
-type ArrivalClassDraft = { count: string; intervalSec: string; priority: string }
-type RolePolicyDraft = { capacity: string; queuePolicy: QueuePolicy }
-type BpmnSimulationResult = {
-  seed: number; runs: number; completedRuns: number; simulationInstances: number; arrivalIntervalMs: number
-  minDurationMs: number; meanDurationMs: number; standardDeviationMs: number
-  p50DurationMs: number; p90DurationMs: number; p95DurationMs: number; maxDurationMs: number; meanCost: number
-  slaTargetMs?: number; onTimeRate?: number; roleUtilization: { role: string; capacity: number; meanWorkloadMs: number; meanWaitingMs: number; utilization: number }[]; priorityClasses: { priority: number; instances: number; meanWaitingMs: number; meanDurationMs: number }[]
-}
-type EducationalExample = { title: string; explanation: string; checks: string[]; model: ImportedBpmnModel }
-const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample, batchWorkloadExample, priorityQueueExample, fifoPriorityExample] as unknown as EducationalExample[]
-interface BoardElement {
-  id: string
-  type: 'path' | 'sticky' | 'rect' | 'circle' | 'arrow' | 'line' | 'text' | 'emoji'
-  x: number
-  y: number
-  w?: number
-  h?: number
-  points?: Point[]
-  text?: string
-  color: string
-  stroke?: number
-  fill?: string
-  rotation?: number
-  createdBy?: string
-  emoji?: string
-  zIndex?: number
-  bpmnNodeType?: BpmnNodeType
-  bpmnDurationMs?: number
-  bpmnDurationDistribution?: 'fixed' | 'uniform' | 'triangular'
-  bpmnDurationMinMs?: number
-  bpmnDurationModeMs?: number
-  bpmnDurationMaxMs?: number
-  bpmnResourceRole?: string
-  bpmnCostPerHour?: number
-  bpmnResourceCapacity?: number
-  bpmnPriority?: number
-  bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
-}
-const COLORS = [
-  '#FF5D5D', '#FF9F43', '#FFD93D',
-  '#6BCB77', '#4D96FF', '#9D65C9',
-  '#EC4899', '#000000', '#FFFFFF'
-]
-const STICKY_COLORS = [
-  '#FFD93D', '#6BCB77', '#4D96FF',
-  '#FF9F43', '#9D65C9', '#FF5D5D',
-  '#F9F871', '#A0E7E5'
-]
-const EMOJIS = ['👍', '❤️', '⭐', '🔥', '💡', '✅', '❌', '🎯', '📌', '❓', '💪', '🎉', '🚀', '💯', '⚡', '🏆', '👀', '🤔', '💬', '🧠']
-type ContextMenuAction = 'edit' | 'duplicate' | 'front' | 'back' | 'delete'
-type PendingOpen = { proceed: () => Promise<void> }
-const CONTEXT_MENU_ITEMS: { label: string; action: ContextMenuAction; danger?: boolean }[] = [
-  { label: '✏️ Редактировать', action: 'edit' },
-  { label: '📋 Дублировать', action: 'duplicate' },
-  { label: '⬆️ На передний план', action: 'front' },
-  { label: '⬇️ На задний план', action: 'back' },
-  { label: '🗑️ Удалить', action: 'delete', danger: true },
-]
-function genId() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID()
-  }
-  // Fallback for environments without crypto.randomUUID
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const bytes = new Uint8Array(16)
-    crypto.getRandomValues(bytes)
-    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)
-  }
-  // Final fallback (should never reach in modern browsers)
-  return Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9)
-}
-function pointToLineDistance(p: Point, a: Point, b: Point): number {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const len = Math.sqrt(dx * dx + dy * dy)
-  if (len === 0) return Math.hypot(p.x - a.x, p.y - a.y)
-  return Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / len
-}
-function simplifyPath(points: Point[], tolerance = 2): Point[] {
-  if (points.length <= 2) return points
-  let maxDist = 0, maxIdx = 0
-  const first = points[0], last = points[points.length - 1]
-  for (let i = 1; i < points.length - 1; i++) {
-    const d = pointToLineDistance(points[i], first, last)
-    if (d > maxDist) { maxDist = d; maxIdx = i }
-  }
-  if (maxDist > tolerance) {
-    const left = simplifyPath(points.slice(0, maxIdx + 1), tolerance)
-    const right = simplifyPath(points.slice(maxIdx), tolerance)
-    return [...left.slice(0, -1), ...right]
-  }
-  return [first, last]
-}
-function smoothPathD(points: Point[]): string {
-  if (points.length < 2) return ''
-  if (points.length === 2) return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`
-  let d = `M ${points[0].x} ${points[0].y}`
-  for (let i = 1; i < points.length - 1; i++) {
-    const mx = (points[i].x + points[i + 1].x) / 2
-    const my = (points[i].y + points[i + 1].y) / 2
-    d += ` Q ${points[i].x} ${points[i].y} ${mx} ${my}`
-  }
-  d += ` L ${points[points.length - 1].x} ${points[points.length - 1].y}`
-  return d
-}
-function snapVal(v: number, grid = 20) { return snap_to_grid(v, grid) }
-function bpmnEdgeAnchor(element: BoardElement, towardX: number, towardY: number): Point {
-  const width = element.w || 0
-  const height = element.h || 0
-  const centerX = element.x + width / 2
-  const centerY = element.y + height / 2
-  const dx = towardX - centerX
-  const dy = towardY - centerY
-  if (dx === 0 && dy === 0) return { x: centerX, y: centerY }
-  const halfWidth = width / 2
-  const halfHeight = height / 2
-  let scale: number
-  if (element.bpmnNodeType === 'startEvent' || element.bpmnNodeType === 'endEvent') {
-    scale = Math.min(halfWidth, halfHeight) / Math.hypot(dx, dy)
-  } else if (element.bpmnNodeType === 'xorGateway' || element.bpmnNodeType === 'andGateway' || element.bpmnNodeType === 'orGateway') {
-    scale = 1 / (Math.abs(dx) / halfWidth + Math.abs(dy) / halfHeight)
-  } else {
-    scale = 1 / Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight)
-  }
-  return { x: centerX + dx * scale, y: centerY + dy * scale }
-}
+
 export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -185,7 +80,11 @@ export default function App() {
   const [color, setColor] = useState('#000000')
   const [strokeWidth, setStrokeWidth] = useState(3)
   const [elements, setElements] = useState<BoardElement[]>([])
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Selection>(clearSelection)
+  /** The element property panels and resize handles act on: single selection only. */
+  const selectedElementId = primaryOf(selectedIds)
+  /** Shift-marquee anchor: the selection a Shift drag extends or shrinks. */
+  const [anchorId, setAnchorId] = useState<string | null>(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [currentPath, setCurrentPath] = useState<Point[]>([])
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 })
@@ -200,7 +99,7 @@ export default function App() {
   const [showLearningModules, setShowLearningModules] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('board')
-  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null)
+  const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null)
   const [tourStep, setTourStep] = useState(() => {
     try { return localStorage.getItem('miro-onboarding-seen') ? -1 : 0 } catch { return -1 }
   })
@@ -222,15 +121,10 @@ export default function App() {
   const [bpmnSimulationResult, setBpmnSimulationResult] = useState<BpmnSimulationResult | null>(null)
   const [bottleneckRole, setBottleneckRole] = useState<string | null>(null)
   const [simulationResultFingerprint, setSimulationResultFingerprint] = useState<string | null>(null)
-  const [simulationSeed, setSimulationSeed] = useState('42')
-  const [simulationRuns, setSimulationRuns] = useState('500')
-  const [simulationTarget, setSimulationTarget] = useState('')
-  const [simulationInstances, setSimulationInstances] = useState('1')
-  const [arrivalInterval, setArrivalInterval] = useState('0')
-  const [arrivalClasses, setArrivalClasses] = useState<ArrivalClassDraft[]>([])
-  const [rolePolicies, setRolePolicies] = useState<Record<string, RolePolicyDraft>>({})
-  const [calendarStart, setCalendarStart] = useState('')
-  const [calendarEnd, setCalendarEnd] = useState('')
+  const simulation = useSimulationSettings()
+  // Stable across renders (it is the raw setState), so the long-lived
+  // profileConfig observer can capture it without re-subscribing.
+  const replaceSimulation = simulation.replace
   const [bpmnProfileActive, setBpmnProfileActive] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
@@ -248,19 +142,24 @@ export default function App() {
       setFlowPreviewPoint(null)
     }
   }, [])
-  // Drag state
-  const [dragInfo, setDragInfo] = useState<{
-    id: string; startX: number; startY: number; elStartX: number; elStartY: number
-  } | null>(null)
+  // Drag state. One gesture moves the whole selection, so it carries the start
+  // frame of every dragged element instead of a single one.
+  //
+  // Refs rather than state: nothing renders from them, and reading gesture
+  // geometry from state made the outcome depend on whether React had committed
+  // the pointermove renders before pointerup arrived — a flick released inside
+  // one frame finished with the pointerdown geometry and silently did nothing
+  // (see src/board/gesture.ts).
+  const dragInfoRef = useRef<DragInfo | null>(null)
   // Resize state
-  const [resizeInfo, setResizeInfo] = useState<{
-    id: string; corner: string; startX: number; startY: number;
-    elX: number; elY: number; elW: number; elH: number
-  } | null>(null)
+  const resizeInfoRef = useRef<ResizeInfo | null>(null)
   // Gesture frames stay local until pointer-up, preventing one Yjs item rewrite
   // (and one gc:false tombstone) per pointer event.
-  const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> } | null>(null)
-  const transientFrameRef = useRef<{ id: string; updates: Partial<BoardElement> } | null>(null)
+  const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> }[] | null>(null)
+  const transientFrameRef = useRef<{ id: string; updates: Partial<BoardElement> }[] | null>(null)
+  // Marquee selection in world coordinates; Shift extends the current selection.
+  const [marquee, setMarquee] = useState<Bounds | null>(null)
+  const marqueeRef = useRef<{ from: Point; shift: boolean } | null>(null)
   const longPressRef = useRef<{ timer: number | null; x: number; y: number; startedAt: number } | null>(null)
   const bpmnImportRef = useRef<HTMLInputElement>(null)
   const bpmnRunTimersRef = useRef<number[]>([])
@@ -273,7 +172,7 @@ export default function App() {
   const compactHistoryOnSaveRef = useRef(false)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
   const profileConfigRef = useRef<Y.Map<unknown> | null>(null); const profileConfigJsonRef = useRef(''); const profileConfigHydratingRef = useRef(false)
-  const showToast = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'info') => {
+  const showToast = useCallback((message: string, tone: ToastTone = 'info') => {
     setToast({ message, tone })
     window.setTimeout(() => setToast(null), 4200)
   }, [])
@@ -286,7 +185,7 @@ export default function App() {
   const exitPreview = useCallback(() => {
     setPreviewSnapshot(null)
     setPreviewElements(null)
-    setSelectedId(null)
+    setSelectedIds(clearSelection())
     setEditingText(null)
     transientFrameRef.current = null
     setTransientFrame(null)
@@ -300,7 +199,7 @@ export default function App() {
     setPreviewSnapshot(snapshot)
     setPreviewElements(historical)
     setShowSimulationPanel(false)
-    setSelectedId(null)
+    setSelectedIds(clearSelection())
     setEditingText(null)
     setShowMore(false)
     setShowColorPicker(false)
@@ -359,7 +258,7 @@ export default function App() {
     // Only emit roles the user actually configured. An empty list keeps the
     // engine on the per-node `resourceCapacity` fallback, so untouched boards
     // simulate exactly as before.
-    const resourceRoles = Object.entries(rolePolicies)
+    const resourceRoles = Object.entries(simulation.rolePolicies)
       .filter(([name]) => nodes.some((node) => node.resourceRole === name))
       .map(([name, policy]) => ({
         name,
@@ -369,19 +268,19 @@ export default function App() {
     return {
       nodes,
       flows,
-      slaTargetMs: simulationTarget ? Number(simulationTarget) * 1000 : undefined,
-      calendarWorkStartMs: calendarStart ? Number(calendarStart) * 3_600_000 : undefined,
-      calendarWorkEndMs: calendarEnd ? Number(calendarEnd) * 3_600_000 : undefined,
-      simulationInstances: Number(simulationInstances) || 1,
-      arrivalIntervalMs: Math.max(0, Number(arrivalInterval) || 0) * 1000,
-      arrivalClasses: arrivalClasses.map((arrivalClass) => ({
+      slaTargetMs: simulation.slaTargetSec ? Number(simulation.slaTargetSec) * 1000 : undefined,
+      calendarWorkStartMs: simulation.calendarStartHour ? Number(simulation.calendarStartHour) * 3_600_000 : undefined,
+      calendarWorkEndMs: simulation.calendarEndHour ? Number(simulation.calendarEndHour) * 3_600_000 : undefined,
+      simulationInstances: Number(simulation.instances) || 1,
+      arrivalIntervalMs: Math.max(0, Number(simulation.arrivalIntervalSec) || 0) * 1000,
+      arrivalClasses: simulation.arrivalClasses.map((arrivalClass) => ({
         count: Math.max(1, Number(arrivalClass.count) || 1),
         intervalMs: Math.max(0, Number(arrivalClass.intervalSec) || 0) * 1000,
         priority: Number(arrivalClass.priority) || 0,
       })),
       resourceRoles,
     }
-  }, [elements, simulationTarget, calendarStart, calendarEnd, simulationInstances, arrivalInterval, arrivalClasses, rolePolicies])
+  }, [elements, simulation.slaTargetSec, simulation.calendarStartHour, simulation.calendarEndHour, simulation.instances, simulation.arrivalIntervalSec, simulation.arrivalClasses, simulation.rolePolicies])
   const createSimulationBpmnModel = useCallback(() => {
     const model = createBpmnModel()
     return {
@@ -400,8 +299,8 @@ export default function App() {
   // immediately after an edit, without scheduling synchronous state updates from
   // an effect.
   const simulationFingerprint = useMemo(
-    () => JSON.stringify({ model: createSimulationBpmnModel(), seed: simulationSeed, runs: simulationRuns }),
-    [createSimulationBpmnModel, simulationSeed, simulationRuns],
+    () => JSON.stringify({ model: createSimulationBpmnModel(), seed: simulation.seed, runs: simulation.runs }),
+    [createSimulationBpmnModel, simulation.seed, simulation.runs],
   )
   const bpmnIssues = useMemo(() => {
     const model = createBpmnModel()
@@ -428,34 +327,49 @@ export default function App() {
     return [...roles.entries()].sort(([left], [right]) => left.localeCompare(right))
   }, [elements])
   const selectedBpmnTask = useMemo(
-    () => elements.find((element) => element.id === selectedId && element.bpmnNodeType === 'task') ?? null,
-    [elements, selectedId],
+    () => elements.find((element) => element.id === selectedElementId && element.bpmnNodeType === 'task') ?? null,
+    [elements, selectedElementId],
   )
   const selectedBpmnFlow = useMemo(
-    () => elements.find((element) => element.id === selectedId && element.bpmnFlow) ?? null,
-    [elements, selectedId],
+    () => elements.find((element) => element.id === selectedElementId && element.bpmnFlow) ?? null,
+    [elements, selectedElementId],
   )
+  // Boolean, not `boolean | undefined`: the old expression short-circuited to
+  // undefined for a flow without bpmnFlow, which read as false everywhere it was
+  // used but is not assignable to a boolean prop.
   const selectedBpmnFlowIsXor = useMemo(
-    () => selectedBpmnFlow?.bpmnFlow && elements.find((element) => element.id === selectedBpmnFlow.bpmnFlow!.sourceId)?.bpmnNodeType === 'xorGateway',
+    () => Boolean(selectedBpmnFlow?.bpmnFlow && elements.find((element) => element.id === selectedBpmnFlow.bpmnFlow!.sourceId)?.bpmnNodeType === 'xorGateway'),
     [elements, selectedBpmnFlow],
   )
-  const user = useMemo(() => {
-    const saved = localStorage.getItem('miro-author-id')
-    if (saved) return { id: saved }
-    const id = genId()
-    try { localStorage.setItem('miro-author-id', id) } catch { /* author id is optional metadata */ }
-    return { id }
+  // Local participant profile. Device-scoped and fail-soft: it carries the
+  // author id that `createdBy` on every node already stores, plus the name and
+  // colour a collaboration session will publish through awareness.
+  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+    const profile = readProfile(localStorage, genId)
+    writeProfile(localStorage, profile)
+    return profile
+  })
+  const [showProfile, setShowProfile] = useState(false)
+  const updateUserProfile = useCallback((next: UserProfile) => {
+    setUserProfile(next)
+    writeProfile(localStorage, next)
   }, [])
   useEffect(() => {
     const yarray = ydoc.getArray<BoardElement>('elements')
     const meta = ydoc.getMap<unknown>('meta')
     const profileConfig = ydoc.getMap<unknown>('profileConfig')
     yElements.current = yarray
-    dirtyTrackerRef.current = createDirtyTracker(ydoc, setIsDirty)
+    // NON_EDIT_ORIGINS rather than the tracker's default: opening a document is
+    // labelled LOAD, and a load must not report unsaved changes.
+    dirtyTrackerRef.current = createDirtyTracker(ydoc, setIsDirty, NON_EDIT_ORIGINS)
     captureTriggersRef.current = createCaptureTriggers({
       ydoc,
       capture: appendCheckpoint,
-      ignoredOrigins: new Set([RECOVERY_ORIGIN, HISTORY_RESTORE_ORIGIN]),
+      // The same rule as the dirty tracker above, from the same place: opening
+      // a file is not an edit. This set used to be spelled out by hand without
+      // LOAD, so opening a document counted as an edit and the interval timer
+      // then wrote an "Авто" checkpoint for a board nobody had touched.
+      ignoredOrigins: NON_EDIT_ORIGINS,
     })
     profileConfigRef.current = profileConfig
     if (!meta.has('id')) {
@@ -467,28 +381,36 @@ export default function App() {
     const applyProfileConfig = (_event?: unknown, transaction?: Y.Transaction) => {
       const config = profileConfig.toJSON() as ProfileConfig
       profileConfigJsonRef.current = JSON.stringify(config)
-      const simulation = bpmnSimulationFromProfileConfig(config)
-      setBpmnProfileActive(simulation !== null)
-      if (!simulation) {
+      const incoming = bpmnSimulationFromProfileConfig(config)
+      setBpmnProfileActive(incoming !== null)
+      if (!incoming) {
         setWorkspaceMode('board')
         setShowSimulationPanel(false)
         return
       }
-      profileConfigHydratingRef.current = transaction?.origin === RECOVERY_ORIGIN
-      setSimulationSeed(simulation.seed); setSimulationRuns(simulation.runs)
-      setSimulationTarget(simulation.slaTargetSec); setSimulationInstances(simulation.instances)
-      setArrivalInterval(simulation.arrivalIntervalSec)
-      setArrivalClasses(simulation.arrivalClasses)
-      setRolePolicies(simulation.rolePolicies)
-      setCalendarStart(simulation.calendarStartHour)
-      setCalendarEnd(simulation.calendarEndHour)
+      // Any non-edit origin means the config arrived with the document rather
+      // than from the user: a file open (LOAD), the recovery cache replaying
+      // itself, or an applied history restore. Hydrating the simulation inputs
+      // from it must not echo back as a profileConfig write, or a freshly saved
+      // document turns dirty again the moment these setState calls settle.
+      //
+      // This used to test RECOVERY_ORIGIN alone, which was complete until file
+      // opens were relabelled LOAD; NON_EDIT_ORIGINS keeps the rule in one place
+      // (src/collab/origins.ts) so the next origin added cannot miss this site.
+      profileConfigHydratingRef.current = NON_EDIT_ORIGINS.has(transaction?.origin)
+      replaceSimulation(incoming)
     }
     profileConfig.observe(applyProfileConfig)
     applyProfileConfig()
     // UndoManager
     const undoManager = new Y.UndoManager(yarray, {
       captureTimeout: 500,
-      trackedOrigins: new Set([null, HISTORY_RESTORE_ORIGIN]),
+      // Only this user's own intent is undoable. Remote updates arrive with
+      // the provider instance as origin and stay out of the stack; loads and
+      // recovery replays are excluded by NON_EDIT_ORIGINS semantics.
+      // HISTORY_RESTORE_ORIGIN stays tracked so restore-as-append remains
+      // reversible, which is the documented behaviour of the timeline.
+      trackedOrigins: new Set<unknown>([...LOCAL_ORIGINS, HISTORY_RESTORE_ORIGIN]),
     })
     undoManagerRef.current = undoManager
     const updateUndoState = () => setUndoState({
@@ -522,7 +444,19 @@ export default function App() {
     }
     void attachPersistence()
     // Sync
-    const updateElements = () => setElements(yarray.toArray())
+    const updateElements = () => {
+      const next = yarray.toArray()
+      setElements(next)
+      // Elements can vanish without this component asking: undo/redo, a file
+      // load, a history restore and (later) a remote peer's delete. Drop stale
+      // ids so panels and gestures never point at a missing element.
+      const ids = new Set(next.map(element => element.id))
+      setSelectedIds(current => retainExisting(current, ids))
+      // The context menu is anchored to one element in world coordinates, so a
+      // vanished element leaves it hovering over empty canvas with actions that
+      // silently do nothing (the command layer refuses unknown ids).
+      setContextMenu(current => (current && !ids.has(current.id) ? null : current))
+    }
     yarray.observe(updateElements)
     updateElements()
     return () => {
@@ -538,22 +472,13 @@ export default function App() {
       persistence?.destroy()
       ydoc.destroy()
     }
-  }, [appendCheckpoint, showToast, ydoc])
+  }, [appendCheckpoint, replaceSimulation, showToast, ydoc])
   useEffect(() => {
     return addBeforeUnloadGuard(isDirty)
   }, [isDirty])
-  const simulationProfile = useMemo(() => ({
-    ...DEFAULT_BPMN_SIMULATION,
-    seed: simulationSeed,
-    runs: simulationRuns,
-    slaTargetSec: simulationTarget,
-    instances: simulationInstances,
-    arrivalIntervalSec: arrivalInterval,
-    calendarStartHour: calendarStart,
-    calendarEndHour: calendarEnd,
-    arrivalClasses,
-    rolePolicies,
-  }), [simulationSeed, simulationRuns, simulationTarget, simulationInstances, arrivalInterval, calendarStart, calendarEnd, arrivalClasses, rolePolicies])
+  // Identical to the draft by construction: SimulationSettings holds exactly the
+  // SimulationDraft shape, so there is nothing left to assemble here.
+  const simulationProfile = simulation.draft
   useEffect(() => {
     if (!bpmnProfileActive || !profileConfigRef.current) return
     if (profileConfigHydratingRef.current) { profileConfigHydratingRef.current = false; return }
@@ -561,7 +486,7 @@ export default function App() {
     const encoded = JSON.stringify(config)
     if (encoded === profileConfigJsonRef.current) return
     profileConfigJsonRef.current = encoded
-    ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn))
+    ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn), LOCAL_EDIT)
   }, [bpmnProfileActive, simulationProfile, ydoc])
   const activateBpmnProfile = useCallback(() => {
     if (profileConfigRef.current && !bpmnProfileActive) {
@@ -570,15 +495,35 @@ export default function App() {
       // defaults, so fixture arrival classes and role policies survive activation.
       const config = withBpmnSimulation({}, simulationProfile)
       profileConfigJsonRef.current = JSON.stringify(config)
-      ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn))
+      ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn), LOCAL_EDIT)
     }
     setBpmnProfileActive(true)
     setWorkspaceMode('bpmn')
     setShowBpmnPalette(true)
   }, [bpmnProfileActive, simulationProfile, ydoc])
   const openSimulation = useCallback(() => { if (previewSnapshot) return void showToast('Симуляция недоступна во время просмотра истории.', 'info'); if (!bpmnProfileActive) activateBpmnProfile(); setWorkspaceMode('simulation'); setShowSimulationPanel(true) }, [activateBpmnProfile, bpmnProfileActive, previewSnapshot, showToast])
+  /**
+   * Writes an in-flight gesture to the document.
+   *
+   * A drag or resize lives in `transientFrame` until pointerup, so anything
+   * that reads the document mid-gesture sees the pre-drag position. Saving is
+   * the case that matters: Ctrl+S during a drag wrote the old coordinates to
+   * disk while the screen showed the new ones.
+   */
+  const flushGesture = useCallback(() => {
+    const frame = transientFrameRef.current
+    if (!frame?.length || !yElements.current) return
+    ydoc.transact(() => {
+      for (const item of frame) commitElementUpdate(ydoc, yElements.current!, item.id, item.updates)
+    }, LOCAL_GESTURE)
+    transientFrameRef.current = null
+    setTransientFrame(null)
+  }, [ydoc])
+
   const saveBoard = useCallback(async (mode: 'save' | 'saveAs'): Promise<boolean> => {
     if (previewSnapshot) { showToast('Недоступно во время просмотра истории.', 'info'); return false }
+    // Land any in-flight drag first, so the file matches the screen.
+    flushGesture()
     const metaMap = ydoc.getMap<unknown>('meta')
     const metaId = metaMap.get('id')
     const metaTitle = metaMap.get('title')
@@ -630,7 +575,7 @@ export default function App() {
       showToast('Не удалось сохранить документ. Проверьте доступ к файлу.', 'error')
     }
     return false
-  }, [elements, fileSession, previewSnapshot, showToast, ydoc])
+  }, [elements, fileSession, flushGesture, previewSnapshot, showToast, ydoc])
   const resetDocument = useCallback(() => { if (isDirty && !window.confirm('Несохраненные изменения будут потеряны. Продолжить?')) return
     const meta = ydoc.getMap<unknown>('meta')
     const profileConfig = ydoc.getMap<unknown>('profileConfig')
@@ -644,7 +589,7 @@ export default function App() {
     setFileSession({ handle: null, name: null, isUntitled: true }); setRecoveryNotice(null)
     historySnapshotsRef.current = []
     setHistorySnapshots([])
-    setSelectedId(null)
+    setSelectedIds(clearSelection())
     setWorkspaceMode('board')
     setBpmnProfileActive(false)
     dirtyTrackerRef.current?.markSaved()
@@ -664,12 +609,15 @@ export default function App() {
       profileConfigJsonRef.current = JSON.stringify(outcome.file.profileConfig); profileConfig.clear()
       Object.entries(outcome.file.profileConfig).forEach(([key, value]) => profileConfig.set(key, value))
       setRecoverySession(meta, createRecoverySession(outcome.session.name ?? outcome.file.meta.title, yElements.current?.toJSON() ?? loadedElements, profileConfig.toJSON()))
-    }, RECOVERY_ORIGIN)
+      // LOAD rather than RECOVERY_ORIGIN: opening a file is not a recovery.
+      // Both are non-edit origins, but the distinction is what authorship and
+      // remote sync will key off later.
+    }, LOAD)
     setFileSession(outcome.session); setRecoveryNotice(null)
     const snapshots = reconstructed.historyLost ? [] : outcome.file.history.snapshots
     historySnapshotsRef.current = snapshots
     setHistorySnapshots(snapshots)
-    setSelectedId(null)
+    setSelectedIds(clearSelection())
     dirtyTrackerRef.current?.markSaved()
     showToast(
       outcome.migratedFrom === undefined
@@ -724,58 +672,131 @@ export default function App() {
   const screenToWorld = useCallback((sx: number, sy: number): Point => {
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) return { x: 0, y: 0 }
-    return {
-      x: (sx - rect.left - transform.x) / transform.scale,
-      y: (sy - rect.top - transform.y) / transform.scale
-    }
+    return toWorld(transform, rect, sx, sy)
   }, [transform])
-  const addElement = useCallback((el: BoardElement) => {
-    if (previewSnapshot) return
-    if (!yElements.current) return
-    ydoc.transact(() => { yElements.current!.push([el]) })
+  const addElement = useCallback((el: BoardElement, origin: unknown = LOCAL_EDIT) => {
+    if (previewSnapshot || !yElements.current) return
+    commands.addElement(ydoc, yElements.current, el, origin)
     if ('vibrate' in navigator) navigator.vibrate(10)
   }, [previewSnapshot, ydoc])
 
-  const updateElement = useCallback((id: string, updates: Partial<BoardElement>) => {
-    if (previewSnapshot) return
-    if (!yElements.current) return
-    commitElementUpdate(ydoc, yElements.current, id, updates)
+  const updateElement = useCallback((id: string, updates: Partial<BoardElement>, origin: unknown = LOCAL_EDIT) => {
+    if (previewSnapshot || !yElements.current) return
+    commands.updateElement(ydoc, yElements.current, id, updates, origin)
   }, [previewSnapshot, ydoc])
+  /** Selection helpers. Defined next to the mutators they drive. */
+  const selectElement = useCallback((id: string) => setSelectedIds(selectOnly(id)), [])
+  const clearSelectionState = useCallback(() => setSelectedIds(clearSelection()), [])
+  const selectElements = useCallback((ids: string[]) => setSelectedIds(ids.length ? selectMany(ids) : clearSelection()), [])
+  const removeIdFromSelection = useCallback((id: string) => {
+    setSelectedIds(current => removeFromSelection(current, id))
+    setAnchorId(current => (current === id ? null : current))
+  }, [])
   const deleteElement = useCallback((id: string) => {
-    if (previewSnapshot) return
-    if (!yElements.current) return
-    const idx = yElements.current.toArray().findIndex(e => e.id === id)
-    if (idx >= 0) ydoc.transact(() => { yElements.current!.delete(idx, 1) })
-    setSelectedId(null)
+    if (previewSnapshot || !yElements.current) return
+    if (!commands.deleteElement(ydoc, yElements.current, id)) return
+    removeIdFromSelection(id)
     setContextMenu(null)
-  }, [previewSnapshot, ydoc])
+  }, [previewSnapshot, ydoc, removeIdFromSelection])
+  const deleteSelected = useCallback(() => {
+    if (previewSnapshot || !yElements.current) return
+    if (!commands.deleteElements(ydoc, yElements.current, selectedIds)) return
+    clearSelectionState()
+    setContextMenu(null)
+  }, [previewSnapshot, ydoc, selectedIds, clearSelectionState])
+  /**
+   * One transaction for the whole selection. This looped over updateElement,
+   * which made recolouring eight elements eight undo steps and eight
+   * checkpoints.
+   */
+  const updateSelected = useCallback((updates: Partial<BoardElement>, origin: unknown = LOCAL_EDIT) => {
+    if (previewSnapshot || !yElements.current) return
+    commands.updateElements(ydoc, yElements.current, selectedIds, updates, origin)
+  }, [selectedIds, previewSnapshot, ydoc])
 
   const bringToFront = useCallback((id: string) => {
-    if (previewSnapshot) return
-    if (!yElements.current) return
-    const idx = yElements.current.toArray().findIndex(e => e.id === id)
-    if (idx >= 0) {
-      if (idx === yElements.current.length - 1) return
-      const el = yElements.current.get(idx)
-      const zIndex = Date.now()
-      ydoc.transact(() => {
-        yElements.current!.delete(idx, 1)
-        yElements.current!.push([{ ...el, zIndex }])
-      })
-    }
+    if (previewSnapshot || !yElements.current) return
+    commands.bringToFront(ydoc, yElements.current, id)
   }, [previewSnapshot, ydoc])
   const sendToBack = useCallback((id: string) => {
     updateElement(id, { zIndex: 0 })
   }, [updateElement])
-  const duplicateElement = useCallback((id: string) => {
-    const el = elements.find(e => e.id === id)
-    if (el) {
-      const newEl = { ...el, id: genId(), x: el.x + 20, y: el.y + 20 }
-      addElement(newEl)
+  /**
+   * Duplicates the whole selection. The offset grows with the copy index so
+   * duplicating three overlapping objects does not stack them into one.
+   * Returns the new ids so callers can select the copies.
+   */
+  const duplicateSelection = useCallback((origin?: unknown): string[] => {
+    if (previewSnapshot || !yElements.current) return []
+    return commands.duplicateElements(ydoc, yElements.current, selectedIds, genId, origin ?? LOCAL_EDIT, userProfile.id)
+  }, [selectedIds, previewSnapshot, ydoc, userProfile.id])
+
+  /**
+   * Nudges the whole selection in ONE transaction. Arrow keys used to commit
+   * per element, which made an 8-element nudge 8 undo steps and 8 checkpoints.
+   */
+  const moveSelection = useCallback((delta: { x: number; y: number }) => {
+    if (previewSnapshot || !yElements.current) return
+    commands.moveElements(ydoc, yElements.current, selectedIds, delta)
+  }, [selectedIds, previewSnapshot, ydoc])
+
+  /**
+   * The in-memory clipboard. A `file://` deployment — the primary way this app
+   * is shipped — usually has no clipboard permission at all, so the internal
+   * copy is the source of truth and the system clipboard is what makes
+   * cross-tab paste work when it is available.
+   */
+  const internalClipboardRef = useRef<string | null>(null)
+
+  /** Ctrl+C. Returns how many elements were copied, so the caller knows whether to take over the shortcut. */
+  const copySelection = useCallback((): number => {
+    const picked = elements.filter(element => selectedIds.has(element.id))
+    if (!picked.length) return 0
+    const payload = serialiseSelection(picked)
+    internalClipboardRef.current = payload
+    void navigator.clipboard?.writeText(payload).catch(() => undefined)
+    return picked.length
+  }, [elements, selectedIds])
+
+  /** Ctrl+V: one transaction for the whole paste, labelled as a clipboard write. */
+  const pasteFromClipboard = useCallback(async () => {
+    if (previewSnapshot) return
+    let raw = internalClipboardRef.current
+    try {
+      const text = await navigator.clipboard?.readText()
+      // Another tab holds a newer payload than our in-memory copy.
+      if (text && parseClipboard(text)) raw = text
+    } catch {
+      // Denied or unavailable — the internal copy still works.
     }
-  }, [elements, addElement])
+    const parsed = parseClipboard(raw)
+    if (!parsed?.length) {
+      showToast('В буфере обмена нет объектов miroboard', 'info')
+      return
+    }
+    const created = preparePaste(parsed, {
+      makeId: () => genId(),
+      offset: { x: PASTE_OFFSET, y: PASTE_OFFSET },
+      createdBy: userProfile.id,
+    })
+    ydoc.transact(() => {
+      for (const element of created) yElements.current?.push([element])
+    }, LOCAL_CLIPBOARD)
+    setSelectedIds(selectMany(created.map(element => element.id)))
+    setAnchorId(created[created.length - 1]?.id ?? null)
+    showToast(`Вставлено объектов: ${created.length}`, 'success')
+  }, [previewSnapshot, ydoc, userProfile.id, showToast])
+
+  /** Ctrl+X: copy, then delete — the deletion stays a single undo step of its own. */
+  const cutSelection = useCallback(() => {
+    if (!copySelection()) return
+    deleteSelected()
+  }, [copySelection, deleteSelected])
 
   const handleContextMenuAction = useCallback((action: ContextMenuAction, id: string) => {
+    // Right-clicking a member of a multi-selection applies to the selection,
+    // which is what every canvas editor does and what users expect.
+    const targets = selectedIds.has(id) ? idsOf(selectedIds) : [id]
     if (action === 'edit') {
       const element = elements.find(candidate => candidate.id === id)
       if (element) {
@@ -783,16 +804,19 @@ export default function App() {
         setEditValue(element.text || '')
       }
     } else if (action === 'duplicate') {
-      duplicateElement(id)
+      if (targets.length > 1) setSelectedIds(selectMany(duplicateSelection()))
+      else duplicateSelection()
     } else if (action === 'front') {
-      bringToFront(id)
+      targets.forEach(bringToFront)
     } else if (action === 'back') {
-      sendToBack(id)
+      targets.forEach(sendToBack)
+    } else if (targets.length > 1) {
+      deleteSelected()
     } else {
       deleteElement(id)
     }
     setContextMenu(null)
-  }, [elements, duplicateElement, bringToFront, sendToBack, deleteElement])
+  }, [elements, selectedIds, duplicateSelection, bringToFront, sendToBack, deleteElement, deleteSelected])
 
   const { canUndo, canRedo } = undoState
 
@@ -813,7 +837,7 @@ export default function App() {
       while (yElements.current!.length > 0) yElements.current!.delete(0, 1)
       const t: BoardElement[] = []
       const s = (text: string, x: number, y: number, w = 160, h = 60, fill = '#FFD93D') =>
-        ({ id: genId(), type: 'sticky' as const, x, y, w, h, text, color: fill, fill, createdBy: user.id })
+        ({ id: genId(), type: 'sticky' as const, x, y, w, h, text, color: fill, fill, createdBy: userProfile.id })
 
       if (name === 'kanban') {
         t.push(s('📋 Сделать', 40, 30, 200, 55, '#FFD93D'))
@@ -842,27 +866,27 @@ export default function App() {
         t.push(s('', 500, 90, 220, 100, '#FFFFFF'))
       } else if (name === 'flowchart') {
         t.push(s('Старт', 250, 20, 120, 50, '#6BCB77'))
-        t.push({ id: genId(), type: 'arrow', x: 310, y: 70, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id })
+        t.push({ id: genId(), type: 'arrow', x: 310, y: 70, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id })
         t.push(s('Шаг 1', 230, 140, 160, 60, '#4D96FF'))
-        t.push({ id: genId(), type: 'arrow', x: 310, y: 200, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id })
+        t.push({ id: genId(), type: 'arrow', x: 310, y: 200, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id })
         t.push(s('Шаг 2', 230, 270, 160, 60, '#FFD93D'))
-        t.push({ id: genId(), type: 'arrow', x: 310, y: 330, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id })
+        t.push({ id: genId(), type: 'arrow', x: 310, y: 330, w: 0, h: 60, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id })
         t.push(s('Результат', 230, 400, 160, 60, '#9D65C9'))
       } else if (name === 'bpmn') {
         const startId = genId()
         const taskId = genId()
         const endId = genId()
-        t.push({ id: startId, type: 'sticky', x: 80, y: 180, w: 86, h: 56, text: 'Старт', color: '#6BCB77', fill: '#6BCB77', createdBy: user.id, bpmnNodeType: 'startEvent' })
-        t.push({ id: taskId, type: 'sticky', x: 250, y: 170, w: 180, h: 76, text: 'Выполнить задачу', color: '#4D96FF', fill: '#4D96FF', createdBy: user.id, bpmnNodeType: 'task' })
-        t.push({ id: endId, type: 'sticky', x: 510, y: 180, w: 86, h: 56, text: 'Конец', color: '#FF5D5D', fill: '#FF5D5D', createdBy: user.id, bpmnNodeType: 'endEvent' })
-        t.push({ id: genId(), type: 'arrow', x: 166, y: 208, w: 84, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id, bpmnFlow: { sourceId: startId, targetId: taskId } })
-        t.push({ id: genId(), type: 'arrow', x: 430, y: 208, w: 80, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: user.id, bpmnFlow: { sourceId: taskId, targetId: endId } })
+        t.push({ id: startId, type: 'sticky', x: 80, y: 180, w: 86, h: 56, text: 'Старт', color: '#6BCB77', fill: '#6BCB77', createdBy: userProfile.id, bpmnNodeType: 'startEvent' })
+        t.push({ id: taskId, type: 'sticky', x: 250, y: 170, w: 180, h: 76, text: 'Выполнить задачу', color: '#4D96FF', fill: '#4D96FF', createdBy: userProfile.id, bpmnNodeType: 'task' })
+        t.push({ id: endId, type: 'sticky', x: 510, y: 180, w: 86, h: 56, text: 'Конец', color: '#FF5D5D', fill: '#FF5D5D', createdBy: userProfile.id, bpmnNodeType: 'endEvent' })
+        t.push({ id: genId(), type: 'arrow', x: 166, y: 208, w: 84, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id, bpmnFlow: { sourceId: startId, targetId: taskId } })
+        t.push({ id: genId(), type: 'arrow', x: 430, y: 208, w: 80, h: 0, color: '#000', stroke: 2, fill: 'transparent', createdBy: userProfile.id, bpmnFlow: { sourceId: taskId, targetId: endId } })
       }
       t.forEach(el => yElements.current!.push([el]))
-    })
+    }, LOCAL_TEMPLATE)
     setShowTemplates(false)
     setTransform({ x: 0, y: 0, scale: 1 })
-  }, [ydoc, user.id])
+  }, [ydoc, userProfile.id])
 
   const exportToPNG = useCallback(() => {
     const svg = svgRef.current
@@ -935,9 +959,9 @@ export default function App() {
   const simulateBpmn = useCallback(() => {
     if (previewSnapshot) return void showToast('Симуляция недоступна во время просмотра истории.', 'info')
     try {
-      const runs = Number(simulationRuns)
+      const runs = Number(simulation.runs)
       if (!Number.isInteger(runs) || runs < 1 || runs > 10000) throw new Error('Количество прогонов должно быть целым числом от 1 до 10000.')
-      const result = JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createSimulationBpmnModel()), simulationSeed, runs)) as BpmnSimulationResult
+      const result = JSON.parse(simulate_bpmn_seed_string(JSON.stringify(createSimulationBpmnModel()), simulation.seed, runs)) as BpmnSimulationResult
       const seconds = (value: number) => `${(value / 1000).toFixed(1)}с`
       setBpmnSimulationResult(result)
       setBottleneckRole(result.roleUtilization[0]?.role ?? null)
@@ -949,10 +973,16 @@ export default function App() {
       setSimulationResultFingerprint(null)
       showToast(error instanceof Error ? error.message : 'Не удалось запустить BPMN-симуляцию.', 'error')
     }
-  }, [createSimulationBpmnModel, previewSnapshot, simulationFingerprint, simulationRuns, simulationSeed, showToast])
+  }, [createSimulationBpmnModel, previewSnapshot, simulationFingerprint, simulation.runs, simulation.seed, showToast])
   const visibleSimulationResult = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationResult : null
   const visibleSimulationSummary = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationSummary : null
   const visibleBottleneckRole = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bottleneckRole : null
+  /**
+   * The BPMN validity badge describes the live document, which is not what a
+   * history preview has on screen. Hiding it there matches the simulation
+   * summaries just above, which are already blanked for the same reason.
+   */
+  const showBpmnStatus = !previewSnapshot && elements.some(element => element.bpmnNodeType)
 
   useEffect(() => {
     if (!__MIROBOARD_DEBUG_HOOK__) return
@@ -992,7 +1022,7 @@ export default function App() {
         return [node.id, {
           id: node.id, type: 'sticky' as const, x: node.x ?? 100 + column * 260, y: node.y ?? 130 + row * 180,
           w: node.width ?? width, h: node.height ?? height, text: node.name || (type === 'task' ? 'Задача' : ''),
-          color: colorForType(type), fill: colorForType(type), createdBy: user.id, bpmnNodeType: type,
+          color: colorForType(type), fill: colorForType(type), createdBy: userProfile.id, bpmnNodeType: type,
           bpmnDurationMs: type === 'task' ? 1000 : undefined,
         }]
       }))
@@ -1002,7 +1032,7 @@ export default function App() {
           if (!nodeById.has(flow.sourceId) || !nodeById.has(flow.targetId)) continue
           replacement.push({
             id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2,
-            fill: 'transparent', createdBy: user.id,
+            fill: 'transparent', createdBy: userProfile.id,
             bpmnFlow: {
               sourceId: flow.sourceId,
               targetId: flow.targetId,
@@ -1016,15 +1046,15 @@ export default function App() {
       ydoc.transact(() => {
         if (yElements.current!.length) yElements.current!.delete(0, yElements.current!.length)
         yElements.current!.push(replacement)
-      })
-      setSelectedId(null)
+      }, LOCAL_TEMPLATE)
+      setSelectedIds(clearSelection())
       setTransform({ x: 0, y: 0, scale: 1 })
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Не удалось импортировать BPMN-файл.', 'error')
     } finally {
       event.target.value = ''
     }
-  }, [user.id, ydoc, showToast])
+  }, [userProfile.id, ydoc, showToast])
 
   const loadEducationalExample = useCallback((example: EducationalExample) => {
     if (!yElements.current) return
@@ -1040,46 +1070,38 @@ export default function App() {
         const color = colorForType(type)
         yElements.current!.push([{
           id: node.id, type: 'sticky', x: node.x ?? 100, y: node.y ?? 100, w: node.width ?? (type === 'task' ? 176 : 78), h: node.height ?? (type === 'task' ? 76 : 78),
-          text: node.name || (type === 'task' ? 'Задача' : ''), color, fill: color, createdBy: user.id, bpmnNodeType: type,
+          text: node.name || (type === 'task' ? 'Задача' : ''), color, fill: color, createdBy: userProfile.id, bpmnNodeType: type,
           bpmnDurationMs: node.durationMs, bpmnDurationDistribution: node.durationDistribution, bpmnDurationMinMs: node.durationMinMs, bpmnDurationModeMs: node.durationModeMs, bpmnDurationMaxMs: node.durationMaxMs,
           bpmnResourceRole: node.resourceRole, bpmnCostPerHour: node.costPerHour, bpmnResourceCapacity: node.resourceCapacity,
           bpmnPriority: node.priority,
         }])
       }
       for (const flow of example.model.flows) yElements.current!.push([{
-        id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: user.id,
+        id: flow.id, type: 'arrow', x: 0, y: 0, w: 0, h: 0, color: '#334155', stroke: 2, fill: 'transparent', createdBy: userProfile.id,
         bpmnFlow: { sourceId: flow.sourceId, targetId: flow.targetId, flowType: flow.flowType || 'sequence', condition: flow.condition, probability: flow.probability, isDefault: flow.isDefault },
       }])
-    })
-    // Load arrival classes if provided
-    if (example.model.arrivalClasses) {
-      setArrivalClasses(
-        example.model.arrivalClasses.map((ac) => ({
-          count: String(ac.count),
-          intervalSec: String(ac.intervalMs / 1000),
-          priority: String(ac.priority),
-        }))
-      )
-    } else {
-      setArrivalClasses([])
-    }
-    // Load role policies if provided
-    if (example.model.resourceRoles) {
-      const policies: Record<string, RolePolicyDraft> = {}
-      for (const role of example.model.resourceRoles) {
-        policies[role.name] = {
-          capacity: String(role.capacity),
-          queuePolicy: role.queuePolicy ?? 'fifo',
-        }
-      }
-      setRolePolicies(policies)
-    } else {
-      setRolePolicies({})
-    }
-    setSelectedId(null)
+    }, LOCAL_TEMPLATE)
+    // Only the two collections the example actually carries. Seed, runs and the
+    // SLA target deliberately survive a module load — the original code left
+    // them alone, and changing that is a behaviour decision, not a refactor.
+    replaceSimulation(current => ({
+      ...current,
+      arrivalClasses: (example.model.arrivalClasses ?? []).map(arrivalClass => ({
+        count: String(arrivalClass.count),
+        intervalSec: String(arrivalClass.intervalMs / 1000),
+        priority: String(arrivalClass.priority),
+      })),
+      rolePolicies: Object.fromEntries(
+        (example.model.resourceRoles ?? []).map(role => [
+          role.name,
+          { capacity: String(role.capacity), queuePolicy: role.queuePolicy ?? 'fifo' },
+        ]),
+      ),
+    }))
+    setSelectedIds(clearSelection())
     setTransform({ x: 0, y: 0, scale: 1 })
     showToast(`Загружен модуль: ${example.title}. Откройте Симуляцию для проверки.`, 'success')
-  }, [user.id, ydoc, showToast])
+  }, [userProfile.id, ydoc, showToast, replaceSimulation])
 
   // ======================== POINTER HANDLERS ========================
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -1089,6 +1111,7 @@ export default function App() {
     setContextMenu(null)
     setShowTemplates(false)
     setShowMore(false)
+    setShowProfile(false)
 
     const point = screenToWorld(e.clientX, e.clientY)
     if (previewSnapshot) {
@@ -1098,11 +1121,6 @@ export default function App() {
       }
       return
     }
-    console.log('[BPMN diagnostic] canvas pointerdown before placement', JSON.stringify({
-      tool,
-      point,
-      paletteVisible: showBpmnPalette,
-    }))
     if (e.pointerType === 'touch' && e.isPrimary === false) return
 
     // Two fingers = pan
@@ -1121,7 +1139,7 @@ export default function App() {
     if (tool === 'emoji') {
       addElement({
         id: genId(), type: 'emoji', x: point.x - 24, y: point.y - 24,
-        w: 48, h: 48, emoji: selectedEmoji, color: 'transparent', createdBy: user.id
+        w: 48, h: 48, emoji: selectedEmoji, color: 'transparent', createdBy: userProfile.id
       })
       return
     }
@@ -1135,14 +1153,14 @@ export default function App() {
     if (tool === 'select') {
       // Check resize handle
       const resizeHandle = target.closest('[data-resize]') as HTMLElement
-      if (resizeHandle && selectedId) {
-        const el = elements.find(e => e.id === selectedId)
+      if (resizeHandle && selectedElementId) {
+        const el = elements.find(candidate => candidate.id === selectedElementId)
         if (el) {
-          setResizeInfo({
-            id: selectedId, corner: resizeHandle.dataset.resize!,
+          resizeInfoRef.current = {
+            id: selectedElementId, corner: resizeHandle.dataset.resize as ResizeCorner,
             startX: point.x, startY: point.y,
-            elX: el.x, elY: el.y, elW: el.w || 0, elH: el.h || 0
-          })
+            elX: el.x, elY: el.y, elW: el.w || 0, elH: el.h || 0,
+          }
           return
         }
       }
@@ -1150,23 +1168,43 @@ export default function App() {
       const el = target.closest('[data-id]') as HTMLElement
       if (el) {
         const elId = el.dataset.id!
-        const boardEl = elements.find(e2 => e2.id === elId)
-        setSelectedId(elId)
-        if (boardEl) {
-          setDragInfo({
-            id: elId, startX: point.x, startY: point.y,
-            elStartX: boardEl.x, elStartY: boardEl.y
-          })
+        if (e.shiftKey) {
+          // Shift-click toggles membership and never starts a drag: the user is
+          // building a set, not moving it.
+          setSelectedIds(current => toggleInSelection(current, elId))
+          setAnchorId(elId)
+          return
+        }
+        // Clicking inside an existing multi-selection keeps it, so the whole
+        // group can be dragged. Clicking outside replaces it.
+        if (!selectedIds.has(elId)) {
+          setSelectedIds(selectOnly(elId))
+          setAnchorId(elId)
+        }
+        const dragged = (selectedIds.has(elId) ? idsOf(selectedIds) : [elId])
+          .map(id => elements.find(candidate => candidate.id === id))
+          .filter((candidate): candidate is BoardElement => Boolean(candidate))
+        if (dragged.length) {
+          dragInfoRef.current = {
+            startX: point.x, startY: point.y,
+            items: dragged.map(item => ({ id: item.id, x: item.x, y: item.y })),
+          }
         }
         const longPress = { timer: null as number | null, x: e.clientX, y: e.clientY, startedAt: performance.now() }
         longPress.timer = window.setTimeout(() => {
           if (longPressRef.current === longPress) longPressRef.current = null
+          // A long press outside the current selection retargets it, so the
+          // context menu never acts on a set the user cannot see.
+          if (!selectedIds.has(elId)) selectElement(elId)
           setContextMenu({ x: point.x, y: point.y, id: elId })
           if ('vibrate' in navigator) navigator.vibrate(30)
         }, 500)
         longPressRef.current = longPress
       } else {
-        setSelectedId(null)
+        // Empty canvas: start a marquee. Shift extends the anchored selection.
+        marqueeRef.current = { from: point, shift: e.shiftKey }
+        setAnchorId(current => (e.shiftKey ? current : null))
+        setMarquee(normaliseRect(point, point))
       }
       return
     }
@@ -1182,7 +1220,7 @@ export default function App() {
       if (!targetNode) return
       if (!bpmnFlowSourceId) {
         setBpmnFlowSourceId(targetNode.id)
-        setSelectedId(targetNode.id)
+        selectElement(targetNode.id)
         setFlowPreviewPoint({ x: targetNode.x + (targetNode.w || 0) / 2, y: targetNode.y + (targetNode.h || 0) / 2 })
         showToast('Источник выбран. Теперь выберите целевой BPMN-узел.', 'info')
         return
@@ -1208,12 +1246,12 @@ export default function App() {
         color: '#334155',
         stroke: 2,
         fill: 'transparent',
-        createdBy: user.id,
+        createdBy: userProfile.id,
         bpmnFlow: { sourceId: sourceNode.id, targetId: targetNode.id, flowType: 'sequence' },
       })
       setBpmnFlowSourceId(null)
       setFlowPreviewPoint(null)
-      setSelectedId(flowId)
+      setSelectedIds(selectOnly(flowId))
       chooseTool('select')
       showToast('Sequence flow создан.', 'success')
       return
@@ -1238,12 +1276,12 @@ export default function App() {
         text: bpmnNode.text,
         color: bpmnNode.color,
         fill: bpmnNode.color,
-        createdBy: user.id,
+        createdBy: userProfile.id,
         bpmnNodeType: bpmnNode.type,
         bpmnDurationMs: bpmnNode.durationMs,
       }
       addElement(newEl)
-      setSelectedId(id)
+      setSelectedIds(selectOnly(id))
       chooseTool('select')
       return
     }
@@ -1255,10 +1293,10 @@ export default function App() {
         text: tool === 'sticky' ? 'Заметка' : 'Текст',
         color: tool === 'sticky' ? STICKY_COLORS[0] : '#000000',
         fill: tool === 'sticky' ? STICKY_COLORS[0] : 'transparent',
-        createdBy: user.id
+        createdBy: userProfile.id
       }
       addElement(newEl)
-      setSelectedId(id)
+      setSelectedIds(selectOnly(id))
       setEditingText(id)
       setEditValue(newEl.text || '')
       chooseTool('select')
@@ -1268,9 +1306,9 @@ export default function App() {
       const id = genId()
       addElement({
         id, type: tool, x: point.x, y: point.y, w: 0, h: 0,
-        color, stroke: strokeWidth, fill: 'transparent', createdBy: user.id
+        color, stroke: strokeWidth, fill: 'transparent', createdBy: userProfile.id
       })
-      setSelectedId(id)
+      setSelectedIds(selectOnly(id))
       setIsDrawing(true)
       return
     }
@@ -1278,7 +1316,7 @@ export default function App() {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, user.id, selectedId, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, showBpmnPalette, previewSnapshot])
+  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, userProfile.id, selectedIds, selectedElementId, selectElement, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, previewSnapshot])
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
     const isLaser = tool === 'laser'
@@ -1295,29 +1333,24 @@ export default function App() {
       setTransform(t => ({ ...t, x: e.clientX - panStart.x, y: e.clientY - panStart.y }))
       return
     }
+    // Marquee
+    if (marqueeRef.current) {
+      setMarquee(normaliseRect(marqueeRef.current.from, point))
+      return
+    }
     // Resize
-    if (resizeInfo) {
-      const dx = point.x - resizeInfo.startX
-      const dy = point.y - resizeInfo.startY
-      const c = resizeInfo.corner
-      let newX = resizeInfo.elX, newY = resizeInfo.elY
-      let newW = resizeInfo.elW, newH = resizeInfo.elH
-      if (c === 'se') { newW = Math.max(30, resizeInfo.elW + dx); newH = Math.max(30, resizeInfo.elH + dy) }
-      else if (c === 'sw') { newX = resizeInfo.elX + dx; newW = Math.max(30, resizeInfo.elW - dx); newH = Math.max(30, resizeInfo.elH + dy) }
-      else if (c === 'ne') { newY = resizeInfo.elY + dy; newW = Math.max(30, resizeInfo.elW + dx); newH = Math.max(30, resizeInfo.elH - dy) }
-      else if (c === 'nw') { newX = resizeInfo.elX + dx; newY = resizeInfo.elY + dy; newW = Math.max(30, resizeInfo.elW - dx); newH = Math.max(30, resizeInfo.elH - dy) }
-      if (snapGrid) { newX = snapVal(newX); newY = snapVal(newY); newW = snapVal(newW); newH = snapVal(newH) }
-      const frame = { id: resizeInfo.id, updates: { x: newX, y: newY, w: newW, h: newH } }
+    const resize = resizeInfoRef.current
+    if (resize) {
+      const frame = resizeFrame(resize, point, snapGrid ? snapVal : undefined)
       transientFrameRef.current = frame
       setTransientFrame(frame)
       return
     }
-    // Drag
-    if (dragInfo) {
-      let newX = dragInfo.elStartX + (point.x - dragInfo.startX)
-      let newY = dragInfo.elStartY + (point.y - dragInfo.startY)
-      if (snapGrid) { newX = snapVal(newX); newY = snapVal(newY) }
-      const frame = { id: dragInfo.id, updates: { x: newX, y: newY } }
+    // Drag: one delta applied to every dragged element, so a multi-selection
+    // moves as a group and stays internally consistent.
+    const drag = dragInfoRef.current
+    if (drag) {
+      const frame = dragFrame(drag, point, snapGrid ? snapVal : undefined)
       transientFrameRef.current = frame
       setTransientFrame(frame)
       return
@@ -1327,16 +1360,16 @@ export default function App() {
       setCurrentPath(prev => [...prev, point])
       return
     }
-    if (selectedId && (tool === 'rect' || tool === 'circle' || tool === 'arrow' || tool === 'line')) {
-      const el = elements.find(e => e.id === selectedId)
+    if (selectedElementId && (tool === 'rect' || tool === 'circle' || tool === 'arrow' || tool === 'line')) {
+      const el = elements.find(e => e.id === selectedElementId)
       if (el) {
         let w = point.x - el.x, h = point.y - el.y
         if (snapGrid) { w = snapVal(w); h = snapVal(h) }
-        updateElement(selectedId, { w, h })
+        updateElement(selectedElementId, { w, h })
       }
     }
-  }, [isPanning, panStart, isDrawing, tool, selectedId, elements, screenToWorld, updateElement, dragInfo, resizeInfo, snapGrid, bpmnFlowSourceId])
-  const handlePointerUp = useCallback(() => {
+  }, [isPanning, panStart, isDrawing, tool, selectedElementId, elements, screenToWorld, updateElement, snapGrid, bpmnFlowSourceId])
+  const handlePointerUp = useCallback((e?: React.PointerEvent) => {
     // Cancel long press
     if (longPressRef.current) {
       if (performance.now() - longPressRef.current.startedAt < 500) {
@@ -1354,21 +1387,54 @@ export default function App() {
         points: simplified.map(p => ({ x: p.x - minX, y: p.y - minY })),
         color: tool === 'marker' ? color + '80' : color,
         stroke: tool === 'marker' ? strokeWidth * 3 : strokeWidth,
-        createdBy: user.id
+        createdBy: userProfile.id
       })
     }
-    const frame = transientFrameRef.current
-    if (frame) updateElement(frame.id, frame.updates)
+    // Where the pointer actually is. A cancelled gesture has no meaningful
+    // release point, so it keeps whatever the last move produced.
+    const releasedAt = e && e.type !== 'pointercancel' ? screenToWorld(e.clientX, e.clientY) : null
+    const snap = snapGrid ? snapVal : undefined
+    // Recompute the final frame from the release point instead of trusting the
+    // last committed pointermove: the gesture has to land where the user let go,
+    // whatever React has rendered by then.
+    const frame = releasedAt
+      ? resizeInfoRef.current
+        ? resizeFrame(resizeInfoRef.current, releasedAt, snap)
+        : dragInfoRef.current
+          ? dragFrame(dragInfoRef.current, releasedAt, snap)
+          : transientFrameRef.current
+      : transientFrameRef.current
+    // One commit per gesture, labelled as such: the drag itself stays local
+    // (transientFrame) so a 3-second drag is a single undo step, not 180.
+    if (frame?.length) {
+      const frames = frame
+      ydoc.transact(() => {
+        for (const item of frames) commitElementUpdate(ydoc, yElements.current!, item.id, item.updates)
+      }, LOCAL_GESTURE)
+    }
     transientFrameRef.current = null
     setTransientFrame(null)
+    // Finish the marquee: select what the rect covers, measured to the release
+    // point for the same reason as the frame above.
+    const pendingMarquee = marqueeRef.current
+    if (pendingMarquee) {
+      const rect = releasedAt ? normaliseRect(pendingMarquee.from, releasedAt) : marquee
+      if (rect) {
+        const picked = selectInRect(elements, rect, 'intersect')
+        setSelectedIds(current => (pendingMarquee.shift ? unionSelection(current, picked) : selectMany(picked)))
+        if (!pendingMarquee.shift) setAnchorId(picked.length ? picked[picked.length - 1] : null)
+      }
+    }
+    marqueeRef.current = null
+    setMarquee(null)
     setIsDrawing(false)
     setCurrentPath([])
     setIsPanning(false)
     setPanStart(null)
     setLastPinchDist(null)
-    setDragInfo(null)
-    setResizeInfo(null)
-  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, user.id, updateElement])
+    dragInfoRef.current = null
+    resizeInfoRef.current = null
+  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, userProfile.id, marquee, elements, ydoc, screenToWorld, snapGrid])
   // Touch pinch
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -1377,12 +1443,9 @@ export default function App() {
       const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
       const cx = (t1.clientX + t2.clientX) / 2, cy = (t1.clientY + t2.clientY) / 2
       if (lastPinchDist) {
-        const s = dist / lastPinchDist
-        setTransform(t => {
-          const ns = clamp_scale(t.scale * s)
-          const wc = screenToWorld(cx, cy)
-          return { scale: ns, x: cx - wc.x * ns, y: cy - wc.y * ns }
-        })
+        const factor = dist / lastPinchDist
+        const world = screenToWorld(cx, cy)
+        setTransform(current => zoomAround(current, factor, { x: cx, y: cy }, world))
       }
       setLastPinchDist(dist)
     }
@@ -1390,37 +1453,15 @@ export default function App() {
   // Wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault()
-    const delta = e.ctrlKey || e.metaKey ? -e.deltaY : -e.deltaY
-    const scale = delta > 0 ? 1.08 : 0.92
-    const point = screenToWorld(e.clientX, e.clientY)
-    setTransform(t => {
-      const ns = clamp_scale(t.scale * scale)
-      return { scale: ns, x: e.clientX - point.x * ns, y: e.clientY - point.y * ns }
-    })
+    const world = screenToWorld(e.clientX, e.clientY)
+    const factor = wheelZoomFactor(e.deltaY)
+    setTransform(current => zoomAround(current, factor, { x: e.clientX, y: e.clientY }, world))
   }, [screenToWorld])
   const fitToContent = useCallback(() => {
-    const scoped = workspaceMode === 'board'
-      ? elements.filter(element => !element.bpmnNodeType && !element.bpmnFlow)
-      : elements.filter(element => element.bpmnNodeType || element.bpmnFlow)
-    const visible = scoped.length ? scoped : elements
-    if (!visible.length) {
-      setTransform({ x: 0, y: 0, scale: 1 })
-      return
-    }
-    const minX = Math.min(...visible.map(element => element.x))
-    const minY = Math.min(...visible.map(element => element.y))
-    const maxX = Math.max(...visible.map(element => element.x + (element.w || 48)))
-    const maxY = Math.max(...visible.map(element => element.y + (element.h || 48)))
-    const padding = 64
-    const scale = clamp_scale(Math.min(
-      (window.innerWidth - padding * 2) / Math.max(maxX - minX, 1),
-      (window.innerHeight - 170) / Math.max(maxY - minY, 1),
-    ))
-    setTransform({
-      scale,
-      x: (window.innerWidth - (maxX - minX) * scale) / 2 - minX * scale,
-      y: (window.innerHeight - (maxY - minY) * scale) / 2 - minY * scale,
-    })
+    setTransform(fitTransform(elementsInScope(elements, workspaceMode), {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }))
   }, [elements, workspaceMode])
   useEffect(() => () => {
     bpmnRunTimersRef.current.forEach(window.clearTimeout)
@@ -1429,7 +1470,7 @@ export default function App() {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && previewSnapshot) { e.preventDefault(); closeTimeline(); return }
-      if (e.key === 'Escape') { e.preventDefault(); setSelectedId(null); setContextMenu(null); setShowBpmnPalette(false); setWorkspaceMode('board'); return }
+      if (e.key === 'Escape') { e.preventDefault(); setSelectedIds(clearSelection()); setContextMenu(null); setShowBpmnPalette(false); setWorkspaceMode('board'); return }
       if (editingText) return
       if (showSimulationPanel && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault()
@@ -1440,10 +1481,56 @@ export default function App() {
       if (showSimulationPanel) return
       const target = (e.target as HTMLElement | null) || document.activeElement as HTMLElement | null
       if (target?.isContentEditable || (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
-      if (e.key === 'Delete' || e.key === 'Backspace') { if (selectedId) deleteElement(selectedId) }
+      // Past this point every branch reads or writes the document, and a drag
+      // in progress is not in the document yet. Ctrl+D mid-drag used to place
+      // the copy next to where the element started, nowhere near the one on
+      // screen; Ctrl+C copied the pre-drag position. One flush covers all of
+      // them, rather than each shortcut having to remember.
+      flushGesture()
+      if (e.key === 'Delete' || e.key === 'Backspace') { if (selectedIds.size) deleteSelected() }
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo() }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); handleRedo() }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'd') { e.preventDefault(); if (selectedId) duplicateElement(selectedId) }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
+        e.preventDefault()
+        if (selectedIds.size) setSelectedIds(selectMany(duplicateSelection()))
+      }
+      // Clipboard. Ctrl+C is only taken over when the canvas has a selection,
+      // so copying text anywhere else in the UI keeps working natively.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && !e.shiftKey) {
+        if (copySelection()) e.preventDefault()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'x') {
+        if (selectedIds.size) {
+          e.preventDefault()
+          cutSelection()
+        }
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        void pasteFromClipboard()
+        return
+      }
+      // Ctrl+A selects the whole board; arrow keys nudge the selection.
+      // `elements` is the live document, while a history preview renders
+      // `previewElements`. Selecting here during a preview would hand back
+      // objects that are not on screen — and Ctrl+C would then copy them.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        if (previewSnapshot) return
+        selectElements(elements.map(element => element.id))
+        return
+      }
+      if (!e.metaKey && !e.ctrlKey && selectedIds.size && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault()
+        const step = e.shiftKey ? 10 : 1
+        const delta = e.key === 'ArrowUp' ? { x: 0, y: -step }
+          : e.key === 'ArrowDown' ? { x: 0, y: step }
+            : e.key === 'ArrowLeft' ? { x: -step, y: 0 } : { x: step, y: 0 }
+        moveSelection(delta)
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault()
         void saveBoard(e.shiftKey ? 'saveAs' : 'save')
@@ -1470,19 +1557,33 @@ export default function App() {
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
-  }, [selectedId, deleteElement, editingText, handleUndo, handleRedo, duplicateElement, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
+  }, [selectedIds, deleteSelected, editingText, flushGesture, handleUndo, handleRedo, duplicateSelection, elements, moveSelection, copySelection, cutSelection, pasteFromClipboard, selectElements, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
   // ======================== RENDER ELEMENT ========================
   const isPreview = previewSnapshot !== null
   const liveElementIds = useMemo(() => new Set(elements.map(element => element.id)), [elements])
   const baseRenderedElements = previewElements ?? elements
   const renderedElements = useMemo(() => {
     if (!transientFrame || isPreview) return baseRenderedElements
-    return baseRenderedElements.map(element => element.id === transientFrame.id
-      ? { ...element, ...transientFrame.updates }
-      : element)
+    const frames = new Map(transientFrame.map(frame => [frame.id, frame.updates]))
+    return baseRenderedElements.map(element => {
+      const updates = frames.get(element.id)
+      return updates ? { ...element, ...updates } : element
+    })
   }, [baseRenderedElements, isPreview, transientFrame])
+  const selectionCount = selectedIds.size
+  /** Wires one element's text editing to the shared editor state. */
+  const textEditorProps = (el: BoardElement) => ({
+    text: el.text ?? '',
+    editing: editingText === el.id,
+    draft: editValue,
+    readOnly: isPreview,
+    onDraftChange: setEditValue,
+    onBeginEdit: () => { setEditingText(el.id); setEditValue(el.text || '') },
+    onCommit: () => { updateElement(el.id, { text: editValue }); setEditingText(null) },
+  })
+
   const renderElement = (el: BoardElement) => {
-    const isSelected = selectedId === el.id
+    const isSelected = isIdSelected(selectedIds, el.id)
     const invS = 1 / transform.scale
     const isChangedInPreview = isPreview && !liveElementIds.has(el.id)
     if (el.bpmnNodeType) {
@@ -1496,7 +1597,7 @@ export default function App() {
       const isBottleneck = el.bpmnNodeType === 'task' && visibleBottleneckRole !== null && el.bpmnResourceRole === visibleBottleneckRole
       return (
         <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-          {isChangedInPreview && <rect x={-7} y={-7} width={width + 14} height={height + 14} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={12} />}
+          {isChangedInPreview && <ChangedInPreview invScale={invS} x={-7} y={-7} width={width + 14} height={height + 14} radius={12} />}
           {el.bpmnNodeType === 'startEvent' && <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={3} />}
           {el.bpmnNodeType === 'endEvent' && <>
             <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={5} />
@@ -1531,7 +1632,7 @@ export default function App() {
         const d = smoothPathD(el.points)
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none">
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={6} />}
             <path d={d} fill="none" stroke={el.color} strokeWidth={el.stroke}
               strokeLinecap="round" strokeLinejoin="round" className="pointer-events-stroke"
               style={{ paintOrder: 'stroke', ...(el.stroke && el.stroke > 6 ? { filter: `blur(${el.stroke > 10 ? 1 : 0}px)` } : {}) }} />
@@ -1545,48 +1646,41 @@ export default function App() {
       case 'sticky':
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={14} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={14} />}
             <rect width={el.w} height={el.h} fill={el.fill} rx={10}
               style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.12))' }} />
             <rect width={el.w} height={el.h} fill={el.fill} rx={10} />
             <foreignObject x={8} y={8} width={(el.w || 160) - 16} height={(el.h || 160) - 16}>
               <div className="w-full h-full flex items-center justify-center p-2 text-[14px] leading-snug font-medium text-black/80 break-words text-center select-none">
-                {editingText === el.id ? (
-                  <textarea autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { updateElement(el.id, { text: editValue }); setEditingText(null) }}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); updateElement(el.id, { text: editValue }); setEditingText(null) } }}
-                    className="w-full h-full bg-transparent outline-none resize-none text-center text-[14px]" />
-                ) : (
-                  <div onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}>{el.text}</div>
-                )}
+                <ElementTextEditor
+                  {...textEditorProps(el)}
+                  className={editingText === el.id ? 'w-full h-full bg-transparent outline-none resize-none text-center text-[14px]' : undefined}
+                />
               </div>
             </foreignObject>
-            {isSelected && <>
+            {isSelected && selectionCount === 1 && <>
               <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
                 fill="none" stroke="#4D96FF" strokeWidth={2 * invS} rx={12} />
-              {/* Resize handles */}
-              {([['nw', -6, -6], ['ne', (el.w || 0) - 2, -6], ['sw', -6, (el.h || 0) - 2], ['se', (el.w || 0) - 2, (el.h || 0) - 2]] as [string, number, number][]).map(([c, cx, cy]) => (
-                <circle key={c} data-resize={c} cx={cx} cy={cy} r={7 * invS}
-                  fill="white" stroke="#4D96FF" strokeWidth={2 * invS} className="cursor-nwse-resize" style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.2))' }} />
-              ))}
+              {/* Resize handles: single selection only, multi-resize needs an anchor */}
+              <ResizeHandles invScale={invS} width={el.w || 0} height={el.h || 0} />
             </>}
           </g>
         )
       case 'text':
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 200) + 12} height={(el.h || 60) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 200) + 12} height={(el.h || 60) + 12} radius={6} />}
             <foreignObject width={el.w || 200} height={el.h || 60}>
               <div className="w-full h-full select-none"
                 onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}>
-                {editingText === el.id ? (
-                  <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { updateElement(el.id, { text: editValue }); setEditingText(null) }}
-                    onKeyDown={e => { if (e.key === 'Enter') { updateElement(el.id, { text: editValue }); setEditingText(null) } }}
-                    className="w-full bg-transparent outline-none text-[16px] font-semibold" style={{ color: el.color }} />
-                ) : (
-                  <div className="text-[16px] font-semibold" style={{ color: el.color }}>{el.text}</div>
-                )}
+                <ElementTextEditor
+                  {...textEditorProps(el)}
+                  multiline={false}
+                  className={editingText === el.id
+                    ? 'w-full bg-transparent outline-none text-[16px] font-semibold'
+                    : 'text-[16px] font-semibold'}
+                  style={{ color: el.color }}
+                />
               </div>
             </foreignObject>
             {isSelected && <rect x={-4} y={-4} width={(el.w || 200) + 8} height={(el.h || 60) + 8}
@@ -1600,20 +1694,16 @@ export default function App() {
             onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseUp={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}>
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={8} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={8} />}
             <rect width={el.w} height={el.h} fill={el.fill || 'transparent'} stroke={el.color}
               strokeWidth={el.stroke} rx={4}
-              onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }} />
+              onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }} />
             <foreignObject x={8} y={8} width={Math.max((el.w || 0) - 16, 120)} height={Math.max((el.h || 0) - 16, 40)}>
               <div className="w-full h-full flex items-center justify-center p-2 text-[14px] leading-snug font-medium text-black/80 break-words text-center select-none">
-                {editingText === el.id ? (
-                  <textarea autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { updateElement(el.id, { text: editValue }); setEditingText(null) }}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); updateElement(el.id, { text: editValue }); setEditingText(null) } }}
-                    className="w-full h-full bg-transparent outline-none resize-none text-center text-[14px]" />
-                ) : (
-                  <div onDoubleClick={e => { e.stopPropagation(); setEditingText(el.id); setEditValue(el.text || '') }}>{el.text}</div>
-                )}
+                <ElementTextEditor
+                  {...textEditorProps(el)}
+                  className={editingText === el.id ? 'w-full h-full bg-transparent outline-none resize-none text-center text-[14px]' : undefined}
+                />
               </div>
             </foreignObject>
             {isSelected && <>
@@ -1633,20 +1723,16 @@ export default function App() {
             onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseUp={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}>
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={8} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={8} />}
             <ellipse cx={(el.w || 0) / 2} cy={(el.h || 0) / 2} rx={Math.abs((el.w || 0) / 2)} ry={Math.abs((el.h || 0) / 2)}
               fill={el.fill || 'transparent'} stroke={el.color} strokeWidth={el.stroke}
-              onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }} />
+              onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }} />
             <foreignObject x={8} y={8} width={Math.max((el.w || 0) - 16, 120)} height={Math.max((el.h || 0) - 16, 40)}>
               <div className="w-full h-full flex items-center justify-center p-2 text-[14px] leading-snug font-medium text-black/80 break-words text-center select-none">
-                {editingText === el.id ? (
-                  <textarea autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { updateElement(el.id, { text: editValue }); setEditingText(null) }}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); updateElement(el.id, { text: editValue }); setEditingText(null) } }}
-                    className="w-full h-full bg-transparent outline-none resize-none text-center text-[14px]" />
-                ) : (
-                  <div onDoubleClick={e => { e.stopPropagation(); setEditingText(el.id); setEditValue(el.text || '') }}>{el.text}</div>
-                )}
+                <ElementTextEditor
+                  {...textEditorProps(el)}
+                  className={editingText === el.id ? 'w-full h-full bg-transparent outline-none resize-none text-center text-[14px]' : undefined}
+                />
               </div>
             </foreignObject>
             {isSelected && <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
@@ -1668,7 +1754,7 @@ export default function App() {
         const hs = 12
         return (
           <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-            {isChangedInPreview && <rect x={Math.min(0, x2) - 7} y={Math.min(0, y2) - 7} width={Math.abs(x2) + 14} height={Math.abs(y2) + 14} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, x2) - 7} y={Math.min(0, y2) - 7} width={Math.abs(x2) + 14} height={Math.abs(y2) + 14} radius={6} />}
             <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} />
             <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
               fill={el.color} />
@@ -1689,7 +1775,7 @@ export default function App() {
       case 'line':
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-            {isChangedInPreview && <rect x={Math.min(0, el.w || 0) - 7} y={Math.min(0, el.h || 0) - 7} width={Math.abs(el.w || 0) + 14} height={Math.abs(el.h || 0) + 14} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, el.w || 0) - 7} y={Math.min(0, el.h || 0) - 7} width={Math.abs(el.w || 0) + 14} height={Math.abs(el.h || 0) + 14} radius={6} />}
             <line x1={0} y1={0} x2={el.w || 0} y2={el.h || 0} stroke={el.color} strokeWidth={el.stroke} strokeLinecap="round" />
             {isSelected && <rect x={Math.min(0, el.w || 0) - 4} y={Math.min(0, el.h || 0) - 4}
               width={Math.abs(el.w || 0) + 8} height={Math.abs(el.h || 0) + 8}
@@ -1713,9 +1799,8 @@ export default function App() {
   }
   // ======================== JSX ========================
   const dk = darkMode
-  const bgMain = '#F7F8FC'
-  const bgBar = 'bg-white/95'
-  const borderC = 'border-slate-200'
+  // Extracted panels take the whole theme rather than five separate props.
+  const theme = createTheme(darkMode)
   const textC = 'text-slate-900'
   const textSec = 'text-slate-500'
   const hoverBg = 'hover:bg-slate-100'
@@ -1723,111 +1808,46 @@ export default function App() {
     <div className={`fixed inset-0 overflow-hidden select-none ${dk ? 'bg-slate-900 text-white' : 'bg-[#F7F7F5] text-black'}`}>
       <input ref={bpmnImportRef} type="file" accept=".bpmn,.xml,application/xml,text/xml" className="hidden" onChange={importFromBpmn} />
       {/* ===== HEADER ===== */}
-      <div className={`absolute top-0 left-0 right-0 z-30 h-[52px] flex items-center justify-between px-3 ${dk ? 'bg-slate-900/90' : 'bg-white/90'} backdrop-blur-xl border-b ${borderC}`} data-ui>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <div className="size-7 rounded-lg bg-gradient-to-br from-violet-500 to-blue-500 grid place-items-center">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-            </div>
-            <span className={`text-[15px] font-bold tracking-tight ${textC}`}>{fileSession.name ?? 'Новый документ'}</span>
-            <span role="status" aria-live="polite" className={`text-[11px] font-semibold ${isDirty ? 'text-amber-700' : textSec}`}>{isDirty ? 'Не сохранено' : 'Сохранено'}</span>
-            {recoveryNotice && <RecoveryDivergenceNotice message={recoveryNotice} />}
-            <span className="select-text rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-600" title="Build version: можно выделить и скопировать">{__MIROBOARD_VERSION__}</span>
-            <div className="ml-1 hidden rounded-lg bg-slate-100 p-0.5 sm:flex">
-              {([
-                ['board', 'Доска'],
-                ['bpmn', 'BPMN'],
-                ['simulation', 'Симуляция'],
-              ] as [WorkspaceMode, string][]).map(([mode, label]) => (
-                <button key={mode} onClick={() => mode === 'simulation' ? openSimulation() : (mode === 'bpmn' && !bpmnProfileActive ? activateBpmnProfile() : setWorkspaceMode(mode))} disabled={mode === 'simulation' && isPreview} className={`rounded-md px-2 py-1 text-[10px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${workspaceMode === mode ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowProjectHistory(true)}
-              className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`}
-              title="История проекта"
-            >
-              История
-            </button>
-            <button
-              onClick={() => setShowTimeline(true)}
-              className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${showTimeline ? 'bg-violet-100 text-violet-700' : `${hoverBg} ${textSec}`}`}
-              title="Контрольные точки документа"
-            >
-              Контрольные точки
-            </button>
-            <button onClick={() => setTourStep(0)} className={`grid size-7 place-items-center rounded-lg text-[12px] font-bold transition ${hoverBg} ${textSec}`} title="Краткий тур по интерфейсу">
-              ?
-            </button>
-            <button onClick={() => setShowLearningModules(true)} className={`h-7 px-2 rounded-lg text-[11px] font-semibold transition ${hoverBg} ${textSec}`} title="Учебные BPMN-примеры">
-              Примеры
-            </button>
-          </div>
-          <div className={`h-4 w-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
-          {/* Undo/Redo */}
-          <button onClick={handleUndo} disabled={!canUndo || isPreview}
-            className={`size-8 grid place-items-center rounded-lg transition ${canUndo ? hoverBg + ' ' + textSec : 'opacity-25 cursor-default'}`} title="Отменить (Ctrl+Z)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 10h13a4 4 0 0 1 0 8H9M3 10l5-5M3 10l5 5" /></svg>
-          </button>
-          <button onClick={handleRedo} disabled={!canRedo || isPreview}
-            className={`size-8 grid place-items-center rounded-lg transition ${canRedo ? hoverBg + ' ' + textSec : 'opacity-25 cursor-default'}`} title="Вернуть (Ctrl+Shift+Z)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10H8a4 4 0 0 0 0 8h7M21 10l-5-5M21 10l-5 5" /></svg>
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          {tool === 'bpmnSequence' && (
-            <div className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-violet-900 text-violet-100' : 'bg-violet-100 text-violet-700'}`}>
-              {bpmnFlowSourceId ? 'Поток: выберите цель' : 'Поток: выберите источник'}
-            </div>
-          )}
-          {elements.some(element => element.bpmnNodeType) && (
-            <>
-              <div
-                className={`h-7 px-2 rounded-lg text-[11px] font-semibold flex items-center gap-1 ${bpmnIssues.some(issue => issue.severity === 'error') ? 'bg-red-100 text-red-700' : bpmnIssues.length > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}
-                title={bpmnIssues.map(issue => issue.message).join('\n') || 'BPMN-модель корректна'}
-              >
-                <span>{bpmnIssues.some(issue => issue.severity === 'error') ? '!' : '✓'}</span>
-                BPMN {bpmnIssues.length || 'OK'}
-              </div>
-              <button onClick={openSimulation} disabled={isPreview} className="h-7 rounded-lg bg-fuchsia-500 px-2.5 text-[11px] font-bold text-white shadow-sm hover:bg-fuchsia-600 disabled:cursor-not-allowed disabled:opacity-50" title="Открыть Monte Carlo симуляцию">
-                Симуляция
-              </button>
-              {bpmnRunSummary && (
-                <div className={`h-7 px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-indigo-950 text-indigo-200' : 'bg-indigo-50 text-indigo-700'}`}>
-                  {bpmnRunSummary}
-                </div>
-              )}
-              {visibleSimulationSummary && (
-                <div className={`h-7 max-w-[340px] truncate px-2 rounded-lg text-[11px] font-semibold ${dk ? 'bg-fuchsia-950 text-fuchsia-200' : 'bg-fuchsia-50 text-fuchsia-700'}`} title={visibleSimulationSummary}>
-                  {visibleSimulationSummary}
-                </div>
-              )}
-            </>
-          )}
-          {/* Snap */}
-          <button onClick={() => setSnapGrid(!snapGrid)}
-            className={`h-7 px-2 rounded-lg text-[11px] font-medium flex items-center gap-1 transition ${snapGrid ? (dk ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-700') : (dk ? 'text-slate-400 hover:bg-slate-700' : 'text-black/40 hover:bg-black/5')}`} title="Привязка к сетке">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>
-            Сетка
-          </button>
-          {/* Dark mode */}
-          <button onClick={() => setDarkMode(!dk)} className={`size-8 grid place-items-center rounded-lg transition ${hoverBg} ${textSec}`} title="Тёмная тема">
-            {dk ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>}
-          </button>
-          {/* Minimap toggle */}
-          <button onClick={() => setShowMiniMap(!showMiniMap)} className={`size-8 grid place-items-center rounded-lg transition ${hoverBg} ${textSec}`} title="Мини-карта">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18" /></svg>
-          </button>
-        </div>
-      </div>
-      {toast && (
-        <div className={`absolute right-4 top-16 z-[60] max-w-sm rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${toast.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-violet-200 bg-violet-50 text-violet-800'}`} data-ui aria-live="polite">
-          <div className="flex items-start gap-3"><span>{toast.tone === 'error' ? '!' : toast.tone === 'success' ? '✓' : 'i'}</span><span>{toast.message}</span><button onClick={() => setToast(null)} className="ml-auto text-base leading-none">×</button></div>
-        </div>
-      )}
+      <BoardHeader
+        theme={theme}
+        documentName={fileSession.name ?? null}
+        isDirty={isDirty}
+        version={__MIROBOARD_VERSION__}
+        workspaceMode={workspaceMode}
+        isPreview={isPreview}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        showTimeline={showTimeline}
+        snapGrid={snapGrid}
+        tool={tool}
+        bpmnFlowSourceId={bpmnFlowSourceId}
+        selectionCount={selectionCount}
+        hasBpmnNodes={showBpmnStatus}
+        bpmnIssues={bpmnIssues}
+        bpmnRunSummary={bpmnRunSummary}
+        simulationSummary={visibleSimulationSummary}
+        userProfile={userProfile}
+        showProfile={showProfile}
+        recoveryNotice={recoveryNotice ? <RecoveryDivergenceNotice message={recoveryNotice} /> : null}
+        onSelectMode={mode => {
+          if (mode === 'simulation') openSimulation()
+          else if (mode === 'bpmn' && !bpmnProfileActive) activateBpmnProfile()
+          else setWorkspaceMode(mode)
+        }}
+        onOpenProjectHistory={() => setShowProjectHistory(true)}
+        onOpenTimeline={() => setShowTimeline(true)}
+        onStartTour={() => setTourStep(0)}
+        onOpenLearningModules={() => setShowLearningModules(true)}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onOpenSimulation={openSimulation}
+        onToggleSnapGrid={() => setSnapGrid(!snapGrid)}
+        onToggleDarkMode={() => setDarkMode(!dk)}
+        onToggleMiniMap={() => setShowMiniMap(!showMiniMap)}
+        onToggleProfile={() => setShowProfile(value => !value)}
+      />
+      {showProfile && <ProfilePanel profile={userProfile} theme={theme} onChange={updateUserProfile} />}
+      {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
       <HistoryPreviewBanner darkMode={dk} snapshot={previewSnapshot} onRestore={restorePreview} onClose={closeTimeline} />
       {pendingOpen && (
         <UnsavedChangesDialog
@@ -1848,31 +1868,7 @@ export default function App() {
           }}
         />
       )}
-      {tourStep >= 0 && (
-        <div className="absolute inset-0 z-[70] grid place-items-center bg-slate-900/45 p-4 backdrop-blur-sm" data-ui>
-          {(() => {
-            const steps = [
-              ['Добро пожаловать', 'MiroBoard объединяет свободную доску, BPMN-моделирование и воспроизводимую симуляцию. Начните с режима «Доска» или загрузите учебный модуль.'],
-              ['Режимы работы', 'В шапке переключаются «Доска», «BPMN» и «Симуляция». В BPMN-режиме слева появляются команды моделирования, проверки и симуляции.'],
-              ['Потоки и свойства', 'Выберите «Поток», кликните источник и затем цель. Выбранная задача или стрелка открывает справа свойства: время, ресурсы, условия и вероятность.'],
-              ['Проверяемый результат', 'Симуляция показывает длительность, SLA, стоимость, загрузку и очереди. «История» содержит commits и releases, которые формируются при build из Git.'],
-            ] as const
-            const [title, text] = steps[tourStep] ?? steps[0]
-            return <section className="w-full max-w-md rounded-[28px] bg-white p-7 shadow-2xl">
-              <div className="mb-4 flex gap-1">{steps.map((_, index) => <span key={index} className={`h-1.5 flex-1 rounded-full ${index <= tourStep ? 'bg-violet-600' : 'bg-slate-200'}`} />)}</div>
-              <div className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-violet-600">Тур {tourStep + 1} из {steps.length}</div>
-              <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
-              <p className="mt-3 text-sm leading-6 text-slate-600">{text}</p>
-              <div className="mt-7 flex items-center justify-between">
-                <button onClick={finishTour} className="text-sm font-semibold text-slate-500 hover:text-slate-800">Пропустить</button>
-                <button onClick={() => tourStep === steps.length - 1 ? finishTour() : setTourStep(tourStep + 1)} className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-violet-700">
-                  {tourStep === steps.length - 1 ? 'Начать работу' : 'Далее'}
-                </button>
-              </div>
-            </section>
-          })()}
-        </div>
-      )}
+      {tourStep >= 0 && <OnboardingTour step={tourStep} onNext={setTourStep} onFinish={finishTour} />}
       {/* ===== CANVAS ===== */}
       <div ref={canvasRef} data-testid="canvas" className="absolute inset-0 touch-none"
         onPointerDown={handlePointerDown} onPointerMove={handlePointerMove}
@@ -1894,30 +1890,32 @@ export default function App() {
               setEditValue(element.text || '')
             }
           }}>
-          <defs>
-            <pattern id="grid" width={40} height={40} patternUnits="userSpaceOnUse"
-              patternTransform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
-              <circle cx="0" cy="0" r={snapGrid ? 1.5 : 1} fill={dk ? '#fff' : '#000'} fillOpacity={snapGrid ? (dk ? 0.12 : 0.1) : (dk ? 0.05 : 0.06)} />
-            </pattern>
-            <pattern id="grid-large" width={200} height={200} patternUnits="userSpaceOnUse"
-              patternTransform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
-              <circle cx="0" cy="0" r={1.8} fill={dk ? '#fff' : '#000'} fillOpacity={dk ? 0.08 : 0.1} />
-            </pattern>
-            {/* Snap grid lines */}
-            {snapGrid && (
-              <pattern id="snap-grid" width={40} height={40} patternUnits="userSpaceOnUse"
-                patternTransform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
-                <line x1={0} y1={0} x2={40} y2={0} stroke={dk ? '#fff' : '#000'} strokeOpacity={0.04} strokeWidth={0.5} />
-                <line x1={0} y1={0} x2={0} y2={40} stroke={dk ? '#fff' : '#000'} strokeOpacity={0.04} strokeWidth={0.5} />
-              </pattern>
-            )}
-          </defs>
-          <rect width="100%" height="100%" fill={bgMain} />
-          {snapGrid && <rect width="100%" height="100%" fill="url(#snap-grid)" />}
-          <rect width="100%" height="100%" fill="url(#grid)" />
-          <rect width="100%" height="100%" fill="url(#grid-large)" />
+          <CanvasBackground dark={dk} snapGrid={snapGrid} transform={transform} />
           <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
             {renderedElements.map(renderElement)}
+            {selectionCount > 1 && anchorId && (() => {
+              const anchor = elements.find(element => element.id === anchorId)
+              if (!anchor) return null
+              return (
+                <circle
+                  data-testid="selection-anchor"
+                  cx={anchor.x} cy={anchor.y} r={4 / transform.scale}
+                  fill="#7C3AED" pointerEvents="none"
+                />
+              )
+            })()}
+            {marquee && (
+              <rect
+                data-testid="marquee"
+                x={marquee.minX} y={marquee.minY}
+                width={Math.max(0, marquee.maxX - marquee.minX)}
+                height={Math.max(0, marquee.maxY - marquee.minY)}
+                fill="#4D96FF" fillOpacity={0.08}
+                stroke="#4D96FF" strokeWidth={1.5 / transform.scale}
+                strokeDasharray={`${4 / transform.scale}`}
+                pointerEvents="none"
+              />
+            )}
             {bpmnFlowSourceId && flowPreviewPoint && (() => {
               const source = elements.find(element => element.id === bpmnFlowSourceId)
               if (!source) return null
@@ -1963,8 +1961,11 @@ export default function App() {
             </div>}
           </aside>
         )}
-        {/* Empty state */}
-        {elements.length === 0 && !showTemplates && (
+        {/* Empty state. Reads what is on screen, not the live document: a
+            preview of an earlier snapshot draws its own elements, and an
+            emptied live board would otherwise cover them with "start creating"
+            and an inviting template button. */}
+        {renderedElements.length === 0 && !showTemplates && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ paddingTop: '52px' }}>
             <div className={`text-center px-6 -mt-20 ${textC}`}>
               <div className={`inline-flex size-16 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white shadow-xl shadow-black/5 border border-black/5'} items-center justify-center mb-4 border`}>
@@ -1995,379 +1996,110 @@ export default function App() {
       {/* ===== MINIMAP ===== */}
       {showMiniMap && <MiniMap elements={renderedElements} transform={transform} darkMode={darkMode} setTransform={setTransform} />}
       {/* ===== BOTTOM TOOLBAR ===== */}
-      <div className="absolute bottom-0 left-0 right-0 z-40 pb-[calc(env(safe-area-inset-bottom)+8px)]" data-ui>
-        <div className="mx-auto w-fit max-w-[calc(100%-16px)]">
-          {/* Emoji picker */}
-          {showEmoji && (
-            <div className={`mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
-              <div className="flex flex-wrap gap-1 max-w-[280px]">
-                {EMOJIS.map(em => (
-                  <button key={em} onClick={() => { setSelectedEmoji(em); chooseTool('emoji'); setShowEmoji(false) }}
-                    className={`size-10 rounded-xl grid place-items-center text-[22px] transition active:scale-90 ${selectedEmoji === em ? (dk ? 'bg-violet-600' : 'bg-violet-100') : hoverBg}`}>
-                    {em}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {showBpmnPalette && (
-            <div className={`relative z-10 mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
-              <div className="flex gap-1.5" onClickCapture={(event) => {
-                const target = event.target as HTMLElement
-                console.log('[BPMN diagnostic] palette click capture', JSON.stringify({
-                  targetTitle: target.closest('button')?.title ?? null,
-                  paletteVisible: showBpmnPalette,
-                  tool,
-                }))
-              }}>
-                {([
-                  { id: 'bpmnStart', label: 'Старт', icon: '○' },
-                  { id: 'bpmnTask', label: 'Задача', icon: '▭' },
-                  { id: 'bpmnGateway', label: 'Шлюз XOR', icon: '◇' },
-                  { id: 'bpmnParallel', label: 'Шлюз AND', icon: '+' },
-                  { id: 'bpmnEnd', label: 'Конец', icon: '◉' },
-                  { id: 'bpmnSequence', label: 'Поток', icon: '→' },
-                ] as { id: Tool; label: string; icon: string }[]).map(item => (
-                  <button key={item.id} onClick={(event) => {
-                    const button = event.currentTarget
-                    const styles = window.getComputedStyle(button)
-                    const bounds = button.getBoundingClientRect()
-                    console.log('[BPMN diagnostic] palette button click start', JSON.stringify({
-                      id: item.id,
-                      label: item.label,
-                      currentTool: tool,
-                      paletteVisible: showBpmnPalette,
-                      visible: styles.display !== 'none' && styles.visibility !== 'hidden' && bounds.width > 0 && bounds.height > 0,
-                      clickable: !button.disabled && styles.pointerEvents !== 'none',
-                    }))
-                    chooseTool(item.id)
-                    console.log('[BPMN diagnostic] palette button after chooseTool', JSON.stringify({
-                      id: item.id,
-                      currentTool: tool,
-                      requestedTool: item.id,
-                      note: 'React state updates commit after this handler returns',
-                    }))
-                  }}
-                    className={`min-w-14 h-12 px-2 rounded-xl grid place-items-center text-center transition active:scale-90 ${tool === item.id ? 'bg-violet-600 text-white' : hoverBg}`}
-                    title={item.label}>
-                    <span className="text-xl leading-none">{item.icon}</span>
-                    <span className="text-[10px] leading-none mt-0.5">{item.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {/* Color picker */}
-          {showColorPicker && (
-            <div className={`mb-2 mx-auto w-fit flex items-center gap-1.5 p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
-              {COLORS.map(c => (
-                <button key={c} onClick={() => { setColor(c); setShowColorPicker(false) }}
-                  className="size-8 rounded-full transition-all active:scale-90"
-                  style={{ backgroundColor: c, border: c === '#FFFFFF' ? `1px solid ${dk ? '#555' : '#e5e5e5'}` : 'none', boxShadow: color === c ? '0 0 0 2px white, 0 0 0 4px #4D96FF' : 'none' }} />
-              ))}
-              <div className={`w-px h-6 ${dk ? 'bg-slate-600' : 'bg-black/10'} mx-1`} />
-              {[2, 4, 7, 12].map(w => (
-                <button key={w} onClick={() => setStrokeWidth(w)}
-                  className={`size-8 rounded-full grid place-items-center transition ${strokeWidth === w ? (dk ? 'bg-slate-600' : 'bg-black/10') : hoverBg}`}>
-                  <div className="rounded-full bg-current" style={{ width: w * 2, height: w * 2, color: dk ? '#fff' : '#000' }} />
-                </button>
-              ))}
-            </div>
-          )}
-          {/* Main toolbar */}
-          <div className={`flex items-center gap-0.5 p-1.5 rounded-[22px] ${bgBar} backdrop-blur-2xl shadow-2xl shadow-black/20 border ${borderC}`}>
-            {([
-              { id: 'select', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /></svg>, label: 'Выбор' },
-              { id: 'pan', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 11V8a1 1 0 0 0-1-1h-3M6 13v3a1 1 0 0 0 1 1h3M13 18h3a1 1 0 0 0 1-1v-3M11 6H8a1 1 0 0 0-1 1v3" /></svg>, label: 'Рука' },
-              { id: 'pen', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><path d="M11 11l4 4" /></svg>, label: 'Перо' },
-              { id: 'marker', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.34 4.93l-3.59 3.59-1.41-1.42-1.42 1.42 1.42 1.41-3.6 3.59c-.39.39-.39 1.02 0 1.41L10.34 19c.39.39 1.02.39 1.41 0l3.6-3.59 1.41 1.42 1.42-1.42-1.42-1.41 3.59-3.59c.39-.39.39-1.02 0-1.41L15.75 4.93c-.39-.39-1.02-.39-1.41 0z" /></svg>, label: 'Маркер' },
-            ] as { id: Tool; icon: React.ReactNode; label: string }[]).map(t => (
-              <button key={t.id} onClick={() => { chooseTool(t.id); setShowEmoji(false) }} disabled={isPreview && t.id !== 'pan'}
-                className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
-                title={t.label}>{t.icon}</button>
-            ))}
-            <div className={`w-px h-7 ${dk ? 'bg-slate-600' : 'bg-black/10'} mx-0.5`} />
-            {([
-              { id: 'sticky', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" fill="#FFD93D" stroke="#000" strokeOpacity="0.1" /><path d="M7 8h10M7 12h7M7 16h4" stroke="#000" strokeOpacity="0.5" strokeWidth="1.5" strokeLinecap="round" /></svg> },
-              { id: 'text', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7V4h16v3M9 20h6M12 4v16" /></svg> },
-              { id: 'emoji', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" /></svg> },
-              { id: 'rect', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /></svg> },
-              { id: 'circle', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /></svg> },
-              { id: 'arrow', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M13 5l7 7-7 7" /></svg> },
-            ] as { id: Tool; icon: React.ReactNode }[]).map(t => (
-              <button key={t.id} onClick={() => {
-                if (t.id === 'emoji') { setShowEmoji(!showEmoji); chooseTool('emoji') }
-                else { chooseTool(t.id); setShowEmoji(false) }
-              }} disabled={isPreview}
-                className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
-              >{t.icon}</button>
-            ))}
-            <div className={`w-px h-7 ${dk ? 'bg-slate-600' : 'bg-black/10'} mx-0.5`} />
-            {/* Color */}
-            <button onClick={() => setShowColorPicker(!showColorPicker)}
-              className={`size-11 grid place-items-center rounded-[14px] ${hoverBg} transition`}>
-              <div className="size-6 rounded-full ring-2 ring-black/10 shadow-inner" style={{ backgroundColor: color, border: color === '#FFFFFF' ? `1px solid ${dk ? '#555' : '#ddd'}` : 'none' }} />
-            </button>
-            {/* More */}
-            <button onClick={() => { setShowMore(value => !value); setShowBpmnPalette(false) }} disabled={isPreview}
-              aria-label="Дополнительные инструменты"
-              className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${showMore ? 'bg-black text-white' : `${textSec} ${hoverBg}`}`}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
-            </button>
-          </div>
-        </div>
-      </div>
+      <BottomToolbar
+        theme={theme}
+        tool={tool}
+        color={color}
+        strokeWidth={strokeWidth}
+        selectedEmoji={selectedEmoji}
+        isPreview={isPreview}
+        showEmoji={showEmoji}
+        showBpmnPalette={showBpmnPalette}
+        showColorPicker={showColorPicker}
+        showMore={showMore}
+        onChooseTool={chooseTool}
+        onSetColor={setColor}
+        onSetStrokeWidth={setStrokeWidth}
+        onSetSelectedEmoji={setSelectedEmoji}
+        onToggleEmoji={() => setShowEmoji(!showEmoji)}
+        onToggleColorPicker={() => setShowColorPicker(!showColorPicker)}
+        onToggleMore={() => { setShowMore(value => !value); setShowBpmnPalette(false) }}
+        onCloseEmoji={() => setShowEmoji(false)}
+        onCloseColorPicker={() => setShowColorPicker(false)}
+      />
       {/* ===== MORE MENU ===== */}
       {showMore && (
-        <div className={`absolute bottom-[104px] left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 p-1.5 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
-          <button onClick={() => { chooseTool('line'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'line' ? 'bg-black text-white' : hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 19L19 5" /></svg> Линия
-          </button>
-          <button onClick={() => { chooseTool('laser'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'laser' ? 'bg-black text-white' : hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="8" strokeDasharray="4 3" /></svg> Лазер
-          </button>
-          <button onClick={() => { chooseTool('eraser'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'eraser' ? 'bg-black text-white' : hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 20H7L3 16a1.9 1.9 0 0 1 0-2.8L14.2 2h.8l6 6v.8L9.8 20" /></svg> Ластик
-          </button>
-          <button onClick={() => { activateBpmnProfile(); setShowMore(false); setShowEmoji(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${showBpmnPalette ? 'bg-violet-600 text-white' : hoverBg}`}>
-            ◇ BPMN
-          </button>
-          <div className={`w-px h-6 ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
-          <button onClick={() => { setShowTemplates(true); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            📋 Шаблоны
-          </button>
-          <button onClick={() => { bpmnImportRef.current?.click(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            ⇧ BPMN
-          </button>
-          {elements.some(element => element.bpmnNodeType) && (
-            <>
-              <button onClick={() => { runBpmn(); setShowMore(false) }}
-                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-                ▶ Запуск
-              </button>
-              <button onClick={() => { openSimulation(); setShowMore(false) }} disabled={isPreview}
-                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition disabled:cursor-not-allowed disabled:opacity-50 ${hoverBg}`}>
-                ◌ Симуляция
-              </button>
-              <button onClick={() => { exportToBpmn(); setShowMore(false) }}
-                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-                ⇩ BPMN
-              </button>
-            </>
-          )}
-          <button onClick={() => { exportToPNG(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg> PNG
-          </button>
-          <button onClick={() => { resetDocument(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            Новый
-          </button>
-          <button onClick={() => { void openBoard(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            Открыть
-          </button>
-          <button onClick={() => { void saveBoard('save'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            ⇩ Сохранить
-          </button>
-          <button onClick={() => { void saveBoard('saveAs'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            ⇩ Сохранить как
-          </button>
-          <button onClick={() => { markCurrentState(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            ◉ Отметить состояние
-          </button>
-          <HistoryRetentionControls elements={elements} snapshots={historySnapshots} ydoc={ydoc} textClassName={textSec} onCompact={compactHistory} />
-          <button onClick={() => { setTransform({ x: 0, y: 0, scale: 1 }); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M9 22V12h6v10" /></svg> Домой
-          </button>
-        </div>
+        <MoreMenu
+          theme={theme}
+          tool={tool}
+          bpmnPaletteActive={showBpmnPalette}
+          hasBpmnNodes={elements.some(element => element.bpmnNodeType)}
+          isPreview={isPreview}
+          retentionControls={
+            <HistoryRetentionControls
+              elements={elements}
+              snapshots={historySnapshots}
+              ydoc={ydoc}
+              textClassName={textSec}
+              onCompact={compactHistory}
+            />
+          }
+          onChooseTool={chooseTool}
+          onActivateBpmn={() => { activateBpmnProfile(); setShowEmoji(false) }}
+          onOpenTemplates={() => setShowTemplates(true)}
+          onImportBpmn={() => bpmnImportRef.current?.click()}
+          onRunBpmn={runBpmn}
+          onOpenSimulation={openSimulation}
+          onExportBpmn={exportToBpmn}
+          onExportPng={exportToPNG}
+          onNewDocument={resetDocument}
+          onOpenDocument={() => { void openBoard() }}
+          onSave={() => { void saveBoard('save') }}
+          onSaveAs={() => { void saveBoard('saveAs') }}
+          onMarkState={markCurrentState}
+          onResetViewport={() => setTransform({ x: 0, y: 0, scale: 1 })}
+          onClose={() => setShowMore(false)}
+        />
       )}
       {/* ===== CONTEXT MENU ===== */}
       {contextMenu && (
-        <div className="absolute z-40" style={{
-          left: contextMenu.x * transform.scale + transform.x,
-          top: contextMenu.y * transform.scale + transform.y
-        }} data-ui>
-          <div className={`rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC} overflow-hidden py-1 min-w-[180px]`}>
-            {CONTEXT_MENU_ITEMS.map((item) => (
-              <button key={item.action} onClick={() => handleContextMenuAction(item.action, contextMenu.id)}
-                className={`w-full h-10 px-4 text-left text-[14px] flex items-center gap-2 transition ${item.danger ? 'text-red-500 hover:bg-red-50' : `${textSec} ${hoverBg}`}`}>
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          transform={transform}
+          theme={theme}
+          onAction={action => handleContextMenuAction(action, contextMenu.id)}
+        />
       )}
-      {/* ===== STICKY COLORS ===== */}
+      {/* ===== SELECTION PROPERTY PANELS ===== */}
       {selectedBpmnTask && !contextMenu && (
-        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC} max-md:inset-x-3 max-md:top-auto max-md:bottom-20 max-md:w-auto max-md:max-h-[46vh] max-md:overflow-y-auto`} data-ui>
-          <div className="text-xs font-bold text-slate-400">Свойства задачи</div>
-          <div className="grid grid-cols-2 gap-2">
-          <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-duration">Длительность, с</label>
-          <input
-            id="bpmn-duration"
-            type="number"
-            min="0"
-            max="3600"
-            step="0.1"
-            value={(selectedBpmnTask.bpmnDurationMs ?? 1000) / 1000}
-            onChange={(event) => {
-              const seconds = Number(event.target.value)
-              if (Number.isFinite(seconds) && seconds >= 0) {
-                updateElement(selectedBpmnTask.id, { bpmnDurationMs: Math.round(Math.min(seconds, 3600) * 1000) })
-              }
-            }}
-            className={`w-16 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-          />
-          <select
-            value={selectedBpmnTask.bpmnDurationDistribution || 'fixed'}
-            onChange={(event) => updateElement(selectedBpmnTask.id, {
-              bpmnDurationDistribution: event.target.value as 'fixed' | 'uniform' | 'triangular',
-              bpmnDurationMinMs: selectedBpmnTask.bpmnDurationMinMs ?? selectedBpmnTask.bpmnDurationMs ?? 1000,
-              bpmnDurationModeMs: selectedBpmnTask.bpmnDurationModeMs ?? selectedBpmnTask.bpmnDurationMs ?? 1000,
-              bpmnDurationMaxMs: selectedBpmnTask.bpmnDurationMaxMs ?? selectedBpmnTask.bpmnDurationMs ?? 1000,
-            })}
-            className={`rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-          >
-            <option value="fixed">Fixed</option>
-            <option value="uniform">Uniform</option>
-            <option value="triangular">Triangular</option>
-          </select>
-          {(selectedBpmnTask.bpmnDurationDistribution === 'uniform' || selectedBpmnTask.bpmnDurationDistribution === 'triangular') && (
-            <>
-              <label className={`text-[11px] font-semibold ${textSec}`}>Min
-                <input type="number" min="0" value={(selectedBpmnTask.bpmnDurationMinMs ?? 1000) / 1000} onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnDurationMinMs: Math.max(0, Number(event.target.value) * 1000) })} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-              </label>
-              {selectedBpmnTask.bpmnDurationDistribution === 'triangular' && (
-                <label className={`text-[11px] font-semibold ${textSec}`}>Mode
-                  <input type="number" min="0" value={(selectedBpmnTask.bpmnDurationModeMs ?? 1000) / 1000} onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnDurationModeMs: Math.max(0, Number(event.target.value) * 1000) })} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-                </label>
-              )}
-              <label className={`text-[11px] font-semibold ${textSec}`}>Max
-                <input type="number" min="0" value={(selectedBpmnTask.bpmnDurationMaxMs ?? 1000) / 1000} onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnDurationMaxMs: Math.max(0, Number(event.target.value) * 1000) })} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-              </label>
-            </>
-          )}
-          <label className={`text-[11px] font-semibold ${textSec}`}>Роль
-            <input value={selectedBpmnTask.bpmnResourceRole || ''} placeholder="Аналитик" onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnResourceRole: event.target.value || undefined })} className={`ml-1 w-20 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-          </label>
-          <label className={`text-[11px] font-semibold ${textSec}`}>€/ч
-            <input type="number" min="0" step="0.01" value={selectedBpmnTask.bpmnCostPerHour ?? ''} onChange={(event) => { const value = event.target.value; const cost = value === '' ? undefined : Number(value); if (cost === undefined || (Number.isFinite(cost) && cost >= 0)) updateElement(selectedBpmnTask.id, { bpmnCostPerHour: cost }) }} className={`ml-1 w-16 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-          </label>
-          <label className={`text-[11px] font-semibold ${textSec}`}>Capacity
-            <input type="number" min="1" max="1000" step="1" value={selectedBpmnTask.bpmnResourceCapacity ?? 1} onChange={(event) => { const capacity = Number(event.target.value); if (Number.isInteger(capacity) && capacity >= 1 && capacity <= 1000) updateElement(selectedBpmnTask.id, { bpmnResourceCapacity: capacity }) }} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-          </label>
-          <label className={`text-[11px] font-semibold ${textSec}`}>Priority
-            <input type="number" min="-100" max="100" step="1" value={selectedBpmnTask.bpmnPriority ?? 0} onChange={(event) => { const priority = Number(event.target.value); if (Number.isInteger(priority) && priority >= -100 && priority <= 100) updateElement(selectedBpmnTask.id, { bpmnPriority: priority }) }} className="ml-1 w-14 rounded-lg border border-slate-200 px-2 py-1 text-[12px] outline-none" />
-          </label>
-          </div>
-        </aside>
+        <BpmnTaskProperties task={selectedBpmnTask} theme={theme} onUpdate={updateElement} />
       )}
       {selectedBpmnFlow && !contextMenu && (
-        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC} max-md:inset-x-3 max-md:top-auto max-md:bottom-20 max-md:w-auto max-md:max-h-[46vh] max-md:overflow-y-auto`} data-ui>
-          <div className="text-xs font-bold text-slate-400">Свойства sequence flow</div>
-          <div className="flex flex-col gap-3">
-          <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-type">Тип потока</label>
-          <select
-            id="bpmn-flow-type"
-            data-testid="bpmn-flow-type"
-            value={selectedBpmnFlow.bpmnFlow?.flowType || 'sequence'}
-            onChange={(event) => updateElement(selectedBpmnFlow.id, {
-              bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, flowType: event.target.value as 'sequence' | 'message' },
-            })}
-            className={`w-32 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-          >
-            <option value="sequence">sequence</option>
-            <option value="message">message</option>
-          </select>
-          <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-condition">Условие</label>
-          <input
-            id="bpmn-flow-condition"
-            value={selectedBpmnFlow.bpmnFlow?.condition || ''}
-            placeholder="true"
-            onChange={(event) => updateElement(selectedBpmnFlow.id, {
-              bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, condition: event.target.value || undefined },
-            })}
-            className={`w-20 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-          />
-          {selectedBpmnFlowIsXor && (
-            <>
-              <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-probability">P</label>
-              <input
-                id="bpmn-flow-probability"
-                type="number"
-                min="0"
-                max="1"
-                step="0.01"
-                value={selectedBpmnFlow.bpmnFlow?.probability ?? ''}
-                onChange={(event) => {
-                  const value = event.target.value
-                  const probability = value === '' ? undefined : Number(value)
-                  if (probability === undefined || (Number.isFinite(probability) && probability >= 0 && probability <= 1)) {
-                    updateElement(selectedBpmnFlow.id, {
-                      bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, probability },
-                    })
-                  }
-                }}
-                className={`w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-              />
-              <label className={`flex items-center gap-1 text-[11px] font-semibold ${textSec}`}>
-                <input
-                  type="checkbox"
-                  checked={selectedBpmnFlow.bpmnFlow?.isDefault || false}
-                  onChange={(event) => updateElement(selectedBpmnFlow.id, {
-                    bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, isDefault: event.target.checked },
-                  })}
-                />
-                default
-              </label>
-            </>
-          )}
-          </div>
-        </aside>
+        <BpmnFlowProperties
+          flow={selectedBpmnFlow}
+          isXorBranch={selectedBpmnFlowIsXor}
+          theme={theme}
+          onUpdate={updateElement}
+        />
       )}
-      {selectedId && elements.find(e => e.id === selectedId && (e.type === 'sticky' || e.type === 'rect' || e.type === 'circle')) && !contextMenu && (
-        <div className={`absolute left-1/2 -translate-x-1/2 bottom-[104px] z-30 flex items-center gap-1 p-1.5 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
-          {STICKY_COLORS.map(c => (
-            <button key={c} onClick={() => updateElement(selectedId, { color: c, fill: c })}
-              className="size-7 rounded-full ring-1 ring-black/10 active:scale-90 transition" style={{ background: c }} />
-          ))}
-        </div>
+      {selectedElementId && elements.find(e => e.id === selectedElementId && (e.type === 'sticky' || e.type === 'rect' || e.type === 'circle')) && !contextMenu && (
+        <ColorPicker theme={theme} onPick={color => updateSelected({ color, fill: color })} />
       )}
       {/* ===== SIMULATION MODAL ===== */}
       {showSimulationPanel && !isPreview && (
         <SimulationModal
-        arrivalClasses={arrivalClasses}
-        arrivalInterval={arrivalInterval}
-        calendarEnd={calendarEnd}
-        calendarStart={calendarStart}
+        arrivalClasses={simulation.arrivalClasses}
+        arrivalInterval={simulation.arrivalIntervalSec}
+        calendarEnd={simulation.calendarEndHour}
+        calendarStart={simulation.calendarStartHour}
         detectedRoles={detectedRoles}
         dk={dk}
         hoverBg={hoverBg}
-        rolePolicies={rolePolicies}
-        setArrivalClasses={setArrivalClasses}
-        setArrivalInterval={setArrivalInterval}
-        setCalendarEnd={setCalendarEnd}
-        setCalendarStart={setCalendarStart}
-        setRolePolicies={setRolePolicies}
-        setSimulationInstances={setSimulationInstances}
-        setSimulationRuns={setSimulationRuns}
-        setSimulationSeed={setSimulationSeed}
-        setSimulationTarget={setSimulationTarget}
-        simulationInstances={simulationInstances}
-        simulationRuns={simulationRuns}
-        simulationSeed={simulationSeed}
-        simulationTarget={simulationTarget}
+        rolePolicies={simulation.rolePolicies}
+        setArrivalClasses={simulation.setArrivalClasses}
+        setArrivalInterval={simulation.setArrivalIntervalSec}
+        setCalendarEnd={simulation.setCalendarEndHour}
+        setCalendarStart={simulation.setCalendarStartHour}
+        setRolePolicies={simulation.setRolePolicies}
+        setSimulationInstances={simulation.setInstances}
+        setSimulationRuns={simulation.setRuns}
+        setSimulationSeed={simulation.setSeed}
+        setSimulationTarget={simulation.setSlaTargetSec}
+        simulationInstances={simulation.instances}
+        simulationRuns={simulation.runs}
+        simulationSeed={simulation.seed}
+        simulationTarget={simulation.slaTargetSec}
         simulateBpmn={simulateBpmn}
         textSec={textSec}
         visibleBottleneckRole={visibleBottleneckRole}
@@ -2375,153 +2107,38 @@ export default function App() {
         onClose={() => setShowSimulationPanel(false)}
         />
       )}
-      {/* ===== PROJECT HISTORY MODAL ===== */}
       {showProjectHistory && (
-        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowProjectHistory(false)} data-ui>
-          <section className={`w-full max-w-3xl max-h-[82vh] overflow-y-auto rounded-[28px] ${dk ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'} shadow-2xl p-6`} onClick={event => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4 mb-5">
-              <div>
-                <h2 className="text-xl font-bold">История проекта</h2>
-                <p className={`mt-1 text-sm ${textSec}`}>Учебная хронология разработки MiroBoard, зафиксированная Git-коммитами.</p>
-              </div>
-              <button onClick={() => setShowProjectHistory(false)} className={`size-9 rounded-xl text-lg ${hoverBg}`} aria-label="Закрыть историю">×</button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3 mb-6">
-              <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer" className={`rounded-2xl p-3 ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-50 hover:bg-slate-100'} transition`}>
-                <div className={`text-[11px] font-semibold ${textSec}`}>Репозиторий</div>
-                <div className="mt-1 text-sm font-bold">GitHub ↗</div>
-              </a>
-              <div className={`rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-slate-50'}`}>
-                <div className={`text-[11px] font-semibold ${textSec}`}>Автономный релиз</div>
-                <div className="mt-1 text-sm font-bold">Один HTML-файл</div>
-              </div>
-              <div className={`rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-slate-50'}`}>
-                <div className={`text-[11px] font-semibold ${textSec}`}>Токены модели</div>
-                <div className="mt-1 text-sm font-bold">Не измеряются достоверно</div>
-              </div>
-            </div>
-            <div className={`rounded-2xl p-4 mb-5 ${dk ? 'bg-indigo-950/70' : 'bg-indigo-50'}`}>
-              <h3 className="text-sm font-bold">Стек и engineering harness</h3>
-              <p className={`mt-1 text-[13px] leading-5 ${textSec}`}>
-                React, TypeScript, Vite, Tailwind, Yjs, WebRTC, IndexedDB и Rust/WASM. Factory Droid harness выполняет scoped-изменения, Rust/TypeScript-проверки, production build, Git commit/push и ведёт локальную операционную историю через jj.
-              </p>
-              <p className={`mt-2 text-[12px] leading-5 ${textSec}`}>
-                Git не содержит точных usage-метрик LLM, поэтому число токенов не выводится как оценка. Достоверный учёт возможен только при подключении telemetry API провайдера модели.
-              </p>
-            </div>
-            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
-              <h3 className="text-sm font-bold">Как читать эту историю</h3>
-              <p className={`mt-1 text-[13px] leading-5 ${textSec}`}>
-                <b>Commit</b>, например <code>394dec5</code>, это неизменяемый точный снимок исходного кода. По ссылке можно увидеть, какие файлы и почему изменились. <b>Release</b>, например <code>v0.6.0</code>, это понятная пользователю стабильная версия, объединяющая проверенные commits и готовый HTML.
-              </p>
-              <p className={`mt-2 text-[13px] leading-5 ${textSec}`}>
-                jj автоматически хранит локальные операции и позволяет безопасно отменять шаги, но пока не генерирует этот UI-список commits. В текущем release список обновляется вручную и поэтому отражает только опубликованные этапы. Сейчас развивается BPMN-симулятор: после длительностей, стоимости и ресурсов добавлены очереди, SLA и рабочий календарь. Следующий этап, приоритеты очереди, несколько экземпляров процесса и bottleneck-анализ.
-              </p>
-            </div>
-            <h3 className="text-sm font-bold mb-3">Этапы</h3>
-            <ol className="space-y-3">
-              {__MIROBOARD_HISTORY__.map(({ date, commit, title, release }) => (
-                <li key={commit} className={`relative pl-5 border-l-2 ${dk ? 'border-slate-600' : 'border-slate-200'}`}>
-                  <span className={`absolute -left-[5px] top-1.5 size-2 rounded-full ${dk ? 'bg-violet-400' : 'bg-violet-500'}`} />
-                  <div className={`text-[11px] font-mono ${textSec}`}>{date}</div>
-                  <a href={`${GITHUB_REPOSITORY}/commit/${commit}`} target="_blank" rel="noreferrer" className="text-[13px] font-semibold hover:underline">
-                    {title} <span className={`font-mono text-[11px] ${textSec}`}>{commit} ↗</span>
-                  </a>
-                  {release && <a href={`${GITHUB_REPOSITORY}/releases/tag/${release}`} target="_blank" rel="noreferrer" className="ml-2 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 hover:bg-violet-200">{release}</a>}
-                </li>
-              ))}
-            </ol>
-          </section>
-        </div>
+        <ProjectHistoryModal
+          theme={theme}
+          repositoryUrl={GITHUB_REPOSITORY}
+          history={__MIROBOARD_HISTORY__}
+          onClose={() => setShowProjectHistory(false)}
+        />
       )}
-      {/* ===== LEARNING MODULES MODAL ===== */}
       {showLearningModules && (
-        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-slate-900/35 backdrop-blur-sm" onClick={() => setShowLearningModules(false)} data-ui>
-          <section className="w-full max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
-            <div className="mb-5 flex items-start justify-between gap-4">
-              <div><h2 className="text-xl font-bold text-slate-900">Учебные BPMN-модули</h2><p className="mt-1 text-sm text-slate-500">Загрузите готовую схему, прочитайте цель и проверьте результат симуляции.</p></div>
-              <button onClick={() => setShowLearningModules(false)} className="grid size-9 place-items-center rounded-xl text-lg text-slate-500 hover:bg-slate-100">×</button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {EDUCATIONAL_EXAMPLES.map((example, index) => (
-                <button key={example.title} onClick={() => { setShowLearningModules(false); loadEducationalExample(example) }} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-violet-300 hover:bg-violet-50">
-                  <div className="mb-2 text-xs font-bold text-violet-600">Модуль {index + 1}</div>
-                  <div className="text-sm font-bold text-slate-900">{example.title}</div>
-                  <div className="mt-2 text-xs leading-5 text-slate-500">{example.explanation}</div>
-                  <div className="mt-3 text-xs font-semibold text-violet-700">Загрузить →</div>
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
+        <LearningModulesModal
+          onClose={() => setShowLearningModules(false)}
+          onLoadExample={loadEducationalExample}
+        />
       )}
-      {/* ===== TEMPLATES MODAL ===== */}
       {showTemplates && (
-        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowTemplates(false)} data-ui>
-          <div className={`w-full max-w-[400px] rounded-[28px] ${dk ? 'bg-slate-800' : 'bg-white'} shadow-2xl p-6`} onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-[20px] font-semibold tracking-tight">Шаблоны досок</h3>
-              <button onClick={() => setShowTemplates(false)} className={`size-8 grid place-items-center rounded-full ${hoverBg}`}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { id: 'kanban', name: '📋 Канбан', desc: 'To Do → В процессе → Готово', gradient: 'from-yellow-400 to-orange-400' },
-                { id: 'brainstorm', name: '🧠 Мозговой штурм', desc: 'Идеи вокруг центральной темы', gradient: 'from-violet-400 to-purple-500' },
-                { id: 'swot', name: '📊 SWOT анализ', desc: 'Сильные, слабые, возможности, угрозы', gradient: 'from-green-400 to-blue-400' },
-                { id: 'retro', name: '🔄 Ретроспектива', desc: 'Что хорошо, что улучшить, действия', gradient: 'from-blue-400 to-cyan-400' },
-                { id: 'flowchart', name: '🔀 Блок-схема', desc: 'Последовательность шагов', gradient: 'from-pink-400 to-rose-400' },
-                { id: 'bpmn', name: '⚙️ BPMN 2.0', desc: 'Старт, задача, завершение и проверка', gradient: 'from-indigo-400 to-violet-500' },
-              ].map(t => (
-                <button key={t.id} onClick={() => applyTemplate(t.id)}
-                  className={`p-4 rounded-2xl ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-gray-50 hover:bg-gray-100'} text-left transition active:scale-95`}>
-                  <div className={`text-[28px] mb-2`}>{t.name.split(' ')[0]}</div>
-                  <div className="text-[14px] font-semibold mb-0.5">{t.name.split(' ').slice(1).join(' ')}</div>
-                  <div className={`text-[12px] ${dk ? 'text-slate-400' : 'text-black/50'}`}>{t.desc}</div>
-                </button>
-              ))}
-            </div>
-            <h4 className="mt-6 mb-3 text-sm font-bold">Учебные BPMN-модули</h4>
-            <div className="space-y-2">
-              {EDUCATIONAL_EXAMPLES.map((example) => (
-                <button key={example.title} onClick={() => { setShowTemplates(false); loadEducationalExample(example) }}
-                  className={`w-full rounded-xl p-3 text-left ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-indigo-50 hover:bg-indigo-100'} transition`}>
-                  <div className="text-sm font-semibold">{example.title}</div>
-                  <div className={`mt-1 text-xs ${dk ? 'text-slate-300' : 'text-slate-600'}`}>{example.explanation}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <TemplatesModal
+          theme={theme}
+          onClose={() => setShowTemplates(false)}
+          onApplyTemplate={applyTemplate}
+          onLoadExample={loadEducationalExample}
+        />
       )}
       {/* ===== ZOOM CONTROLS ===== */}
-      <div className="absolute right-3 bottom-[120px] z-20 flex flex-col gap-1.5" data-ui>
-        <div className={`flex flex-col rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC} overflow-hidden`}>
-          <button onClick={() => setTransform(t => ({ ...t, scale: clamp_scale(t.scale * 1.2) }))}
-            className={`size-10 grid place-items-center ${hoverBg} ${textSec}`}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14" /></svg>
-          </button>
-          <div className={`h-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
-          <button onClick={() => setTransform(t => ({ ...t, scale: Math.max(t.scale / 1.2, 0.15) }))}
-            className={`size-10 grid place-items-center ${hoverBg} ${textSec}`}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14" /></svg>
-          </button>
-          <div className={`h-px ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
-          <button onClick={fitToContent} title="Подогнать содержимое (0)" className={`size-10 grid place-items-center ${hoverBg} ${textSec}`}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
-          </button>
-        </div>
-        <div className={`h-8 px-2.5 grid place-items-center rounded-xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC} text-[11px] font-medium ${dk ? 'text-slate-300' : 'text-black/60'} tabular-nums`}>
-          {Math.round(transform.scale * 100)}%
-        </div>
-      </div>
+      <ZoomControls
+        theme={theme}
+        scale={transform.scale}
+        onZoomIn={() => setTransform(t => ({ ...t, scale: clamp_scale(t.scale * 1.2) }))}
+        onZoomOut={() => setTransform(t => ({ ...t, scale: clamp_scale(t.scale / 1.2) }))}
+        onFitToContent={fitToContent}
+      />
       {/* ===== ELEMENT COUNT ===== */}
-      {elements.length > 0 && (
-        <div className={`absolute top-[60px] left-3 z-10 h-6 px-2.5 rounded-full ${dk ? 'bg-slate-800/80 border-slate-600' : 'bg-white/80 border-black/5'} border backdrop-blur-sm text-[11px] font-medium ${dk ? 'text-slate-400' : 'text-black/40'} flex items-center gap-1`}>
-          {elements.length} элем.
-        </div>
-      )}
+      {elements.length > 0 && <ElementCount theme={theme} count={elements.length} />}
       <style>{`
         * { -webkit-tap-highlight-color: transparent; }
         html, body { overscroll-behavior: none; position: fixed; overflow: hidden; width: 100%; height: 100%; }

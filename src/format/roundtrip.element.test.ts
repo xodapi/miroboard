@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalElement, fromDocEdge, fromDocNode, toDocElement, type BoardElement } from './mboard'
+import { canonicalElement, deserialise, fromDocEdge, fromDocNode, serialise, toDocElement, type BoardElement } from './mboard'
 
 const node: BoardElement = {
   id: 'fractional-sticky',
@@ -82,5 +82,45 @@ describe('canonicalElement', () => {
     expect(canonicalElement(fromDocNode(doc.node))).toEqual(canonicalElement(defaults))
     expect(canonicalElement(defaults)).toMatchObject({ zIndex: 0 })
     expect(canonicalElement(defaults)).not.toHaveProperty('rotation')
+  })
+
+  it('drops an unrecognised bpmnNodeType from an opened file', () => {
+    // An .mboard file is untrusted input: it can be hand-edited, or written by
+    // a newer version. The Rust engine deserialises this field into a strict
+    // enum, so one unknown value stops the whole model from parsing.
+    const doc = toDocElement({ ...node, bpmnNodeType: 'task' })
+    if (!('node' in doc)) throw new Error('expected node')
+    const tampered = {
+      ...doc.node,
+      profileData: { ...doc.node.profileData, bpmn: { ...doc.node.profileData.bpmn, nodeType: 'wishfulGateway' } },
+    }
+
+    expect(fromDocNode(tampered)).not.toHaveProperty('bpmnNodeType')
+  })
+
+  it('keeps an unrecognised bpmnNodeType in the file while refusing it in memory', () => {
+    // Two obligations that pull in opposite directions. The Rust engine needs
+    // a value it can deserialise, so the element must not carry an unknown
+    // nodeType. FORMAT.md promises unknown data survives a load/save cycle, so
+    // refusing the value must not delete it from the user's file — the first
+    // attempt at this did exactly that, which is a worse bug than the one it
+    // set out to fix.
+    const doc = toDocElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', bpmnNodeType: 'task' })
+    if (!('node' in doc)) throw new Error('expected node')
+    const file = {
+      format: 'miroboard', schemaVersion: 1,
+      meta: { id: 'd', title: 't', createdAt: 'x', updatedAt: 'x', createdWith: { version: '1', commit: 'c' }, profiles: [] },
+      nodes: [{ ...doc.node, order: 0, profileData: { bpmn: { nodeType: 'eventSubprocess' } } }],
+      edges: [], profileConfig: {}, history: { yjsState: null, snapshots: [], retention: {} }, assets: {},
+    }
+
+    const loaded = deserialise(file as never)
+    expect(loaded.elements[0]).not.toHaveProperty('bpmnNodeType')
+
+    const saved = serialise({
+      elements: loaded.elements, meta: loaded.meta,
+      profileConfig: loaded.profileConfig, history: loaded.history,
+    })
+    expect(saved.nodes[0].profileData).toEqual({ bpmn: { nodeType: 'eventSubprocess' } })
   })
 })

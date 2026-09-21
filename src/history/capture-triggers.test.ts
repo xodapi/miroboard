@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import type { HistorySnapshot } from '../format/types'
 import { RECOVERY_ORIGIN } from '../persistence/dirty'
+import { LOAD, NON_EDIT_ORIGINS } from '../collab/origins'
 import { HISTORY_RESTORE_ORIGIN } from './snapshots'
 import {
   AUTOMATIC_CHECKPOINT_INTERVAL_MS,
@@ -45,6 +46,24 @@ describe('checkpoint capture triggers', () => {
     for (let index = 0; index < EDITS_PER_AUTOMATIC_CHECKPOINT; index += 1) {
       doc.transact(() => doc.getArray('elements').push([index]), Object.create(IndexeddbPersistence.prototype))
     }
+
+    expect(capture).not.toHaveBeenCalled()
+    triggers.dispose()
+  })
+
+  // App used to spell this set out by hand as {RECOVERY_ORIGIN,
+  // HISTORY_RESTORE_ORIGIN}, omitting LOAD, so opening a document counted as
+  // an edit. Nothing happened immediately — one load is one update, far short
+  // of fifty — but it armed the interval timer, and five minutes later a board
+  // nobody had touched grew an "Авто" checkpoint.
+  it('does not let opening a document arm the interval checkpoint', () => {
+    vi.useFakeTimers()
+    const doc = new Y.Doc({ gc: false })
+    const capture = vi.fn(entry)
+    const triggers = createCaptureTriggers({ ydoc: doc, capture, ignoredOrigins: NON_EDIT_ORIGINS })
+
+    doc.transact(() => doc.getArray('elements').push(['opened from a file']), LOAD)
+    vi.advanceTimersByTime(AUTOMATIC_CHECKPOINT_INTERVAL_MS)
 
     expect(capture).not.toHaveBeenCalled()
     triggers.dispose()

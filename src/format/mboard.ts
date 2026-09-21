@@ -3,9 +3,11 @@
  * Phase 3 converges the models and deletes this module. Keep translation mechanical.
  */
 import { CURRENT_SCHEMA_VERSION, type DocEdge, type DocHistory, type DocMeta, type DocNode, type MboardFile, type ProfileConfig } from './types'
+// board/types.ts is a dependency-free type module, not App.tsx: importing the
+// node-type list from there keeps one list instead of a third copy to drift.
+import { isBpmnNodeType, type BpmnNodeType } from '../board/types'
 
 type Point = { x: number; y: number }
-type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 
 /** Local mirror of frozen App.tsx BoardElement. format/ must not import App.tsx. */
 export interface BoardElement {
@@ -139,7 +141,11 @@ export function fromDocNode(node: DocNode): BoardElement {
     points: node.content.points,
     emoji: node.content.emoji,
     createdBy: node.createdBy,
-    bpmnNodeType: bpmn.nodeType as BpmnNodeType | undefined,
+    // Checked rather than cast: the Rust engine's enum refuses to deserialise
+    // an unknown value, taking validation of the whole model down with it. The
+    // original is preserved below, so a nodeType from a newer version survives
+    // a load/save cycle even though this client will not act on it.
+    bpmnNodeType: isBpmnNodeType(bpmn.nodeType) ? bpmn.nodeType : undefined,
     bpmnDurationMs: bpmn.durationMs as number | undefined,
     bpmnDurationDistribution: bpmn.durationDistribution as BoardElement['bpmnDurationDistribution'],
     bpmnDurationMinMs: bpmn.durationMinMs as number | undefined,
@@ -150,7 +156,20 @@ export function fromDocNode(node: DocNode): BoardElement {
     bpmnResourceCapacity: bpmn.resourceCapacity as number | undefined,
     bpmnPriority: bpmn.priority as number | undefined,
   }) as BoardElement
-  elementExtras.set(element, { ...unknownKeys(node as unknown as Record<string, unknown>, NODE_KEYS), profileData: profileExtras(node.profileData) })
+  const extras: Record<string, unknown> = {
+    ...unknownKeys(node as unknown as Record<string, unknown>, NODE_KEYS),
+    profileData: profileExtras(node.profileData),
+  }
+  // A nodeType this version does not recognise is dropped from the in-memory
+  // element but kept in the extras, so saving writes back what was opened.
+  // FORMAT.md makes unknown-data preservation a guarantee of the v1 format,
+  // and rejecting a value for our own engine must not turn into deleting the
+  // user's data.
+  if (bpmn.nodeType !== undefined && !isBpmnNodeType(bpmn.nodeType)) {
+    const profileData = extras.profileData as Record<string, Record<string, unknown>>
+    extras.profileData = { ...profileData, bpmn: { ...profileData.bpmn, nodeType: bpmn.nodeType } }
+  }
+  elementExtras.set(element, extras)
   return element
 }
 
@@ -271,7 +290,12 @@ function mergeUnknown<T>(value: T, extras: Record<string, unknown> | undefined):
     merged.profileData = { ...extras.profileData as Record<string, unknown>, ...valueRecord.profileData as Record<string, unknown> }
     const oldBpmn = (extras.profileData as Record<string, unknown>).bpmn
     const newBpmn = (valueRecord.profileData as Record<string, unknown>).bpmn
+    // A preserved bpmn namespace must survive even when this version produced
+    // no bpmn data of its own: an element whose only BPMN field was a nodeType
+    // we do not recognise round-trips to profileData: {} otherwise, silently
+    // deleting it from the user's file.
     if (oldBpmn && newBpmn) (merged.profileData as Record<string, unknown>).bpmn = { ...oldBpmn as Record<string, unknown>, ...newBpmn as Record<string, unknown> }
+    else if (oldBpmn && hasEntries(oldBpmn as Record<string, unknown>)) (merged.profileData as Record<string, unknown>).bpmn = oldBpmn
   }
   return merged as T
 }
