@@ -17,6 +17,13 @@ import { RecoveryDivergenceNotice } from './components/RecoveryDivergenceNotice'
 import { openDocument, openDroppedDocument, saveDocument, type FileSession, type OpenOutcome } from './persistence/files'
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
 import { SimulationModal } from './components/SimulationModal'
+import { TemplatesModal } from './components/TemplatesModal'
+import { LearningModulesModal } from './components/LearningModulesModal'
+import { ProjectHistoryModal } from './components/ProjectHistoryModal'
+import { BpmnTaskProperties } from './components/BpmnTaskProperties'
+import { BpmnFlowProperties } from './components/BpmnFlowProperties'
+import { ColorPicker } from './components/ColorPicker'
+import { createTheme } from './board/theme'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
 import { captureSnapshot, fromBase64, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot, toBase64 } from './history/snapshots'
 import { loadIntoDoc } from './history/state'
@@ -37,7 +44,6 @@ import { bpmnEdgeAnchor, simplifyPath, smoothPathD, snapVal } from './board/geom
 import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeInfo } from './board/gesture'
 import { genId } from './board/id'
 import { COLORS, CONTEXT_MENU_ITEMS, EMOJIS, STICKY_COLORS } from './board/palette'
-import { EDUCATIONAL_EXAMPLES } from './board/examples'
 import type {
   ArrivalClassDraft, BoardElement, BpmnNodeType, BpmnSimulationResult, ContextMenuAction, EducationalExample,
   ImportedBpmnModel, PendingOpen, Point, RolePolicyDraft, Tool, WorkspaceMode,
@@ -319,8 +325,11 @@ export default function App() {
     () => elements.find((element) => element.id === selectedElementId && element.bpmnFlow) ?? null,
     [elements, selectedElementId],
   )
+  // Boolean, not `boolean | undefined`: the old expression short-circuited to
+  // undefined for a flow without bpmnFlow, which read as false everywhere it was
+  // used but is not assignable to a boolean prop.
   const selectedBpmnFlowIsXor = useMemo(
-    () => selectedBpmnFlow?.bpmnFlow && elements.find((element) => element.id === selectedBpmnFlow.bpmnFlow!.sourceId)?.bpmnNodeType === 'xorGateway',
+    () => Boolean(selectedBpmnFlow?.bpmnFlow && elements.find((element) => element.id === selectedBpmnFlow.bpmnFlow!.sourceId)?.bpmnNodeType === 'xorGateway'),
     [elements, selectedBpmnFlow],
   )
   // Local participant profile. Device-scoped and fail-soft: it carries the
@@ -1833,6 +1842,8 @@ export default function App() {
   }
   // ======================== JSX ========================
   const dk = darkMode
+  // Extracted panels take the whole theme rather than five separate props.
+  const theme = createTheme(darkMode)
   const bgMain = '#F7F8FC'
   const bgBar = 'bg-white/95'
   const borderC = 'border-slate-200'
@@ -2418,141 +2429,20 @@ export default function App() {
           </div>
         </div>
       )}
-      {/* ===== STICKY COLORS ===== */}
+      {/* ===== SELECTION PROPERTY PANELS ===== */}
       {selectedBpmnTask && !contextMenu && (
-        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC} max-md:inset-x-3 max-md:top-auto max-md:bottom-20 max-md:w-auto max-md:max-h-[46vh] max-md:overflow-y-auto`} data-ui>
-          <div className="text-xs font-bold text-slate-400">Свойства задачи</div>
-          <div className="grid grid-cols-2 gap-2">
-          <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-duration">Длительность, с</label>
-          <input
-            id="bpmn-duration"
-            type="number"
-            min="0"
-            max="3600"
-            step="0.1"
-            value={(selectedBpmnTask.bpmnDurationMs ?? 1000) / 1000}
-            onChange={(event) => {
-              const seconds = Number(event.target.value)
-              if (Number.isFinite(seconds) && seconds >= 0) {
-                updateElement(selectedBpmnTask.id, { bpmnDurationMs: Math.round(Math.min(seconds, 3600) * 1000) })
-              }
-            }}
-            className={`w-16 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-          />
-          <select
-            value={selectedBpmnTask.bpmnDurationDistribution || 'fixed'}
-            onChange={(event) => updateElement(selectedBpmnTask.id, {
-              bpmnDurationDistribution: event.target.value as 'fixed' | 'uniform' | 'triangular',
-              bpmnDurationMinMs: selectedBpmnTask.bpmnDurationMinMs ?? selectedBpmnTask.bpmnDurationMs ?? 1000,
-              bpmnDurationModeMs: selectedBpmnTask.bpmnDurationModeMs ?? selectedBpmnTask.bpmnDurationMs ?? 1000,
-              bpmnDurationMaxMs: selectedBpmnTask.bpmnDurationMaxMs ?? selectedBpmnTask.bpmnDurationMs ?? 1000,
-            })}
-            className={`rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-          >
-            <option value="fixed">Fixed</option>
-            <option value="uniform">Uniform</option>
-            <option value="triangular">Triangular</option>
-          </select>
-          {(selectedBpmnTask.bpmnDurationDistribution === 'uniform' || selectedBpmnTask.bpmnDurationDistribution === 'triangular') && (
-            <>
-              <label className={`text-[11px] font-semibold ${textSec}`}>Min
-                <input type="number" min="0" value={(selectedBpmnTask.bpmnDurationMinMs ?? 1000) / 1000} onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnDurationMinMs: Math.max(0, Number(event.target.value) * 1000) })} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-              </label>
-              {selectedBpmnTask.bpmnDurationDistribution === 'triangular' && (
-                <label className={`text-[11px] font-semibold ${textSec}`}>Mode
-                  <input type="number" min="0" value={(selectedBpmnTask.bpmnDurationModeMs ?? 1000) / 1000} onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnDurationModeMs: Math.max(0, Number(event.target.value) * 1000) })} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-                </label>
-              )}
-              <label className={`text-[11px] font-semibold ${textSec}`}>Max
-                <input type="number" min="0" value={(selectedBpmnTask.bpmnDurationMaxMs ?? 1000) / 1000} onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnDurationMaxMs: Math.max(0, Number(event.target.value) * 1000) })} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-              </label>
-            </>
-          )}
-          <label className={`text-[11px] font-semibold ${textSec}`}>Роль
-            <input value={selectedBpmnTask.bpmnResourceRole || ''} placeholder="Аналитик" onChange={(event) => updateElement(selectedBpmnTask.id, { bpmnResourceRole: event.target.value || undefined })} className={`ml-1 w-20 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-          </label>
-          <label className={`text-[11px] font-semibold ${textSec}`}>€/ч
-            <input type="number" min="0" step="0.01" value={selectedBpmnTask.bpmnCostPerHour ?? ''} onChange={(event) => { const value = event.target.value; const cost = value === '' ? undefined : Number(value); if (cost === undefined || (Number.isFinite(cost) && cost >= 0)) updateElement(selectedBpmnTask.id, { bpmnCostPerHour: cost }) }} className={`ml-1 w-16 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-          </label>
-          <label className={`text-[11px] font-semibold ${textSec}`}>Capacity
-            <input type="number" min="1" max="1000" step="1" value={selectedBpmnTask.bpmnResourceCapacity ?? 1} onChange={(event) => { const capacity = Number(event.target.value); if (Number.isInteger(capacity) && capacity >= 1 && capacity <= 1000) updateElement(selectedBpmnTask.id, { bpmnResourceCapacity: capacity }) }} className={`ml-1 w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`} />
-          </label>
-          <label className={`text-[11px] font-semibold ${textSec}`}>Priority
-            <input type="number" min="-100" max="100" step="1" value={selectedBpmnTask.bpmnPriority ?? 0} onChange={(event) => { const priority = Number(event.target.value); if (Number.isInteger(priority) && priority >= -100 && priority <= 100) updateElement(selectedBpmnTask.id, { bpmnPriority: priority }) }} className="ml-1 w-14 rounded-lg border border-slate-200 px-2 py-1 text-[12px] outline-none" />
-          </label>
-          </div>
-        </aside>
+        <BpmnTaskProperties task={selectedBpmnTask} theme={theme} onUpdate={updateElement} />
       )}
       {selectedBpmnFlow && !contextMenu && (
-        <aside className={`absolute right-3 top-[68px] z-30 flex w-72 max-w-[calc(100vw-24px)] flex-col gap-3 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} p-4 shadow-xl border ${borderC} max-md:inset-x-3 max-md:top-auto max-md:bottom-20 max-md:w-auto max-md:max-h-[46vh] max-md:overflow-y-auto`} data-ui>
-          <div className="text-xs font-bold text-slate-400">Свойства sequence flow</div>
-          <div className="flex flex-col gap-3">
-          <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-type">Тип потока</label>
-          <select
-            id="bpmn-flow-type"
-            data-testid="bpmn-flow-type"
-            value={selectedBpmnFlow.bpmnFlow?.flowType || 'sequence'}
-            onChange={(event) => updateElement(selectedBpmnFlow.id, {
-              bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, flowType: event.target.value as 'sequence' | 'message' },
-            })}
-            className={`w-32 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-          >
-            <option value="sequence">sequence</option>
-            <option value="message">message</option>
-          </select>
-          <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-condition">Условие</label>
-          <input
-            id="bpmn-flow-condition"
-            value={selectedBpmnFlow.bpmnFlow?.condition || ''}
-            placeholder="true"
-            onChange={(event) => updateElement(selectedBpmnFlow.id, {
-              bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, condition: event.target.value || undefined },
-            })}
-            className={`w-20 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-          />
-          {selectedBpmnFlowIsXor && (
-            <>
-              <label className={`text-[11px] font-semibold ${textSec}`} htmlFor="bpmn-flow-probability">P</label>
-              <input
-                id="bpmn-flow-probability"
-                type="number"
-                min="0"
-                max="1"
-                step="0.01"
-                value={selectedBpmnFlow.bpmnFlow?.probability ?? ''}
-                onChange={(event) => {
-                  const value = event.target.value
-                  const probability = value === '' ? undefined : Number(value)
-                  if (probability === undefined || (Number.isFinite(probability) && probability >= 0 && probability <= 1)) {
-                    updateElement(selectedBpmnFlow.id, {
-                      bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, probability },
-                    })
-                  }
-                }}
-                className={`w-14 rounded-lg border px-2 py-1 text-[12px] outline-none ${dk ? 'bg-slate-900 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-800'}`}
-              />
-              <label className={`flex items-center gap-1 text-[11px] font-semibold ${textSec}`}>
-                <input
-                  type="checkbox"
-                  checked={selectedBpmnFlow.bpmnFlow?.isDefault || false}
-                  onChange={(event) => updateElement(selectedBpmnFlow.id, {
-                    bpmnFlow: { ...selectedBpmnFlow.bpmnFlow!, isDefault: event.target.checked },
-                  })}
-                />
-                default
-              </label>
-            </>
-          )}
-          </div>
-        </aside>
+        <BpmnFlowProperties
+          flow={selectedBpmnFlow}
+          isXorBranch={selectedBpmnFlowIsXor}
+          theme={theme}
+          onUpdate={updateElement}
+        />
       )}
       {selectedElementId && elements.find(e => e.id === selectedElementId && (e.type === 'sticky' || e.type === 'rect' || e.type === 'circle')) && !contextMenu && (
-        <div className={`absolute left-1/2 -translate-x-1/2 bottom-[104px] z-30 flex items-center gap-1 p-1.5 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
-          {STICKY_COLORS.map(c => (
-            <button key={c} onClick={() => updateSelected({ color: c, fill: c })}
-              className="size-7 rounded-full ring-1 ring-black/10 active:scale-90 transition" style={{ background: c }} />
-          ))}
-        </div>
+        <ColorPicker theme={theme} onPick={color => updateSelected({ color, fill: color })} />
       )}
       {/* ===== SIMULATION MODAL ===== */}
       {showSimulationPanel && !isPreview && (
@@ -2585,125 +2475,27 @@ export default function App() {
         onClose={() => setShowSimulationPanel(false)}
         />
       )}
-      {/* ===== PROJECT HISTORY MODAL ===== */}
       {showProjectHistory && (
-        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowProjectHistory(false)} data-ui>
-          <section className={`w-full max-w-3xl max-h-[82vh] overflow-y-auto rounded-[28px] ${dk ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'} shadow-2xl p-6`} onClick={event => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4 mb-5">
-              <div>
-                <h2 className="text-xl font-bold">История проекта</h2>
-                <p className={`mt-1 text-sm ${textSec}`}>Учебная хронология разработки MiroBoard, зафиксированная Git-коммитами.</p>
-              </div>
-              <button onClick={() => setShowProjectHistory(false)} className={`size-9 rounded-xl text-lg ${hoverBg}`} aria-label="Закрыть историю">×</button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3 mb-6">
-              <a href={GITHUB_REPOSITORY} target="_blank" rel="noreferrer" className={`rounded-2xl p-3 ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-50 hover:bg-slate-100'} transition`}>
-                <div className={`text-[11px] font-semibold ${textSec}`}>Репозиторий</div>
-                <div className="mt-1 text-sm font-bold">GitHub ↗</div>
-              </a>
-              <div className={`rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-slate-50'}`}>
-                <div className={`text-[11px] font-semibold ${textSec}`}>Автономный релиз</div>
-                <div className="mt-1 text-sm font-bold">Один HTML-файл</div>
-              </div>
-              <div className={`rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-slate-50'}`}>
-                <div className={`text-[11px] font-semibold ${textSec}`}>Токены модели</div>
-                <div className="mt-1 text-sm font-bold">Не измеряются достоверно</div>
-              </div>
-            </div>
-            <div className={`rounded-2xl p-4 mb-5 ${dk ? 'bg-indigo-950/70' : 'bg-indigo-50'}`}>
-              <h3 className="text-sm font-bold">Стек и engineering harness</h3>
-              <p className={`mt-1 text-[13px] leading-5 ${textSec}`}>
-                React, TypeScript, Vite, Tailwind, Yjs, WebRTC, IndexedDB и Rust/WASM. Factory Droid harness выполняет scoped-изменения, Rust/TypeScript-проверки, production build, Git commit/push и ведёт локальную операционную историю через jj.
-              </p>
-              <p className={`mt-2 text-[12px] leading-5 ${textSec}`}>
-                Git не содержит точных usage-метрик LLM, поэтому число токенов не выводится как оценка. Достоверный учёт возможен только при подключении telemetry API провайдера модели.
-              </p>
-            </div>
-            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4">
-              <h3 className="text-sm font-bold">Как читать эту историю</h3>
-              <p className={`mt-1 text-[13px] leading-5 ${textSec}`}>
-                <b>Commit</b>, например <code>394dec5</code>, это неизменяемый точный снимок исходного кода. По ссылке можно увидеть, какие файлы и почему изменились. <b>Release</b>, например <code>v0.6.0</code>, это понятная пользователю стабильная версия, объединяющая проверенные commits и готовый HTML.
-              </p>
-              <p className={`mt-2 text-[13px] leading-5 ${textSec}`}>
-                jj автоматически хранит локальные операции и позволяет безопасно отменять шаги, но пока не генерирует этот UI-список commits. В текущем release список обновляется вручную и поэтому отражает только опубликованные этапы. Сейчас развивается BPMN-симулятор: после длительностей, стоимости и ресурсов добавлены очереди, SLA и рабочий календарь. Следующий этап, приоритеты очереди, несколько экземпляров процесса и bottleneck-анализ.
-              </p>
-            </div>
-            <h3 className="text-sm font-bold mb-3">Этапы</h3>
-            <ol className="space-y-3">
-              {__MIROBOARD_HISTORY__.map(({ date, commit, title, release }) => (
-                <li key={commit} className={`relative pl-5 border-l-2 ${dk ? 'border-slate-600' : 'border-slate-200'}`}>
-                  <span className={`absolute -left-[5px] top-1.5 size-2 rounded-full ${dk ? 'bg-violet-400' : 'bg-violet-500'}`} />
-                  <div className={`text-[11px] font-mono ${textSec}`}>{date}</div>
-                  <a href={`${GITHUB_REPOSITORY}/commit/${commit}`} target="_blank" rel="noreferrer" className="text-[13px] font-semibold hover:underline">
-                    {title} <span className={`font-mono text-[11px] ${textSec}`}>{commit} ↗</span>
-                  </a>
-                  {release && <a href={`${GITHUB_REPOSITORY}/releases/tag/${release}`} target="_blank" rel="noreferrer" className="ml-2 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 hover:bg-violet-200">{release}</a>}
-                </li>
-              ))}
-            </ol>
-          </section>
-        </div>
+        <ProjectHistoryModal
+          theme={theme}
+          repositoryUrl={GITHUB_REPOSITORY}
+          history={__MIROBOARD_HISTORY__}
+          onClose={() => setShowProjectHistory(false)}
+        />
       )}
-      {/* ===== LEARNING MODULES MODAL ===== */}
       {showLearningModules && (
-        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-slate-900/35 backdrop-blur-sm" onClick={() => setShowLearningModules(false)} data-ui>
-          <section className="w-full max-w-2xl rounded-[28px] bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
-            <div className="mb-5 flex items-start justify-between gap-4">
-              <div><h2 className="text-xl font-bold text-slate-900">Учебные BPMN-модули</h2><p className="mt-1 text-sm text-slate-500">Загрузите готовую схему, прочитайте цель и проверьте результат симуляции.</p></div>
-              <button onClick={() => setShowLearningModules(false)} className="grid size-9 place-items-center rounded-xl text-lg text-slate-500 hover:bg-slate-100">×</button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {EDUCATIONAL_EXAMPLES.map((example, index) => (
-                <button key={example.title} onClick={() => { setShowLearningModules(false); loadEducationalExample(example) }} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-violet-300 hover:bg-violet-50">
-                  <div className="mb-2 text-xs font-bold text-violet-600">Модуль {index + 1}</div>
-                  <div className="text-sm font-bold text-slate-900">{example.title}</div>
-                  <div className="mt-2 text-xs leading-5 text-slate-500">{example.explanation}</div>
-                  <div className="mt-3 text-xs font-semibold text-violet-700">Загрузить →</div>
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
+        <LearningModulesModal
+          onClose={() => setShowLearningModules(false)}
+          onLoadExample={loadEducationalExample}
+        />
       )}
-      {/* ===== TEMPLATES MODAL ===== */}
       {showTemplates && (
-        <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => setShowTemplates(false)} data-ui>
-          <div className={`w-full max-w-[400px] rounded-[28px] ${dk ? 'bg-slate-800' : 'bg-white'} shadow-2xl p-6`} onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-[20px] font-semibold tracking-tight">Шаблоны досок</h3>
-              <button onClick={() => setShowTemplates(false)} className={`size-8 grid place-items-center rounded-full ${hoverBg}`}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { id: 'kanban', name: '📋 Канбан', desc: 'To Do → В процессе → Готово', gradient: 'from-yellow-400 to-orange-400' },
-                { id: 'brainstorm', name: '🧠 Мозговой штурм', desc: 'Идеи вокруг центральной темы', gradient: 'from-violet-400 to-purple-500' },
-                { id: 'swot', name: '📊 SWOT анализ', desc: 'Сильные, слабые, возможности, угрозы', gradient: 'from-green-400 to-blue-400' },
-                { id: 'retro', name: '🔄 Ретроспектива', desc: 'Что хорошо, что улучшить, действия', gradient: 'from-blue-400 to-cyan-400' },
-                { id: 'flowchart', name: '🔀 Блок-схема', desc: 'Последовательность шагов', gradient: 'from-pink-400 to-rose-400' },
-                { id: 'bpmn', name: '⚙️ BPMN 2.0', desc: 'Старт, задача, завершение и проверка', gradient: 'from-indigo-400 to-violet-500' },
-              ].map(t => (
-                <button key={t.id} onClick={() => applyTemplate(t.id)}
-                  className={`p-4 rounded-2xl ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-gray-50 hover:bg-gray-100'} text-left transition active:scale-95`}>
-                  <div className={`text-[28px] mb-2`}>{t.name.split(' ')[0]}</div>
-                  <div className="text-[14px] font-semibold mb-0.5">{t.name.split(' ').slice(1).join(' ')}</div>
-                  <div className={`text-[12px] ${dk ? 'text-slate-400' : 'text-black/50'}`}>{t.desc}</div>
-                </button>
-              ))}
-            </div>
-            <h4 className="mt-6 mb-3 text-sm font-bold">Учебные BPMN-модули</h4>
-            <div className="space-y-2">
-              {EDUCATIONAL_EXAMPLES.map((example) => (
-                <button key={example.title} onClick={() => { setShowTemplates(false); loadEducationalExample(example) }}
-                  className={`w-full rounded-xl p-3 text-left ${dk ? 'bg-slate-700 hover:bg-slate-600' : 'bg-indigo-50 hover:bg-indigo-100'} transition`}>
-                  <div className="text-sm font-semibold">{example.title}</div>
-                  <div className={`mt-1 text-xs ${dk ? 'text-slate-300' : 'text-slate-600'}`}>{example.explanation}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <TemplatesModal
+          theme={theme}
+          onClose={() => setShowTemplates(false)}
+          onApplyTemplate={applyTemplate}
+          onLoadExample={loadEducationalExample}
+        />
       )}
       {/* ===== ZOOM CONTROLS ===== */}
       <div className="absolute right-3 bottom-[120px] z-20 flex flex-col gap-1.5" data-ui>
