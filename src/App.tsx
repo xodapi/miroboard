@@ -1481,6 +1481,12 @@ export default function App() {
       if (showSimulationPanel) return
       const target = (e.target as HTMLElement | null) || document.activeElement as HTMLElement | null
       if (target?.isContentEditable || (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+      // Past this point every branch reads or writes the document, and a drag
+      // in progress is not in the document yet. Ctrl+D mid-drag used to place
+      // the copy next to where the element started, nowhere near the one on
+      // screen; Ctrl+C copied the pre-drag position. One flush covers all of
+      // them, rather than each shortcut having to remember.
+      flushGesture()
       if (e.key === 'Delete' || e.key === 'Backspace') { if (selectedIds.size) deleteSelected() }
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo() }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); handleRedo() }
@@ -1551,7 +1557,7 @@ export default function App() {
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
-  }, [selectedIds, deleteSelected, editingText, handleUndo, handleRedo, duplicateSelection, elements, moveSelection, copySelection, cutSelection, pasteFromClipboard, selectElements, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
+  }, [selectedIds, deleteSelected, editingText, flushGesture, handleUndo, handleRedo, duplicateSelection, elements, moveSelection, copySelection, cutSelection, pasteFromClipboard, selectElements, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
   // ======================== RENDER ELEMENT ========================
   const isPreview = previewSnapshot !== null
   const liveElementIds = useMemo(() => new Set(elements.map(element => element.id)), [elements])

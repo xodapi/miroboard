@@ -338,6 +338,26 @@ describe('App smoke', () => {
       expect(JSON.parse(written()).nodes[0].frame).toMatchObject({ x: 280, y: 280 })
     })
 
+    it('duplicates from where a dragged element is now, not where it started', () => {
+      stubFileSession('board.mboard', '')
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+
+      const element = container.querySelector('g[data-id]')!
+      pointer(element, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 300, clientY: 300 })
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(280,280)')
+
+      key('d', { ctrlKey: true })
+
+      // The copy is offset from the source. Without flushing the gesture the
+      // source is still at its pre-drag position in the document, so the copy
+      // landed at (120,120) — beside a rectangle the user had already dragged
+      // away from.
+      const placed = [...container.querySelectorAll('g[data-id]')].map(g => g.getAttribute('transform'))
+      expect(placed).toEqual(['translate(280,280)', 'translate(300,300)'])
+    })
+
     it('saves what is on screen when a drag is still in progress', async () => {
       const written = stubFileSession('board.mboard', '')
       placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
