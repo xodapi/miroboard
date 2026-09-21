@@ -83,4 +83,18 @@ describe('canonicalElement', () => {
     expect(canonicalElement(defaults)).toMatchObject({ zIndex: 0 })
     expect(canonicalElement(defaults)).not.toHaveProperty('rotation')
   })
+
+  it('drops an unrecognised bpmnNodeType from an opened file', () => {
+    // An .mboard file is untrusted input: it can be hand-edited, or written by
+    // a newer version. The Rust engine deserialises this field into a strict
+    // enum, so one unknown value stops the whole model from parsing.
+    const doc = toDocElement({ ...node, bpmnNodeType: 'task' })
+    if (!('node' in doc)) throw new Error('expected node')
+    const tampered = {
+      ...doc.node,
+      profileData: { ...doc.node.profileData, bpmn: { ...doc.node.profileData.bpmn, nodeType: 'wishfulGateway' } },
+    }
+
+    expect(fromDocNode(tampered)).not.toHaveProperty('bpmnNodeType')
+  })
 })

@@ -22,6 +22,7 @@
  * native clipboard integration would use for a real custom MIME type.
  */
 import type { BoardElement } from '../format/mboard'
+import { isBpmnNodeType } from '../board/types'
 
 /** Declared media type of a miroboard clipboard payload. */
 export const CLIPBOARD_MIME = 'application/x-miroboard+json'
@@ -44,6 +45,8 @@ export interface ClipboardPayload {
 const ELEMENT_TYPES: ReadonlySet<BoardElement['type']> = new Set([
   'path', 'sticky', 'rect', 'circle', 'arrow', 'line', 'text', 'emoji',
 ])
+
+
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
@@ -106,7 +109,8 @@ export function sanitiseElement(value: unknown): BoardElement | null {
   const labelOffset = toPoint(raw.labelOffset)
   if (labelOffset) element.labelOffset = labelOffset
 
-  if (typeof raw.bpmnNodeType === 'string') element.bpmnNodeType = raw.bpmnNodeType as BoardElement['bpmnNodeType']
+  // Checked, not cast, for the same reason `type` is — see isBpmnNodeType.
+  if (isBpmnNodeType(raw.bpmnNodeType)) element.bpmnNodeType = raw.bpmnNodeType
   for (const key of [
     'bpmnDurationMs', 'bpmnDurationMinMs', 'bpmnDurationModeMs', 'bpmnDurationMaxMs',
     'bpmnCostPerHour', 'bpmnResourceCapacity', 'bpmnPriority',

@@ -3,9 +3,11 @@
  * Phase 3 converges the models and deletes this module. Keep translation mechanical.
  */
 import { CURRENT_SCHEMA_VERSION, type DocEdge, type DocHistory, type DocMeta, type DocNode, type MboardFile, type ProfileConfig } from './types'
+// board/types.ts is a dependency-free type module, not App.tsx: importing the
+// node-type list from there keeps one list instead of a third copy to drift.
+import { isBpmnNodeType, type BpmnNodeType } from '../board/types'
 
 type Point = { x: number; y: number }
-type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 
 /** Local mirror of frozen App.tsx BoardElement. format/ must not import App.tsx. */
 export interface BoardElement {
@@ -139,7 +141,10 @@ export function fromDocNode(node: DocNode): BoardElement {
     points: node.content.points,
     emoji: node.content.emoji,
     createdBy: node.createdBy,
-    bpmnNodeType: bpmn.nodeType as BpmnNodeType | undefined,
+    // Checked rather than cast: an opened file is untrusted input, and the
+    // Rust engine's enum refuses to deserialise an unknown value, taking the
+    // whole model's validation down with it.
+    bpmnNodeType: isBpmnNodeType(bpmn.nodeType) ? bpmn.nodeType : undefined,
     bpmnDurationMs: bpmn.durationMs as number | undefined,
     bpmnDurationDistribution: bpmn.durationDistribution as BoardElement['bpmnDurationDistribution'],
     bpmnDurationMinMs: bpmn.durationMinMs as number | undefined,

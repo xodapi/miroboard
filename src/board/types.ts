@@ -17,6 +17,23 @@ export type Tool =
 
 export type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
 
+/**
+ * The same list at runtime, next to the type so the two cannot drift.
+ *
+ * Both untrusted entry points — the clipboard and an opened .mboard file —
+ * used to cast this field instead of checking it. The Rust engine
+ * deserialises it into a strict enum, so a single unrecognised value makes
+ * the whole model fail to parse: one bad element and the board reports
+ * "Не удалось проверить BPMN-модель." for every other node too.
+ */
+export const BPMN_NODE_TYPES: readonly BpmnNodeType[] = [
+  'startEvent', 'endEvent', 'task', 'xorGateway', 'andGateway', 'orGateway',
+]
+
+export function isBpmnNodeType(value: unknown): value is BpmnNodeType {
+  return typeof value === 'string' && (BPMN_NODE_TYPES as readonly string[]).includes(value)
+}
+
 export type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 
 export type QueuePolicy = 'fifo' | 'priority'

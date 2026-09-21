@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BoardElement } from '../format/mboard'
+import { BPMN_NODE_TYPES } from '../board/types'
 import {
   CLIPBOARD_MIME,
   CLIPBOARD_VERSION,
@@ -95,6 +96,23 @@ describe('sanitiseElement', () => {
     expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: Number.POSITIVE_INFINITY })).toBeNull()
   })
 
+  it('drops an unrecognised bpmnNodeType instead of trusting it', () => {
+    // The Rust engine deserialises this into a strict enum. One unknown value
+    // makes the whole model fail to parse, so a single pasted element used to
+    // leave the board reporting "Не удалось проверить BPMN-модель." for every
+    // other node too.
+    const element = sanitiseElement({ id: 'a', type: 'sticky', x: 0, y: 0, bpmnNodeType: 'totallyBogus' })
+    expect(element).not.toBeNull()
+    expect(element).not.toHaveProperty('bpmnNodeType')
+  })
+
+  it('keeps every node type the engine knows', () => {
+    for (const nodeType of BPMN_NODE_TYPES) {
+      const element = sanitiseElement({ id: 'a', type: 'sticky', x: 0, y: 0, bpmnNodeType: nodeType })
+      expect(element?.bpmnNodeType).toBe(nodeType)
+    }
+  })
+
   it('defaults the mandatory colour instead of dropping the element', () => {
     expect(sanitiseElement({ id: 'a', type: 'rect', x: 1, y: 2 })?.color).toBe('transparent')
   })
@@ -135,8 +153,8 @@ describe('preparePaste', () => {
 
   it('remaps bpmnFlow endpoints through the same id table, so a copied fragment stays connected to itself', () => {
     const elements: BoardElement[] = [
-      rect({ id: 'start', bpmnNodeType: 'start' as BoardElement['bpmnNodeType'] }),
-      rect({ id: 'task', bpmnNodeType: 'task' as BoardElement['bpmnNodeType'] }),
+      rect({ id: 'start', bpmnNodeType: 'startEvent' }),
+      rect({ id: 'task', bpmnNodeType: 'task' }),
       {
         id: 'flow', type: 'arrow', x: 0, y: 0, color: '#000',
         bpmnFlow: { sourceId: 'start', targetId: 'task', flowType: 'sequence', condition: 'ok' },
