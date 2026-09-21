@@ -27,6 +27,7 @@ import { BoardHeader } from './components/BoardHeader'
 import { ZoomControls, ElementCount } from './components/ZoomControls'
 import { CanvasBackground } from './components/CanvasBackground'
 import { ChangedInPreview, ResizeHandles } from './components/element-chrome'
+import { ElementTextEditor } from './components/ElementTextEditor'
 import { useSimulationSettings } from './board/use-simulation-settings'
 import { elementsInScope, fitTransform, screenToWorld as toWorld, wheelZoomFactor, zoomAround } from './board/viewport'
 import * as commands from './board/commands'
@@ -1526,6 +1527,17 @@ export default function App() {
     })
   }, [baseRenderedElements, isPreview, transientFrame])
   const selectionCount = selectedIds.size
+  /** Wires one element's text editing to the shared editor state. */
+  const textEditorProps = (el: BoardElement) => ({
+    text: el.text ?? '',
+    editing: editingText === el.id,
+    draft: editValue,
+    readOnly: isPreview,
+    onDraftChange: setEditValue,
+    onBeginEdit: () => { setEditingText(el.id); setEditValue(el.text || '') },
+    onCommit: () => { updateElement(el.id, { text: editValue }); setEditingText(null) },
+  })
+
   const renderElement = (el: BoardElement) => {
     const isSelected = isIdSelected(selectedIds, el.id)
     const invS = 1 / transform.scale
@@ -1596,14 +1608,10 @@ export default function App() {
             <rect width={el.w} height={el.h} fill={el.fill} rx={10} />
             <foreignObject x={8} y={8} width={(el.w || 160) - 16} height={(el.h || 160) - 16}>
               <div className="w-full h-full flex items-center justify-center p-2 text-[14px] leading-snug font-medium text-black/80 break-words text-center select-none">
-                {editingText === el.id ? (
-                  <textarea autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { updateElement(el.id, { text: editValue }); setEditingText(null) }}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); updateElement(el.id, { text: editValue }); setEditingText(null) } }}
-                    className="w-full h-full bg-transparent outline-none resize-none text-center text-[14px]" />
-                ) : (
-                  <div onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}>{el.text}</div>
-                )}
+                <ElementTextEditor
+                  {...textEditorProps(el)}
+                  className={editingText === el.id ? 'w-full h-full bg-transparent outline-none resize-none text-center text-[14px]' : undefined}
+                />
               </div>
             </foreignObject>
             {isSelected && selectionCount === 1 && <>
@@ -1621,14 +1629,14 @@ export default function App() {
             <foreignObject width={el.w || 200} height={el.h || 60}>
               <div className="w-full h-full select-none"
                 onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}>
-                {editingText === el.id ? (
-                  <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { updateElement(el.id, { text: editValue }); setEditingText(null) }}
-                    onKeyDown={e => { if (e.key === 'Enter') { updateElement(el.id, { text: editValue }); setEditingText(null) } }}
-                    className="w-full bg-transparent outline-none text-[16px] font-semibold" style={{ color: el.color }} />
-                ) : (
-                  <div className="text-[16px] font-semibold" style={{ color: el.color }}>{el.text}</div>
-                )}
+                <ElementTextEditor
+                  {...textEditorProps(el)}
+                  multiline={false}
+                  className={editingText === el.id
+                    ? 'w-full bg-transparent outline-none text-[16px] font-semibold'
+                    : 'text-[16px] font-semibold'}
+                  style={{ color: el.color }}
+                />
               </div>
             </foreignObject>
             {isSelected && <rect x={-4} y={-4} width={(el.w || 200) + 8} height={(el.h || 60) + 8}
@@ -1645,17 +1653,13 @@ export default function App() {
             {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={8} />}
             <rect width={el.w} height={el.h} fill={el.fill || 'transparent'} stroke={el.color}
               strokeWidth={el.stroke} rx={4}
-              onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }} />
+              onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }} />
             <foreignObject x={8} y={8} width={Math.max((el.w || 0) - 16, 120)} height={Math.max((el.h || 0) - 16, 40)}>
               <div className="w-full h-full flex items-center justify-center p-2 text-[14px] leading-snug font-medium text-black/80 break-words text-center select-none">
-                {editingText === el.id ? (
-                  <textarea autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { updateElement(el.id, { text: editValue }); setEditingText(null) }}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); updateElement(el.id, { text: editValue }); setEditingText(null) } }}
-                    className="w-full h-full bg-transparent outline-none resize-none text-center text-[14px]" />
-                ) : (
-                  <div onDoubleClick={e => { e.stopPropagation(); setEditingText(el.id); setEditValue(el.text || '') }}>{el.text}</div>
-                )}
+                <ElementTextEditor
+                  {...textEditorProps(el)}
+                  className={editingText === el.id ? 'w-full h-full bg-transparent outline-none resize-none text-center text-[14px]' : undefined}
+                />
               </div>
             </foreignObject>
             {isSelected && <>
@@ -1678,17 +1682,13 @@ export default function App() {
             {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={8} />}
             <ellipse cx={(el.w || 0) / 2} cy={(el.h || 0) / 2} rx={Math.abs((el.w || 0) / 2)} ry={Math.abs((el.h || 0) / 2)}
               fill={el.fill || 'transparent'} stroke={el.color} strokeWidth={el.stroke}
-              onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }} />
+              onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }} />
             <foreignObject x={8} y={8} width={Math.max((el.w || 0) - 16, 120)} height={Math.max((el.h || 0) - 16, 40)}>
               <div className="w-full h-full flex items-center justify-center p-2 text-[14px] leading-snug font-medium text-black/80 break-words text-center select-none">
-                {editingText === el.id ? (
-                  <textarea autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
-                    onBlur={() => { updateElement(el.id, { text: editValue }); setEditingText(null) }}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); updateElement(el.id, { text: editValue }); setEditingText(null) } }}
-                    className="w-full h-full bg-transparent outline-none resize-none text-center text-[14px]" />
-                ) : (
-                  <div onDoubleClick={e => { e.stopPropagation(); setEditingText(el.id); setEditValue(el.text || '') }}>{el.text}</div>
-                )}
+                <ElementTextEditor
+                  {...textEditorProps(el)}
+                  className={editingText === el.id ? 'w-full h-full bg-transparent outline-none resize-none text-center text-[14px]' : undefined}
+                />
               </div>
             </foreignObject>
             {isSelected && <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
