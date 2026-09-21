@@ -52,6 +52,28 @@ declare const __MIROBOARD_VERSION__: string
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 declare const __MIROBOARD_DEBUG_HOOK__: boolean
 
+// =============== TEMPORARY CI DIAGNOSTIC — REMOVE BEFORE MERGE ===============
+// Six cross-* suites assert the toolbar reads 'Сохранено' after a save and it
+// reads 'Не сохранено'. jsdom does not reproduce it and CI logs/artifacts are
+// unreachable from the sandbox, so the app records every Yjs update, every dirty
+// transition and every save, and tests/diag-dirty.spec.ts throws that log into a
+// CI annotation — the only channel that gets text back out.
+type DiagEntry = { at: number; kind: string } & Record<string, unknown>
+function diagLog(entry: Record<string, unknown>) {
+  const win = window as unknown as { __MIROBOARD_DIRTY_DIAG__?: DiagEntry[] }
+  const log = win.__MIROBOARD_DIRTY_DIAG__ ?? (win.__MIROBOARD_DIRTY_DIAG__ = [])
+  log.push({ at: Math.round(performance.now()), ...entry } as DiagEntry)
+  if (log.length > 400) log.shift()
+}
+function describeOrigin(origin: unknown): string {
+  if (origin === null) return 'null'
+  if (origin === undefined) return 'undefined'
+  if (typeof origin === 'symbol') return origin.toString()
+  if (typeof origin === 'object') return (origin as object).constructor?.name ?? 'object'
+  return String(origin)
+}
+// ============= end TEMPORARY CI DIAGNOSTIC =============
+
 export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -343,7 +365,16 @@ export default function App() {
     yElements.current = yarray
     // NON_EDIT_ORIGINS rather than the tracker's default: opening a document is
     // labelled LOAD, and a load must not report unsaved changes.
-    dirtyTrackerRef.current = createDirtyTracker(ydoc, setIsDirty, NON_EDIT_ORIGINS)
+    dirtyTrackerRef.current = createDirtyTracker(ydoc, next => { diagLog({ kind: 'dirty', next }); setIsDirty(next) }, NON_EDIT_ORIGINS)
+    // TEMPORARY CI DIAGNOSTIC — REMOVE BEFORE MERGE
+    ydoc.on('update', (_update: Uint8Array, origin: unknown, _doc: Y.Doc, transaction: Y.Transaction) => {
+      const changed: string[] = []
+      transaction.changed.forEach((_subs, type) => {
+        const target = type as unknown
+        changed.push(target === meta ? 'meta' : target === profileConfig ? 'profileConfig' : target === yarray ? 'elements' : (type as object).constructor?.name ?? '?')
+      })
+      diagLog({ kind: 'update', origin: describeOrigin(origin), local: transaction.local, changed })
+    })
     captureTriggersRef.current = createCaptureTriggers({
       ydoc,
       capture: appendCheckpoint,
@@ -461,11 +492,12 @@ export default function App() {
   }), [simulationSeed, simulationRuns, simulationTarget, simulationInstances, arrivalInterval, calendarStart, calendarEnd, arrivalClasses, rolePolicies])
   useEffect(() => {
     if (!bpmnProfileActive || !profileConfigRef.current) return
-    if (profileConfigHydratingRef.current) { profileConfigHydratingRef.current = false; return }
+    if (profileConfigHydratingRef.current) { profileConfigHydratingRef.current = false; diagLog({ kind: 'profileConfig-effect', skipped: 'hydrating' }); return }
     const config = withBpmnSimulation({}, simulationProfile)
     const encoded = JSON.stringify(config)
-    if (encoded === profileConfigJsonRef.current) return
+    if (encoded === profileConfigJsonRef.current) { diagLog({ kind: 'profileConfig-effect', skipped: 'unchanged' }); return }
     profileConfigJsonRef.current = encoded
+    diagLog({ kind: 'profileConfig-write', encoded: encoded.slice(0, 160) }) // TEMPORARY CI DIAGNOSTIC
     ydoc.transact(() => profileConfigRef.current!.set('bpmn', config.bpmn), LOCAL_EDIT)
   }, [bpmnProfileActive, simulationProfile, ydoc])
   const activateBpmnProfile = useCallback(() => {
@@ -517,6 +549,7 @@ export default function App() {
     setHistorySnapshots(history.snapshots)
     const file = serialise({ ...initialFile, history, elements: yElements.current?.toArray() ?? elements })
     const outcome = await saveDocument(file, fileSession, mode)
+    diagLog({ kind: 'save-outcome', outcome: outcome.kind, mode }) // TEMPORARY CI DIAGNOSTIC
     if (outcome.kind === 'saved') {
       compactHistoryOnSaveRef.current = false
       setFileSession(outcome.session)
@@ -527,6 +560,7 @@ export default function App() {
       }, RECOVERY_ORIGIN)
       setRecoveryNotice(null)
       dirtyTrackerRef.current?.markSaved()
+      diagLog({ kind: 'markSaved' }) // TEMPORARY CI DIAGNOSTIC
       showToast('Документ сохранён', 'success')
       return true
     } else if (outcome.kind === 'cancelled') {
