@@ -516,6 +516,38 @@ describe('App smoke', () => {
    * the live list, so it selected objects that were not on screen. Ctrl+C then
    * copied them.
    */
+  /**
+   * Elements can vanish without the user asking: undo, a history restore, a
+   * file load — and, once collaboration lands, a peer's delete. Anything
+   * holding an element id has to cope.
+   */
+  describe('stale element references', () => {
+    it('closes a context menu whose element was undone away', () => {
+      vi.useFakeTimers()
+      try {
+        placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+        const element = container.querySelector('g[data-id]')!
+        key('v') // the long press is a Select-tool gesture
+
+        // A long press opens the menu anchored to that element.
+        pointer(element, 'pointerdown', { clientX: 120, clientY: 120 })
+        act(() => { vi.advanceTimersByTime(600) })
+        expect(byTestId('context-menu')).not.toBeNull()
+
+        // Undo removes the element out from under the open menu.
+        key('z', { ctrlKey: true })
+        expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
+
+        // The menu is positioned in world coordinates and its actions are
+        // refused by the command layer, so leaving it open would show a live
+        // menu over empty canvas whose every item quietly does nothing.
+        expect(byTestId('context-menu')).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+
   describe('history preview', () => {
     /** Marks a named checkpoint of the board as it stands. */
     function markSnapshot() {

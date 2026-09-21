@@ -452,6 +452,10 @@ export default function App() {
       // ids so panels and gestures never point at a missing element.
       const ids = new Set(next.map(element => element.id))
       setSelectedIds(current => retainExisting(current, ids))
+      // The context menu is anchored to one element in world coordinates, so a
+      // vanished element leaves it hovering over empty canvas with actions that
+      // silently do nothing (the command layer refuses unknown ids).
+      setContextMenu(current => (current && !ids.has(current.id) ? null : current))
     }
     yarray.observe(updateElements)
     updateElements()
