@@ -23,6 +23,8 @@ import { ProjectHistoryModal } from './components/ProjectHistoryModal'
 import { BpmnTaskProperties } from './components/BpmnTaskProperties'
 import { BpmnFlowProperties } from './components/BpmnFlowProperties'
 import { ColorPicker } from './components/ColorPicker'
+import { MoreMenu } from './components/MoreMenu'
+import { ContextMenu } from './components/ContextMenu'
 import { createTheme } from './board/theme'
 import { addBeforeUnloadGuard, createDirtyTracker, RECOVERY_ORIGIN, type DirtyTracker } from './persistence/dirty'
 import { captureSnapshot, fromBase64, HISTORY_RESTORE_ORIGIN, readSnapshot, restoreSnapshot, toBase64 } from './history/snapshots'
@@ -43,7 +45,7 @@ import './help-panel.css'
 import { bpmnEdgeAnchor, simplifyPath, smoothPathD, snapVal } from './board/geometry'
 import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeInfo } from './board/gesture'
 import { genId } from './board/id'
-import { COLORS, CONTEXT_MENU_ITEMS, EMOJIS, STICKY_COLORS } from './board/palette'
+import { COLORS, EMOJIS, STICKY_COLORS } from './board/palette'
 import type {
   ArrivalClassDraft, BoardElement, BpmnNodeType, BpmnSimulationResult, ContextMenuAction, EducationalExample,
   ImportedBpmnModel, PendingOpen, Point, RolePolicyDraft, Tool, WorkspaceMode,
@@ -2340,94 +2342,47 @@ export default function App() {
       </div>
       {/* ===== MORE MENU ===== */}
       {showMore && (
-        <div className={`absolute bottom-[104px] left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 p-1.5 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-xl border ${borderC}`} data-ui>
-          <button onClick={() => { chooseTool('line'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'line' ? 'bg-black text-white' : hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 19L19 5" /></svg> Линия
-          </button>
-          <button onClick={() => { chooseTool('laser'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'laser' ? 'bg-black text-white' : hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="8" strokeDasharray="4 3" /></svg> Лазер
-          </button>
-          <button onClick={() => { chooseTool('eraser'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${tool === 'eraser' ? 'bg-black text-white' : hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 20H7L3 16a1.9 1.9 0 0 1 0-2.8L14.2 2h.8l6 6v.8L9.8 20" /></svg> Ластик
-          </button>
-          <button onClick={() => { activateBpmnProfile(); setShowMore(false); setShowEmoji(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${showBpmnPalette ? 'bg-violet-600 text-white' : hoverBg}`}>
-            ◇ BPMN
-          </button>
-          <div className={`w-px h-6 ${dk ? 'bg-slate-600' : 'bg-black/10'}`} />
-          <button onClick={() => { setShowTemplates(true); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            📋 Шаблоны
-          </button>
-          <button onClick={() => { bpmnImportRef.current?.click(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            ⇧ BPMN
-          </button>
-          {elements.some(element => element.bpmnNodeType) && (
-            <>
-              <button onClick={() => { runBpmn(); setShowMore(false) }}
-                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-                ▶ Запуск
-              </button>
-              <button onClick={() => { openSimulation(); setShowMore(false) }} disabled={isPreview}
-                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition disabled:cursor-not-allowed disabled:opacity-50 ${hoverBg}`}>
-                ◌ Симуляция
-              </button>
-              <button onClick={() => { exportToBpmn(); setShowMore(false) }}
-                className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-                ⇩ BPMN
-              </button>
-            </>
-          )}
-          <button onClick={() => { exportToPNG(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg> PNG
-          </button>
-          <button onClick={() => { resetDocument(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            Новый
-          </button>
-          <button onClick={() => { void openBoard(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            Открыть
-          </button>
-          <button onClick={() => { void saveBoard('save'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            ⇩ Сохранить
-          </button>
-          <button onClick={() => { void saveBoard('saveAs'); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            ⇩ Сохранить как
-          </button>
-          <button onClick={() => { markCurrentState(); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            ◉ Отметить состояние
-          </button>
-          <HistoryRetentionControls elements={elements} snapshots={historySnapshots} ydoc={ydoc} textClassName={textSec} onCompact={compactHistory} />
-          <button onClick={() => { setTransform({ x: 0, y: 0, scale: 1 }); setShowMore(false) }}
-            className={`h-9 px-3 rounded-xl text-[13px] font-medium flex items-center gap-1.5 transition ${hoverBg}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M9 22V12h6v10" /></svg> Домой
-          </button>
-        </div>
+        <MoreMenu
+          theme={theme}
+          tool={tool}
+          bpmnPaletteActive={showBpmnPalette}
+          hasBpmnNodes={elements.some(element => element.bpmnNodeType)}
+          isPreview={isPreview}
+          retentionControls={
+            <HistoryRetentionControls
+              elements={elements}
+              snapshots={historySnapshots}
+              ydoc={ydoc}
+              textClassName={textSec}
+              onCompact={compactHistory}
+            />
+          }
+          onChooseTool={chooseTool}
+          onActivateBpmn={() => { activateBpmnProfile(); setShowEmoji(false) }}
+          onOpenTemplates={() => setShowTemplates(true)}
+          onImportBpmn={() => bpmnImportRef.current?.click()}
+          onRunBpmn={runBpmn}
+          onOpenSimulation={openSimulation}
+          onExportBpmn={exportToBpmn}
+          onExportPng={exportToPNG}
+          onNewDocument={resetDocument}
+          onOpenDocument={() => { void openBoard() }}
+          onSave={() => { void saveBoard('save') }}
+          onSaveAs={() => { void saveBoard('saveAs') }}
+          onMarkState={markCurrentState}
+          onResetViewport={() => setTransform({ x: 0, y: 0, scale: 1 })}
+          onClose={() => setShowMore(false)}
+        />
       )}
       {/* ===== CONTEXT MENU ===== */}
       {contextMenu && (
-        <div className="absolute z-40" style={{
-          left: contextMenu.x * transform.scale + transform.x,
-          top: contextMenu.y * transform.scale + transform.y
-        }} data-ui>
-          <div className={`rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC} overflow-hidden py-1 min-w-[180px]`}>
-            {CONTEXT_MENU_ITEMS.map((item) => (
-              <button key={item.action} onClick={() => handleContextMenuAction(item.action, contextMenu.id)}
-                className={`w-full h-10 px-4 text-left text-[14px] flex items-center gap-2 transition ${item.danger ? 'text-red-500 hover:bg-red-50' : `${textSec} ${hoverBg}`}`}>
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          transform={transform}
+          theme={theme}
+          onAction={action => handleContextMenuAction(action, contextMenu.id)}
+        />
       )}
       {/* ===== SELECTION PROPERTY PANELS ===== */}
       {selectedBpmnTask && !contextMenu && (
