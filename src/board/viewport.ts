@@ -1,5 +1,5 @@
 import { clamp_scale } from '../wasm/board-core/board_core'
-import type { BoardElement, Point } from './types'
+import { isElementType, type BoardElement, type Point } from './types'
 
 export interface Transform {
   x: number
@@ -85,6 +85,12 @@ export function fitTransform(elements: BoardElement[], viewport: Viewport): Tran
  */
 export function elementsInScope(elements: BoardElement[], mode: 'board' | 'bpmn' | 'simulation'): BoardElement[] {
   const isBpmn = (element: BoardElement) => Boolean(element.bpmnNodeType || element.bpmnFlow)
-  const scoped = mode === 'board' ? elements.filter(e => !isBpmn(e)) : elements.filter(isBpmn)
-  return scoped.length ? scoped : elements
+  // An element whose type this version does not render is skipped: fitting the
+  // view to something invisible zooms the board out to frame empty space, and
+  // the user cannot see what caused it. Such elements come from a newer
+  // version's file and are preserved on save — they are simply not in scope
+  // for a viewport that cannot draw them.
+  const drawable = elements.filter(element => isElementType(element.type))
+  const scoped = mode === 'board' ? drawable.filter(e => !isBpmn(e)) : drawable.filter(isBpmn)
+  return scoped.length ? scoped : drawable
 }

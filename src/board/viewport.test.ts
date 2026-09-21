@@ -114,6 +114,22 @@ describe('elementsInScope', () => {
   const task = element({ id: 'task', bpmnNodeType: 'task' })
   const flow = element({ id: 'flow', type: 'arrow', bpmnFlow: { sourceId: 'a', targetId: 'b', flowType: 'sequence' } })
 
+  it('leaves out an element this version cannot draw', () => {
+    // A file written by a newer version can carry a node kind this build has
+    // no renderer for. It is kept on save, but framing the view around
+    // something invisible zooms the board out to surround empty space with no
+    // visible cause: a ghost at (5000,5000) dropped the scale from 8 to 0.12.
+    const ghost = element({ id: 'ghost', type: 'hologram' as BoardElement['type'], x: 5000, y: 5000 })
+    expect(elementsInScope([sticky, ghost], 'board')).toEqual([sticky])
+  })
+
+  it('does not fall back to undrawable elements when nothing is in scope', () => {
+    // The "scoped.length ? scoped : …" fallback exists so an empty scope still
+    // frames something. It must not resurrect the ghost.
+    const ghost = element({ id: 'ghost', type: 'hologram' as BoardElement['type'] })
+    expect(elementsInScope([ghost], 'bpmn')).toEqual([])
+  })
+
   it('frames the free-form content in board mode', () => {
     expect(elementsInScope([sticky, task, flow], 'board')).toEqual([sticky])
   })
