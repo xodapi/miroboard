@@ -94,6 +94,20 @@ describe('createDirtyTracker', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
+  // Every write in the app now carries an origin, so an unlabelled one means a
+  // code path forgot to say what it was doing. Losing the user's work is the
+  // expensive failure; a spurious "Не сохранено" is the cheap one.
+  it('treats an unlabelled write as an edit rather than silently ignoring it', () => {
+    const doc = new Y.Doc()
+    const onChange = vi.fn()
+    const tracker = createDirtyTracker(doc, onChange, NON_EDIT_ORIGINS)
+
+    doc.getArray('elements').push(['written with no transaction origin'])
+
+    expect(tracker.isDirty()).toBe(true)
+    expect(onChange).toHaveBeenCalledWith(true)
+  })
+
   it('still dirties the document for a local edit when an ignore set is supplied', () => {
     const doc = new Y.Doc()
     const onChange = vi.fn()

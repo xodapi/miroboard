@@ -26,6 +26,11 @@ describe('transaction origins', () => {
     expect(NON_EDIT_ORIGINS.has(RECOVERY_ORIGIN)).toBe(true)
     expect(NON_EDIT_ORIGINS.has(HISTORY_RESTORE_ORIGIN)).toBe(true)
     expect(NON_EDIT_ORIGINS.has(LOCAL_EDIT)).toBe(false)
+    // An unlabelled write is a bug, not a legacy path: every transaction in
+    // the app now carries an origin. Excluding `null` here would make such a
+    // write silently lose the user's changes, so it must count as an edit.
+    expect(NON_EDIT_ORIGINS.has(null)).toBe(false)
+    expect(NON_EDIT_ORIGINS.has(undefined)).toBe(false)
   })
 
   it('makes every local origin undoable and remote/unknown origins not', () => {

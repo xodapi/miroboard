@@ -43,8 +43,15 @@ export const LOCAL_ORIGINS: ReadonlySet<unknown> = new Set([
 
 /**
  * Writes that must never make a document dirty and never count as an edit:
- * file/recovery load, an applied history restore, and the pre-existing
- * `null` origin still produced by code paths not yet migrated.
+ * file/recovery load and an applied history restore.
+ *
+ * `null` is deliberately NOT a member. Every write to the document now goes
+ * through a labelled transaction (audited: 20 transact sites across App.tsx,
+ * board/commands.ts, persistence/updates.ts and history/), so an unlabelled
+ * write is no longer "some legacy path" — it is a mistake, and the safe
+ * reading of a mistake is that the user changed something. Treating `null` as
+ * non-editing would silently lose real edits; treating it as an edit costs at
+ * worst a spurious "Не сохранено".
  */
 export const NON_EDIT_ORIGINS: ReadonlySet<unknown> = new Set([
   RECOVERY_ORIGIN,
