@@ -51,7 +51,7 @@ async function takeScreenshot(page: import('@playwright/test').Page, filename: s
 
 // VAL-OFFLINE-071: App loads over file:// protocol
 test('VAL-OFFLINE-071: App loads over file:// protocol', async ({ page }) => {
-  await bootFileProtocol(page)
+  const { errors } = await bootFileProtocol(page)
   const screenshot = await takeScreenshot(page, 'VAL-OFFLINE-071-file-protocol-load.png')
   
   const result: TestResult = {
@@ -143,7 +143,7 @@ test('VAL-OFFLINE-073: No external network requests in default mode', async ({ p
 
 // VAL-OFFLINE-070: Offline status is not misreported (no "offline" banner shown)
 test('VAL-OFFLINE-070: Offline status is not misreported', async ({ page }) => {
-  await bootFileProtocol(page)
+  const { errors } = await bootFileProtocol(page)
   
   // Check for offline-related UI elements (banners, indicators)
   const offlineIndicators = await page.locator('text=/offline|оффлайн|нет соединения/i').count()
@@ -198,7 +198,7 @@ test('VAL-OFFLINE-074: App functions with network stack blocked', async ({ page 
   // Block all network requests
   await page.context().route(/^(?!file:|data:|blob:).*/, route => route.abort())
   
-  await bootFileProtocol(page)
+  const { errors } = await bootFileProtocol(page)
   
   // Try to create a node (basic edit operation)
   const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
@@ -276,7 +276,7 @@ test('VAL-OFFLINE-079: Create and edit works fully offline', async ({ page }) =>
   // Block all network requests
   await page.context().route(/^(?!file:|data:|blob:).*/, route => route.abort())
   
-  await bootFileProtocol(page)
+  const { errors } = await bootFileProtocol(page)
   
   const canvas = page.locator('div.absolute.inset-0.touch-none > svg')
   
@@ -351,7 +351,7 @@ test('VAL-OFFLINE-079: Create and edit works fully offline', async ({ page }) =>
 
 // VAL-OFFLINE-049: Open with clean state does not prompt guard
 test('VAL-OFFLINE-049: Open with clean state does not prompt guard', async ({ page }) => {
-  await bootFileProtocol(page)
+  const { errors } = await bootFileProtocol(page)
   
   // Simulate file open (in real scenario this would be via File System Access API)
   // For this test, we verify the app state is clean on initial load
@@ -570,15 +570,12 @@ test.afterAll(async () => {
     summary: `Tested 20 assertions: 11 passed (VAL-OFFLINE-070, 071, 073, 074, 075, 076, 077, 078, 079, 049), 9 blocked (VAL-OFFLINE-050, 051, 052, 053, 054, 055, 056, 057, 058, 072). File operations require File System Access API or manual UI interaction not available in programmatic testing.`
   }
   
-  const reportPath = resolve(
-    'C:\\Users\\d88u5\\.factory\\missions\\b4963a39-830d-42b1-8a97-f2d6f9ca084c',
-    'validation', 'm3-save-load-excellence', 'user-testing', 'flows', 'offline-persistence.json'
-  )
-  
-  // Ensure report directory exists
-  const reportDir = resolve(reportPath, '..')
-  if (!existsSync(reportDir)) {
-    mkdirSync(reportDir, { recursive: true })
+  // Was hardcoded to one developer's Windows profile (C:\\Users\\d88u5\\...),
+  // which on Linux resolves to a junk directory of backslash-named folders
+  // inside the repo. Write next to the screenshots this suite already produces.
+  const reportPath = resolve(evidenceDir, 'offline-persistence.json')
+  if (!existsSync(evidenceDir)) {
+    mkdirSync(evidenceDir, { recursive: true })
   }
   
   writeFileSync(reportPath, JSON.stringify(report, null, 2))
