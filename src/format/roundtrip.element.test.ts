@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalElement, fromDocEdge, fromDocNode, toDocElement, type BoardElement } from './mboard'
+import { canonicalElement, deserialise, fromDocEdge, fromDocNode, serialise, toDocElement, type BoardElement } from './mboard'
 
 const node: BoardElement = {
   id: 'fractional-sticky',
@@ -96,5 +96,31 @@ describe('canonicalElement', () => {
     }
 
     expect(fromDocNode(tampered)).not.toHaveProperty('bpmnNodeType')
+  })
+
+  it('keeps an unrecognised bpmnNodeType in the file while refusing it in memory', () => {
+    // Two obligations that pull in opposite directions. The Rust engine needs
+    // a value it can deserialise, so the element must not carry an unknown
+    // nodeType. FORMAT.md promises unknown data survives a load/save cycle, so
+    // refusing the value must not delete it from the user's file — the first
+    // attempt at this did exactly that, which is a worse bug than the one it
+    // set out to fix.
+    const doc = toDocElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', bpmnNodeType: 'task' })
+    if (!('node' in doc)) throw new Error('expected node')
+    const file = {
+      format: 'miroboard', schemaVersion: 1,
+      meta: { id: 'd', title: 't', createdAt: 'x', updatedAt: 'x', createdWith: { version: '1', commit: 'c' }, profiles: [] },
+      nodes: [{ ...doc.node, order: 0, profileData: { bpmn: { nodeType: 'eventSubprocess' } } }],
+      edges: [], profileConfig: {}, history: { yjsState: null, snapshots: [], retention: {} }, assets: {},
+    }
+
+    const loaded = deserialise(file as never)
+    expect(loaded.elements[0]).not.toHaveProperty('bpmnNodeType')
+
+    const saved = serialise({
+      elements: loaded.elements, meta: loaded.meta,
+      profileConfig: loaded.profileConfig, history: loaded.history,
+    })
+    expect(saved.nodes[0].profileData).toEqual({ bpmn: { nodeType: 'eventSubprocess' } })
   })
 })

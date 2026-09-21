@@ -107,9 +107,24 @@ export type EducationalExample = {
   model: ImportedBpmnModel
 }
 
+export type ElementType = 'path' | 'sticky' | 'rect' | 'circle' | 'arrow' | 'line' | 'text' | 'emoji'
+
+/**
+ * The renderer's switch has no default case beyond `return null`, so an element
+ * of an unknown type is invisible while still occupying the document and being
+ * written back out on save. Both untrusted entry points must reject it.
+ */
+export const ELEMENT_TYPES: readonly ElementType[] = [
+  'path', 'sticky', 'rect', 'circle', 'arrow', 'line', 'text', 'emoji',
+]
+
+export function isElementType(value: unknown): value is ElementType {
+  return typeof value === 'string' && (ELEMENT_TYPES as readonly string[]).includes(value)
+}
+
 export interface BoardElement {
   id: string
-  type: 'path' | 'sticky' | 'rect' | 'circle' | 'arrow' | 'line' | 'text' | 'emoji'
+  type: ElementType
   x: number
   y: number
   w?: number
