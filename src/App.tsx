@@ -29,6 +29,7 @@ import { CanvasBackground } from './components/CanvasBackground'
 import { ChangedInPreview, ResizeHandles } from './components/element-chrome'
 import { useSimulationSettings } from './board/use-simulation-settings'
 import { elementsInScope, fitTransform, screenToWorld as toWorld, wheelZoomFactor, zoomAround } from './board/viewport'
+import * as commands from './board/commands'
 import { BottomToolbar } from './components/BottomToolbar'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingTour } from './components/OnboardingTour'
@@ -645,16 +646,14 @@ export default function App() {
     return toWorld(transform, rect, sx, sy)
   }, [transform])
   const addElement = useCallback((el: BoardElement, origin: unknown = LOCAL_EDIT) => {
-    if (previewSnapshot) return
-    if (!yElements.current) return
-    ydoc.transact(() => { yElements.current!.push([el]) }, origin)
+    if (previewSnapshot || !yElements.current) return
+    commands.addElement(ydoc, yElements.current, el, origin)
     if ('vibrate' in navigator) navigator.vibrate(10)
   }, [previewSnapshot, ydoc])
 
   const updateElement = useCallback((id: string, updates: Partial<BoardElement>, origin: unknown = LOCAL_EDIT) => {
-    if (previewSnapshot) return
-    if (!yElements.current) return
-    commitElementUpdate(ydoc, yElements.current, id, updates, origin)
+    if (previewSnapshot || !yElements.current) return
+    commands.updateElement(ydoc, yElements.current, id, updates, origin)
   }, [previewSnapshot, ydoc])
   /** Selection helpers. Defined next to the mutators they drive. */
   const selectElement = useCallback((id: string) => setSelectedIds(selectOnly(id)), [])
@@ -665,47 +664,30 @@ export default function App() {
     setAnchorId(current => (current === id ? null : current))
   }, [])
   const deleteElement = useCallback((id: string) => {
-    if (previewSnapshot) return
-    if (!yElements.current) return
-    const array = yElements.current
-    const idx = array.toArray().findIndex(e => e.id === id)
-    if (idx < 0) return
-    ydoc.transact(() => { array.delete(idx, 1) }, LOCAL_EDIT)
+    if (previewSnapshot || !yElements.current) return
+    if (!commands.deleteElement(ydoc, yElements.current, id)) return
     removeIdFromSelection(id)
     setContextMenu(null)
   }, [previewSnapshot, ydoc, removeIdFromSelection])
-  /** Deletes the whole selection in one transaction: one undo step, one checkpoint. */
   const deleteSelected = useCallback(() => {
-    if (previewSnapshot) return
-    if (!yElements.current) return
-    const array = yElements.current
-    const ids = new Set(selectedIds)
-    if (!ids.size) return
-    ydoc.transact(() => {
-      for (let index = array.length - 1; index >= 0; index -= 1) {
-        if (ids.has(array.get(index).id)) array.delete(index, 1)
-      }
-    }, LOCAL_EDIT)
+    if (previewSnapshot || !yElements.current) return
+    if (!commands.deleteElements(ydoc, yElements.current, selectedIds)) return
     clearSelectionState()
     setContextMenu(null)
   }, [previewSnapshot, ydoc, selectedIds, clearSelectionState])
+  /**
+   * One transaction for the whole selection. This looped over updateElement,
+   * which made recolouring eight elements eight undo steps and eight
+   * checkpoints.
+   */
   const updateSelected = useCallback((updates: Partial<BoardElement>, origin: unknown = LOCAL_EDIT) => {
-    for (const id of selectedIds) updateElement(id, updates, origin)
-  }, [selectedIds, updateElement])
+    if (previewSnapshot || !yElements.current) return
+    commands.updateElements(ydoc, yElements.current, selectedIds, updates, origin)
+  }, [selectedIds, previewSnapshot, ydoc])
 
   const bringToFront = useCallback((id: string) => {
-    if (previewSnapshot) return
-    if (!yElements.current) return
-    const idx = yElements.current.toArray().findIndex(e => e.id === id)
-    if (idx >= 0) {
-      if (idx === yElements.current.length - 1) return
-      const el = yElements.current.get(idx)
-      const zIndex = Date.now()
-      ydoc.transact(() => {
-        yElements.current!.delete(idx, 1)
-        yElements.current!.push([{ ...el, zIndex }])
-      }, LOCAL_EDIT)
-    }
+    if (previewSnapshot || !yElements.current) return
+    commands.bringToFront(ydoc, yElements.current, id)
   }, [previewSnapshot, ydoc])
   const sendToBack = useCallback((id: string) => {
     updateElement(id, { zIndex: 0 })
@@ -716,35 +698,18 @@ export default function App() {
    * Returns the new ids so callers can select the copies.
    */
   const duplicateSelection = useCallback((origin?: unknown): string[] => {
-    if (previewSnapshot) return []
-    const picked = elements.filter(element => selectedIds.has(element.id))
-    if (!picked.length) return []
-    const created: string[] = []
-    ydoc.transact(() => {
-      picked.forEach((element, index) => {
-        const offset = 20 * (index + 1)
-        const id = genId()
-        created.push(id)
-        yElements.current?.push([{ ...element, id, x: element.x + offset, y: element.y + offset }])
-      })
-    }, origin ?? LOCAL_EDIT)
-    return created
-  }, [elements, selectedIds, previewSnapshot, ydoc])
+    if (previewSnapshot || !yElements.current) return []
+    return commands.duplicateElements(ydoc, yElements.current, selectedIds, genId, origin ?? LOCAL_EDIT)
+  }, [selectedIds, previewSnapshot, ydoc])
 
   /**
    * Nudges the whole selection in ONE transaction. Arrow keys used to commit
    * per element, which made an 8-element nudge 8 undo steps and 8 checkpoints.
    */
   const moveSelection = useCallback((delta: { x: number; y: number }) => {
-    if (previewSnapshot) return
-    const picked = elements.filter(element => selectedIds.has(element.id))
-    if (!picked.length) return
-    ydoc.transact(() => {
-      for (const element of picked) {
-        commitElementUpdate(ydoc, yElements.current!, element.id, { x: element.x + delta.x, y: element.y + delta.y }, LOCAL_EDIT)
-      }
-    }, LOCAL_EDIT)
-  }, [elements, selectedIds, previewSnapshot, ydoc])
+    if (previewSnapshot || !yElements.current) return
+    commands.moveElements(ydoc, yElements.current, selectedIds, delta)
+  }, [selectedIds, previewSnapshot, ydoc])
 
   /**
    * The in-memory clipboard. A `file://` deployment — the primary way this app
