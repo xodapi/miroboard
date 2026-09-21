@@ -25,6 +25,10 @@ import { inflateRawSync } from 'node:zlib'
 
 const args = process.argv.slice(2)
 const annotationsOnly = args.includes('--annotations')
+// GitHub keeps at most 10 annotations of a level per step, so CI runs this
+// script once per page from a step of its own.
+const pageArg = args.find(arg => arg.startsWith('--page='))
+const annotationPage = Math.max(1, Number(pageArg?.slice('--page='.length) ?? 1))
 const reportDir = args.find(arg => !arg.startsWith('--')) ?? 'playwright-report'
 const indexPath = join(reportDir, 'index.html')
 
@@ -164,26 +168,28 @@ function escapeMessage(value) {
   return value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')
 }
 
-// GitHub keeps at most 10 annotations of a level per step; the rest is reported
-// as a count so nothing silently disappears.
 const ANNOTATION_LIMIT = 10
 
 if (annotationsOnly) {
   if (!failures.length) {
-    console.log(`::notice title=Playwright::all ${passed} end-to-end tests passed`)
+    if (annotationPage === 1) console.log(`::notice title=Playwright::all ${passed} end-to-end tests passed`)
     process.exit(0)
   }
-  for (const failure of failures.slice(0, ANNOTATION_LIMIT)) {
+  const from = (annotationPage - 1) * ANNOTATION_LIMIT
+  if (from >= failures.length) process.exit(0) // this page is empty
+  for (const failure of failures.slice(from, from + ANNOTATION_LIMIT)) {
     const title = escapeProperty(`e2e ${failure.label}`.slice(0, 140))
     const message = escapeMessage(failure.error || `test failed (${failure.outcome})`)
     console.log(`::error title=${title}::${message.slice(0, 400)}`)
   }
-  const hidden = failures.length - ANNOTATION_LIMIT
-  console.log(
-    hidden > 0
-      ? `::notice title=Playwright::${failures.length} e2e tests failed, ${hidden} more not annotated`
-      : `::notice title=Playwright::${failures.length} of ${stats.total ?? '?'} e2e tests failed`,
-  )
+  if (annotationPage === 1) {
+    const hidden = Math.max(0, failures.length - ANNOTATION_LIMIT)
+    console.log(
+      hidden > 0
+        ? `::notice title=Playwright::${failures.length} e2e tests failed, ${hidden} more annotated by the next step`
+        : `::notice title=Playwright::${failures.length} of ${stats.total ?? '?'} e2e tests failed`,
+    )
+  }
   process.exit(0)
 }
 

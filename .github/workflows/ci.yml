@@ -72,6 +72,12 @@ jobs:
           # without access to the log/artifact blob storage.
           node scripts/summarize-playwright-report.mjs playwright-report --annotations
 
+      # GitHub keeps 10 annotations per level per step, so a red suite with more
+      # than 10 failures needs a second step to stay fully visible.
+      - name: Annotate remaining end-to-end failures
+        if: always()
+        run: node scripts/summarize-playwright-report.mjs playwright-report --annotations --page=2
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
@@ -80,3 +86,53 @@ jobs:
           path: playwright-report/
           retention-days: 7
           if-no-files-found: ignore
+
+  # TEMPORARY diagnostic job — remove once the e2e suite is green.
+  #
+  # The e2e step is already red on `main` at this PR's base commit (run
+  # 32238922648, 2026-08-19), so a red check on the PR cannot say whether a
+  # given failure is inherited or introduced. This job runs the suspect specs
+  # against the BASE commit's committed `dist/` while keeping this branch's test
+  # files, and reports the result as warnings (not errors) so it never looks
+  # like a failure of the PR itself.
+  e2e-baseline:
+    name: E2E baseline at the PR base commit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Replace the app with the base commit's build
+        run: |
+          git checkout "${{ github.event.pull_request.base.sha }}" -- dist src
+          echo "base sha: $(git rev-parse '${{ github.event.pull_request.base.sha }}')"
+
+      - name: Run the suspect specs against base code
+        continue-on-error: true
+        run: npx playwright test tests/cross-offline-simulation-integration.spec.ts tests/cross-demo-sentence-gate.spec.ts tests/offline-persistence-m3.spec.ts
+
+      - name: Report baseline results as warnings
+        if: always()
+        run: |
+          {
+            echo '### Baseline: same specs, base commit build'
+            echo '```'
+            node scripts/summarize-playwright-report.mjs playwright-report
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          node scripts/summarize-playwright-report.mjs playwright-report --annotations --page=1 \
+            | sed -e 's/^::error title=e2e /::warning title=BASELINE e2e /' \
+                  -e 's/^::notice title=Playwright/::warning title=BASELINE Playwright/'
