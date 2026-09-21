@@ -27,6 +27,7 @@ import { BoardHeader } from './components/BoardHeader'
 import { ZoomControls, ElementCount } from './components/ZoomControls'
 import { CanvasBackground } from './components/CanvasBackground'
 import { useSimulationSettings } from './board/use-simulation-settings'
+import { elementsInScope, fitTransform, screenToWorld as toWorld, wheelZoomFactor, zoomAround } from './board/viewport'
 import { BottomToolbar } from './components/BottomToolbar'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingTour } from './components/OnboardingTour'
@@ -640,10 +641,7 @@ export default function App() {
   const screenToWorld = useCallback((sx: number, sy: number): Point => {
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) return { x: 0, y: 0 }
-    return {
-      x: (sx - rect.left - transform.x) / transform.scale,
-      y: (sy - rect.top - transform.y) / transform.scale
-    }
+    return toWorld(transform, rect, sx, sy)
   }, [transform])
   const addElement = useCallback((el: BoardElement, origin: unknown = LOCAL_EDIT) => {
     if (previewSnapshot) return
@@ -1444,12 +1442,9 @@ export default function App() {
       const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
       const cx = (t1.clientX + t2.clientX) / 2, cy = (t1.clientY + t2.clientY) / 2
       if (lastPinchDist) {
-        const s = dist / lastPinchDist
-        setTransform(t => {
-          const ns = clamp_scale(t.scale * s)
-          const wc = screenToWorld(cx, cy)
-          return { scale: ns, x: cx - wc.x * ns, y: cy - wc.y * ns }
-        })
+        const factor = dist / lastPinchDist
+        const world = screenToWorld(cx, cy)
+        setTransform(current => zoomAround(current, factor, { x: cx, y: cy }, world))
       }
       setLastPinchDist(dist)
     }
@@ -1457,37 +1452,15 @@ export default function App() {
   // Wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault()
-    const delta = e.ctrlKey || e.metaKey ? -e.deltaY : -e.deltaY
-    const scale = delta > 0 ? 1.08 : 0.92
-    const point = screenToWorld(e.clientX, e.clientY)
-    setTransform(t => {
-      const ns = clamp_scale(t.scale * scale)
-      return { scale: ns, x: e.clientX - point.x * ns, y: e.clientY - point.y * ns }
-    })
+    const world = screenToWorld(e.clientX, e.clientY)
+    const factor = wheelZoomFactor(e.deltaY)
+    setTransform(current => zoomAround(current, factor, { x: e.clientX, y: e.clientY }, world))
   }, [screenToWorld])
   const fitToContent = useCallback(() => {
-    const scoped = workspaceMode === 'board'
-      ? elements.filter(element => !element.bpmnNodeType && !element.bpmnFlow)
-      : elements.filter(element => element.bpmnNodeType || element.bpmnFlow)
-    const visible = scoped.length ? scoped : elements
-    if (!visible.length) {
-      setTransform({ x: 0, y: 0, scale: 1 })
-      return
-    }
-    const minX = Math.min(...visible.map(element => element.x))
-    const minY = Math.min(...visible.map(element => element.y))
-    const maxX = Math.max(...visible.map(element => element.x + (element.w || 48)))
-    const maxY = Math.max(...visible.map(element => element.y + (element.h || 48)))
-    const padding = 64
-    const scale = clamp_scale(Math.min(
-      (window.innerWidth - padding * 2) / Math.max(maxX - minX, 1),
-      (window.innerHeight - 170) / Math.max(maxY - minY, 1),
-    ))
-    setTransform({
-      scale,
-      x: (window.innerWidth - (maxX - minX) * scale) / 2 - minX * scale,
-      y: (window.innerHeight - (maxY - minY) * scale) / 2 - minY * scale,
-    })
+    setTransform(fitTransform(elementsInScope(elements, workspaceMode), {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }))
   }, [elements, workspaceMode])
   useEffect(() => () => {
     bpmnRunTimersRef.current.forEach(window.clearTimeout)
