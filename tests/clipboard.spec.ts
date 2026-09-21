@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 
 /**
  * Copy / cut / paste of a selection (Stage 0.3 of docs/COLLABORATION_ANALYSIS.md).
@@ -19,15 +19,27 @@ async function boot(page: Page) {
   await expect(page.getByTestId('canvas')).toBeVisible({ timeout: 5_000 })
   const skipTour = page.getByRole('button', { name: 'Пропустить' })
   if (await skipTour.isVisible().catch(() => false)) await skipTour.click()
-  return { errors, canvas: page.locator('div.absolute.inset-0.touch-none > svg') }
+  return { errors }
 }
 
-/** Draws a rectangle by dragging, then returns to the Select tool. */
-async function drawRect(page: Page, canvas: Locator, from: { x: number; y: number }, to: { x: number; y: number }) {
+/** Board elements only — the minimap and the history preview render their own copies. */
+function elements(page: Page) {
+  return page.locator('svg g[data-id]')
+}
+
+/**
+ * Draws a rectangle by dragging with trusted mouse input, then returns to the
+ * Select tool. Synthetic PointerEvents are not equivalent: gestures read React
+ * state written by the previous event, which is not guaranteed to be committed
+ * by the time the next synthetic event is dispatched.
+ */
+async function drawRect(page: Page, from: { x: number; y: number }, to: { x: number; y: number }) {
   await page.keyboard.press('r')
-  await canvas.dispatchEvent('pointerdown', { clientX: from.x, clientY: from.y, button: 0, pointerId: 1 })
-  await canvas.dispatchEvent('pointermove', { clientX: to.x, clientY: to.y, pointerId: 1 })
-  await canvas.dispatchEvent('pointerup', { clientX: to.x, clientY: to.y, pointerId: 1 })
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2)
+  await page.mouse.move(to.x, to.y)
+  await page.mouse.up()
   await page.keyboard.press('v')
 }
 
@@ -38,7 +50,7 @@ async function selectAll(page: Page) {
 }
 
 function idsOf(page: Page) {
-  return page.locator('g[data-id]').evaluateAll(nodes => nodes.map(node => (node as HTMLElement).dataset.id ?? ''))
+  return elements(page).evaluateAll(nodes => nodes.map(node => (node as HTMLElement).dataset.id ?? ''))
 }
 
 function translateOf(value: string | null): { x: number; y: number } {
@@ -48,7 +60,7 @@ function translateOf(value: string | null): { x: number; y: number } {
 }
 
 function transformsOf(page: Page) {
-  return page.locator('g[data-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
+  return elements(page).evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')))
 }
 
 test.beforeEach(async ({ page }) => {
@@ -56,9 +68,9 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('Ctrl+C then Ctrl+V pastes the selection under new ids, offset from the source', async ({ page }) => {
-  const { errors, canvas } = await boot(page)
-  await drawRect(page, canvas, { x: 120, y: 140 }, { x: 240, y: 220 })
-  await drawRect(page, canvas, { x: 420, y: 320 }, { x: 540, y: 400 })
+  const { errors } = await boot(page)
+  await drawRect(page, { x: 120, y: 140 }, { x: 240, y: 220 })
+  await drawRect(page, { x: 420, y: 320 }, { x: 540, y: 400 })
   const before = await idsOf(page)
   const beforeTransforms = await transformsOf(page)
   expect(before).toHaveLength(2)
@@ -67,7 +79,7 @@ test('Ctrl+C then Ctrl+V pastes the selection under new ids, offset from the sou
   await page.keyboard.press('Control+c')
   await page.keyboard.press('Control+v')
 
-  await expect(page.locator('g[data-id]')).toHaveCount(4)
+  await expect(elements(page)).toHaveCount(4)
   const after = await idsOf(page)
   // The sources keep their identity; the copies are new and distinct.
   expect(after.slice(0, 2)).toEqual(before)
@@ -89,23 +101,23 @@ test('Ctrl+C then Ctrl+V pastes the selection under new ids, offset from the sou
 })
 
 test('Ctrl+X empties the board and the clipboard still holds the content', async ({ page }) => {
-  const { errors, canvas } = await boot(page)
-  await drawRect(page, canvas, { x: 120, y: 140 }, { x: 240, y: 220 })
-  await drawRect(page, canvas, { x: 420, y: 320 }, { x: 540, y: 400 })
+  const { errors } = await boot(page)
+  await drawRect(page, { x: 120, y: 140 }, { x: 240, y: 220 })
+  await drawRect(page, { x: 420, y: 320 }, { x: 540, y: 400 })
 
   await selectAll(page)
   await page.keyboard.press('Control+x')
-  await expect(page.locator('g[data-id]')).toHaveCount(0)
+  await expect(elements(page)).toHaveCount(0)
 
   await page.keyboard.press('Control+v')
-  await expect(page.locator('g[data-id]')).toHaveCount(2)
+  await expect(elements(page)).toHaveCount(2)
   expect(errors).toEqual([])
 })
 
 test('a paste is one undo step', async ({ page }) => {
-  const { errors, canvas } = await boot(page)
-  await drawRect(page, canvas, { x: 120, y: 140 }, { x: 240, y: 220 })
-  await drawRect(page, canvas, { x: 420, y: 320 }, { x: 540, y: 400 })
+  const { errors } = await boot(page)
+  await drawRect(page, { x: 120, y: 140 }, { x: 240, y: 220 })
+  await drawRect(page, { x: 420, y: 320 }, { x: 540, y: 400 })
 
   // The UndoManager merges every write that lands inside its capture window
   // (500ms) into ONE stack item, and the window is measured backwards from the
@@ -117,22 +129,22 @@ test('a paste is one undo step', async ({ page }) => {
   await selectAll(page)
   await page.keyboard.press('Control+c')
   await page.keyboard.press('Control+v')
-  await expect(page.locator('g[data-id]')).toHaveCount(4)
+  await expect(elements(page)).toHaveCount(4)
 
   await page.waitForTimeout(700)
   await page.keyboard.press('Control+z')
-  await expect(page.locator('g[data-id]')).toHaveCount(2)
+  await expect(elements(page)).toHaveCount(2)
   expect(errors).toEqual([])
 })
 
 test('pasting with nothing of ours on the clipboard changes nothing and says so', async ({ page }) => {
-  const { errors, canvas } = await boot(page)
-  await drawRect(page, canvas, { x: 120, y: 140 }, { x: 240, y: 220 })
+  const { errors } = await boot(page)
+  await drawRect(page, { x: 120, y: 140 }, { x: 240, y: 220 })
   const before = await transformsOf(page)
 
   await page.keyboard.press('Control+v')
 
-  await expect(page.locator('g[data-id]')).toHaveCount(1)
+  await expect(elements(page)).toHaveCount(1)
   expect(await transformsOf(page)).toEqual(before)
   // The toast is a [data-ui] element with aria-live, not role="status" — that
   // role already belongs to the save indicator in the toolbar.
@@ -141,15 +153,15 @@ test('pasting with nothing of ours on the clipboard changes nothing and says so'
 })
 
 test('Ctrl+C with no selection leaves the document alone', async ({ page }) => {
-  const { errors, canvas } = await boot(page)
-  await drawRect(page, canvas, { x: 120, y: 140 }, { x: 240, y: 220 })
+  const { errors } = await boot(page)
+  await drawRect(page, { x: 120, y: 140 }, { x: 240, y: 220 })
   await page.keyboard.press('Escape')
   const before = await transformsOf(page)
 
   await page.keyboard.press('Control+c')
   await page.keyboard.press('Control+v')
 
-  await expect(page.locator('g[data-id]')).toHaveCount(1)
+  await expect(elements(page)).toHaveCount(1)
   expect(await transformsOf(page)).toEqual(before)
   expect(errors).toEqual([])
 })
