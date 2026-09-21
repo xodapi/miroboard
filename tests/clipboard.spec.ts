@@ -107,13 +107,18 @@ test('a paste is one undo step', async ({ page }) => {
   await drawRect(page, canvas, { x: 120, y: 140 }, { x: 240, y: 220 })
   await drawRect(page, canvas, { x: 420, y: 320 }, { x: 540, y: 400 })
 
+  // The UndoManager merges every write that lands inside its capture window
+  // (500ms) into ONE stack item, and the window is measured backwards from the
+  // last write. Waiting only before the undo therefore merges the two rectangle
+  // creations with the paste, and undo wipes the board instead of the paste.
+  // Let the creation step close first, so the paste is a step of its own.
+  await page.waitForTimeout(700)
+
   await selectAll(page)
   await page.keyboard.press('Control+c')
   await page.keyboard.press('Control+v')
   await expect(page.locator('g[data-id]')).toHaveCount(4)
 
-  // The UndoManager merges writes within its capture window, so wait it out
-  // before undoing — otherwise the undo can be swallowed by the still-open group.
   await page.waitForTimeout(700)
   await page.keyboard.press('Control+z')
   await expect(page.locator('g[data-id]')).toHaveCount(2)
