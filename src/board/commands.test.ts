@@ -10,7 +10,7 @@ import * as Y from 'yjs'
 import { LOCAL_EDIT, LOCAL_GESTURE } from '../collab/origins'
 import {
   addElement, bringToFront, deleteElement, deleteElements, duplicateElements,
-  moveElements, replaceAll, updateElement, updateElements, type Elements,
+  moveElements, updateElement, updateElements, type Elements,
 } from './commands'
 import type { BoardElement } from './types'
 
@@ -243,32 +243,5 @@ describe('bringToFront', () => {
     bringToFront(doc, elements, 'a')
     expect(elements.toArray().at(-1)!.zIndex).toBe(Date.parse('2026-09-21T00:00:00Z'))
     vi.useRealTimers()
-  })
-})
-
-describe('replaceAll', () => {
-  it('swaps the contents in one transaction', () => {
-    const { doc, elements } = board([element('a'), element('b')])
-    const updates = countUpdates(doc)
-
-    replaceAll(doc, elements, [element('c')], LOCAL_EDIT)
-    expect(updates.value).toBe(1)
-    expect(ids(elements)).toEqual(['c'])
-  })
-
-  it('clears the board when handed nothing', () => {
-    const { doc, elements } = board([element('a')])
-    replaceAll(doc, elements, [], LOCAL_EDIT)
-    expect(elements.length).toBe(0)
-  })
-
-  it('requires an explicit origin, since loading must not look like an edit', () => {
-    // A document load labelled LOCAL_EDIT reports the freshly opened file as
-    // having unsaved changes — this is exactly the regression fixed in 0.4.
-    const { doc, elements } = board()
-    const seen: unknown[] = []
-    doc.on('afterTransaction', tr => seen.push(tr.origin))
-    replaceAll(doc, elements, [element('a')], 'load')
-    expect(seen).toEqual(['load'])
   })
 })

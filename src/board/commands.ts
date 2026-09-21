@@ -176,11 +176,3 @@ export function bringToFront(doc: Y.Doc, elements: Elements, id: string, origin:
   }, origin)
   return true
 }
-
-/** Replaces the board contents wholesale — loading a document or a template. */
-export function replaceAll(doc: Y.Doc, elements: Elements, next: BoardElement[], origin: unknown): void {
-  doc.transact(() => {
-    if (elements.length) elements.delete(0, elements.length)
-    if (next.length) elements.push(next)
-  }, origin)
-}
