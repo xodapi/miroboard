@@ -23,6 +23,7 @@ import { ProjectHistoryModal } from './components/ProjectHistoryModal'
 import { BpmnTaskProperties } from './components/BpmnTaskProperties'
 import { BpmnFlowProperties } from './components/BpmnFlowProperties'
 import { ColorPicker } from './components/ColorPicker'
+import { BottomToolbar } from './components/BottomToolbar'
 import { MoreMenu } from './components/MoreMenu'
 import { ContextMenu } from './components/ContextMenu'
 import { createTheme } from './board/theme'
@@ -45,7 +46,7 @@ import './help-panel.css'
 import { bpmnEdgeAnchor, simplifyPath, smoothPathD, snapVal } from './board/geometry'
 import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeInfo } from './board/gesture'
 import { genId } from './board/id'
-import { COLORS, EMOJIS, STICKY_COLORS } from './board/palette'
+import { STICKY_COLORS } from './board/palette'
 import type {
   ArrivalClassDraft, BoardElement, BpmnNodeType, BpmnSimulationResult, ContextMenuAction, EducationalExample,
   ImportedBpmnModel, PendingOpen, Point, RolePolicyDraft, Tool, WorkspaceMode,
@@ -1142,11 +1143,6 @@ export default function App() {
       }
       return
     }
-    console.log('[BPMN diagnostic] canvas pointerdown before placement', JSON.stringify({
-      tool,
-      point,
-      paletteVisible: showBpmnPalette,
-    }))
     if (e.pointerType === 'touch' && e.isPrimary === false) return
 
     // Two fingers = pan
@@ -1342,7 +1338,7 @@ export default function App() {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, userProfile.id, selectedIds, selectedElementId, selectElement, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, showBpmnPalette, previewSnapshot])
+  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, userProfile.id, selectedIds, selectedElementId, selectElement, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, previewSnapshot])
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
     const isLaser = tool === 'laser'
@@ -1847,7 +1843,6 @@ export default function App() {
   // Extracted panels take the whole theme rather than five separate props.
   const theme = createTheme(darkMode)
   const bgMain = '#F7F8FC'
-  const bgBar = 'bg-white/95'
   const borderC = 'border-slate-200'
   const textC = 'text-slate-900'
   const textSec = 'text-slate-500'
@@ -2218,128 +2213,27 @@ export default function App() {
       {/* ===== MINIMAP ===== */}
       {showMiniMap && <MiniMap elements={renderedElements} transform={transform} darkMode={darkMode} setTransform={setTransform} />}
       {/* ===== BOTTOM TOOLBAR ===== */}
-      <div className="absolute bottom-0 left-0 right-0 z-40 pb-[calc(env(safe-area-inset-bottom)+8px)]" data-ui>
-        <div className="mx-auto w-fit max-w-[calc(100%-16px)]">
-          {/* Emoji picker */}
-          {showEmoji && (
-            <div className={`mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
-              <div className="flex flex-wrap gap-1 max-w-[280px]">
-                {EMOJIS.map(em => (
-                  <button key={em} onClick={() => { setSelectedEmoji(em); chooseTool('emoji'); setShowEmoji(false) }}
-                    className={`size-10 rounded-xl grid place-items-center text-[22px] transition active:scale-90 ${selectedEmoji === em ? (dk ? 'bg-violet-600' : 'bg-violet-100') : hoverBg}`}>
-                    {em}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {showBpmnPalette && (
-            <div className={`relative z-10 mb-2 mx-auto w-fit p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
-              <div className="flex gap-1.5" onClickCapture={(event) => {
-                const target = event.target as HTMLElement
-                console.log('[BPMN diagnostic] palette click capture', JSON.stringify({
-                  targetTitle: target.closest('button')?.title ?? null,
-                  paletteVisible: showBpmnPalette,
-                  tool,
-                }))
-              }}>
-                {([
-                  { id: 'bpmnStart', label: 'Старт', icon: '○' },
-                  { id: 'bpmnTask', label: 'Задача', icon: '▭' },
-                  { id: 'bpmnGateway', label: 'Шлюз XOR', icon: '◇' },
-                  { id: 'bpmnParallel', label: 'Шлюз AND', icon: '+' },
-                  { id: 'bpmnEnd', label: 'Конец', icon: '◉' },
-                  { id: 'bpmnSequence', label: 'Поток', icon: '→' },
-                ] as { id: Tool; label: string; icon: string }[]).map(item => (
-                  <button key={item.id} onClick={(event) => {
-                    const button = event.currentTarget
-                    const styles = window.getComputedStyle(button)
-                    const bounds = button.getBoundingClientRect()
-                    console.log('[BPMN diagnostic] palette button click start', JSON.stringify({
-                      id: item.id,
-                      label: item.label,
-                      currentTool: tool,
-                      paletteVisible: showBpmnPalette,
-                      visible: styles.display !== 'none' && styles.visibility !== 'hidden' && bounds.width > 0 && bounds.height > 0,
-                      clickable: !button.disabled && styles.pointerEvents !== 'none',
-                    }))
-                    chooseTool(item.id)
-                    console.log('[BPMN diagnostic] palette button after chooseTool', JSON.stringify({
-                      id: item.id,
-                      currentTool: tool,
-                      requestedTool: item.id,
-                      note: 'React state updates commit after this handler returns',
-                    }))
-                  }}
-                    className={`min-w-14 h-12 px-2 rounded-xl grid place-items-center text-center transition active:scale-90 ${tool === item.id ? 'bg-violet-600 text-white' : hoverBg}`}
-                    title={item.label}>
-                    <span className="text-xl leading-none">{item.icon}</span>
-                    <span className="text-[10px] leading-none mt-0.5">{item.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {/* Color picker */}
-          {showColorPicker && (
-            <div className={`mb-2 mx-auto w-fit flex items-center gap-1.5 p-2 rounded-2xl ${dk ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${borderC}`}>
-              {COLORS.map(c => (
-                <button key={c} onClick={() => { setColor(c); setShowColorPicker(false) }}
-                  className="size-8 rounded-full transition-all active:scale-90"
-                  style={{ backgroundColor: c, border: c === '#FFFFFF' ? `1px solid ${dk ? '#555' : '#e5e5e5'}` : 'none', boxShadow: color === c ? '0 0 0 2px white, 0 0 0 4px #4D96FF' : 'none' }} />
-              ))}
-              <div className={`w-px h-6 ${dk ? 'bg-slate-600' : 'bg-black/10'} mx-1`} />
-              {[2, 4, 7, 12].map(w => (
-                <button key={w} onClick={() => setStrokeWidth(w)}
-                  className={`size-8 rounded-full grid place-items-center transition ${strokeWidth === w ? (dk ? 'bg-slate-600' : 'bg-black/10') : hoverBg}`}>
-                  <div className="rounded-full bg-current" style={{ width: w * 2, height: w * 2, color: dk ? '#fff' : '#000' }} />
-                </button>
-              ))}
-            </div>
-          )}
-          {/* Main toolbar */}
-          <div className={`flex items-center gap-0.5 p-1.5 rounded-[22px] ${bgBar} backdrop-blur-2xl shadow-2xl shadow-black/20 border ${borderC}`}>
-            {([
-              { id: 'select', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" /></svg>, label: 'Выбор' },
-              { id: 'pan', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 11V8a1 1 0 0 0-1-1h-3M6 13v3a1 1 0 0 0 1 1h3M13 18h3a1 1 0 0 0 1-1v-3M11 6H8a1 1 0 0 0-1 1v3" /></svg>, label: 'Рука' },
-              { id: 'pen', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /><path d="M2 2l7.586 7.586" /><path d="M11 11l4 4" /></svg>, label: 'Перо' },
-              { id: 'marker', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.34 4.93l-3.59 3.59-1.41-1.42-1.42 1.42 1.42 1.41-3.6 3.59c-.39.39-.39 1.02 0 1.41L10.34 19c.39.39 1.02.39 1.41 0l3.6-3.59 1.41 1.42 1.42-1.42-1.42-1.41 3.59-3.59c.39-.39.39-1.02 0-1.41L15.75 4.93c-.39-.39-1.02-.39-1.41 0z" /></svg>, label: 'Маркер' },
-            ] as { id: Tool; icon: React.ReactNode; label: string }[]).map(t => (
-              <button key={t.id} onClick={() => { chooseTool(t.id); setShowEmoji(false) }} disabled={isPreview && t.id !== 'pan'}
-                className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
-                title={t.label}>{t.icon}</button>
-            ))}
-            <div className={`w-px h-7 ${dk ? 'bg-slate-600' : 'bg-black/10'} mx-0.5`} />
-            {([
-              { id: 'sticky', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" fill="#FFD93D" stroke="#000" strokeOpacity="0.1" /><path d="M7 8h10M7 12h7M7 16h4" stroke="#000" strokeOpacity="0.5" strokeWidth="1.5" strokeLinecap="round" /></svg> },
-              { id: 'text', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7V4h16v3M9 20h6M12 4v16" /></svg> },
-              { id: 'emoji', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" /></svg> },
-              { id: 'rect', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /></svg> },
-              { id: 'circle', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /></svg> },
-              { id: 'arrow', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M13 5l7 7-7 7" /></svg> },
-            ] as { id: Tool; icon: React.ReactNode }[]).map(t => (
-              <button key={t.id} onClick={() => {
-                if (t.id === 'emoji') { setShowEmoji(!showEmoji); chooseTool('emoji') }
-                else { chooseTool(t.id); setShowEmoji(false) }
-              }} disabled={isPreview}
-                className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${tool === t.id ? 'bg-black text-white shadow-md' : `${textSec} ${hoverBg}`}`}
-              >{t.icon}</button>
-            ))}
-            <div className={`w-px h-7 ${dk ? 'bg-slate-600' : 'bg-black/10'} mx-0.5`} />
-            {/* Color */}
-            <button onClick={() => setShowColorPicker(!showColorPicker)}
-              className={`size-11 grid place-items-center rounded-[14px] ${hoverBg} transition`}>
-              <div className="size-6 rounded-full ring-2 ring-black/10 shadow-inner" style={{ backgroundColor: color, border: color === '#FFFFFF' ? `1px solid ${dk ? '#555' : '#ddd'}` : 'none' }} />
-            </button>
-            {/* More */}
-            <button onClick={() => { setShowMore(value => !value); setShowBpmnPalette(false) }} disabled={isPreview}
-              aria-label="Дополнительные инструменты"
-              className={`size-11 grid place-items-center rounded-[14px] transition-all active:scale-90 ${showMore ? 'bg-black text-white' : `${textSec} ${hoverBg}`}`}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></svg>
-            </button>
-          </div>
-        </div>
-      </div>
+      <BottomToolbar
+        theme={theme}
+        tool={tool}
+        color={color}
+        strokeWidth={strokeWidth}
+        selectedEmoji={selectedEmoji}
+        isPreview={isPreview}
+        showEmoji={showEmoji}
+        showBpmnPalette={showBpmnPalette}
+        showColorPicker={showColorPicker}
+        showMore={showMore}
+        onChooseTool={chooseTool}
+        onSetColor={setColor}
+        onSetStrokeWidth={setStrokeWidth}
+        onSetSelectedEmoji={setSelectedEmoji}
+        onToggleEmoji={() => setShowEmoji(!showEmoji)}
+        onToggleColorPicker={() => setShowColorPicker(!showColorPicker)}
+        onToggleMore={() => { setShowMore(value => !value); setShowBpmnPalette(false) }}
+        onCloseEmoji={() => setShowEmoji(false)}
+        onCloseColorPicker={() => setShowColorPicker(false)}
+      />
       {/* ===== MORE MENU ===== */}
       {showMore && (
         <MoreMenu

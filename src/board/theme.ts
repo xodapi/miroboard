@@ -20,6 +20,10 @@ export interface Theme {
   surface: string
   /** A slightly recessed surface used for cards inside a panel. */
   subtleSurface: string
+  /** The translucent bar surface, blurred over the canvas. */
+  barSurface: string
+  /** Hairline divider between groups of controls. */
+  divider: string
 }
 
 export function createTheme(dark: boolean): Theme {
@@ -30,5 +34,7 @@ export function createTheme(dark: boolean): Theme {
     hoverBg: 'hover:bg-slate-100',
     surface: dark ? 'bg-slate-800' : 'bg-white',
     subtleSurface: dark ? 'bg-slate-700' : 'bg-slate-50',
+    barSurface: 'bg-white/95',
+    divider: dark ? 'bg-slate-600' : 'bg-black/10',
   }
 }
