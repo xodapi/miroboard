@@ -508,4 +508,46 @@ describe('App smoke', () => {
       expect(event.defaultPrevented).toBe(false)
     })
   })
+
+  /**
+   * A history preview renders `previewElements`, a read-only snapshot, while
+   * `elements` still holds the live document. Every mutator refuses to run
+   * during a preview, but selection is not a mutation — and Ctrl+A read from
+   * the live list, so it selected objects that were not on screen. Ctrl+C then
+   * copied them.
+   */
+  describe('history preview', () => {
+    /** Marks a checkpoint, opens the timeline and previews the first snapshot. */
+    function previewFirstSnapshot() {
+      vi.spyOn(window, 'prompt').mockReturnValue('точка')
+      const more = [...container.querySelectorAll('button')]
+        .find(b => b.getAttribute('aria-label') === 'Дополнительные инструменты')!
+      act(() => { more.click() })
+      const mark = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('Отметить состояние'))!
+      act(() => { mark.click() })
+      const openHistory = [...container.querySelectorAll('button')]
+        .find(b => b.textContent?.trim() === 'Контрольные точки')!
+      act(() => { openHistory.click() })
+      const panel = container.querySelector('[aria-label="История доски"]')!
+      const snapshot = panel.querySelector('li button') as HTMLElement
+      act(() => { snapshot.click() })
+      return snapshot
+    }
+
+    it('does not let Ctrl+A select the live document while previewing history', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      previewFirstSnapshot()
+
+      key('a', { ctrlKey: true })
+
+      // The selection badge is deliberately hidden during a preview, so it
+      // cannot show whether a selection exists. Ctrl+C can: it only takes over
+      // the shortcut when it has something to copy, so a prevented default
+      // means the live document got selected behind the snapshot.
+      const copy = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true })
+      act(() => { window.dispatchEvent(copy) })
+      expect(copy.defaultPrevented).toBe(false)
+    })
+  })
 })

@@ -1473,8 +1473,12 @@ export default function App() {
         return
       }
       // Ctrl+A selects the whole board; arrow keys nudge the selection.
+      // `elements` is the live document, while a history preview renders
+      // `previewElements`. Selecting here during a preview would hand back
+      // objects that are not on screen — and Ctrl+C would then copy them.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
+        if (previewSnapshot) return
         selectElements(elements.map(element => element.id))
         return
       }
