@@ -241,6 +241,11 @@ describe('App smoke', () => {
       return container.querySelector('[role="status"]')?.textContent ?? null
     }
 
+    /** File operations run through a queue, so a macrotask has to pass before their effects are visible. */
+    async function flush() {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    }
+
     /**
      * The four cross-* e2e specs that went red all follow the same shape: open a
      * saved document, then save it again and expect the toolbar to read
@@ -263,6 +268,47 @@ describe('App smoke', () => {
       return () => written
     }
 
+    /**
+     * The cross-* specs save a live document and then reopen the saved file,
+     * which carries `history.yjsState`. Reopening such a file takes the
+     * `Y.applyUpdate(..., RECOVERY_ORIGIN)` branch nested inside the LOAD
+     * transaction of applyOpenOutcome — the path the four failing e2e specs
+     * exercise and the one a fixture without yjsState never reaches.
+     */
+    it('reopens a saved document with a clean dirty state', async () => {
+      const fixture = readFileSync(resolve('examples', 'freeform-board.mboard'), 'utf8')
+      let written = stubFileSession('freeform-board.mboard', fixture)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      expect(container.querySelectorAll('[data-id]').length).toBeGreaterThan(0)
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      const saved = written()
+      expect(saved.length).toBeGreaterThan(0)
+      expect(JSON.parse(saved).history.yjsState).toBeTruthy()
+      expect(status()).toBe('Сохранено')
+
+      // Reopen exactly what was written, the way the e2e specs do. Opening is
+      // labelled LOAD, which must not report unsaved changes.
+      //
+      // Only the dirty state is asserted here: rendering a document restored
+      // from `history.yjsState` yields no elements under jsdom, and it does so
+      // identically on the base commit, so that part is a limitation of this
+      // harness rather than behaviour. The browser path is covered by the
+      // cross-* e2e suites.
+      written = stubFileSession('freeform-board.mboard', saved)
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      await flush()
+      expect(status()).toBe('Сохранено')
+    })
+
     it('keeps a reopened document clean after saving it again', async () => {
       const fixture = readFileSync(resolve('examples', 'freeform-board.mboard'), 'utf8')
       const written = stubFileSession('freeform-board.mboard', fixture)
@@ -270,12 +316,14 @@ describe('App smoke', () => {
       await act(async () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true, cancelable: true }))
       })
+      await flush()
       expect(container.querySelectorAll('[data-id]').length).toBeGreaterThan(0)
       expect(status()).toBe('Сохранено')
 
       await act(async () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
       })
+      await flush()
       expect(written().length).toBeGreaterThan(0)
       expect(status()).toBe('Сохранено')
     })
@@ -292,6 +340,7 @@ describe('App smoke', () => {
       await act(async () => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
       })
+      await flush()
       expect(status()).toBe('Сохранено')
     })
   })

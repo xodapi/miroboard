@@ -7,6 +7,7 @@ import {
   HISTORY_RESTORE_ORIGIN,
   RECOVERY_ORIGIN,
 } from './dirty'
+import { LOAD, LOCAL_EDIT, NON_EDIT_ORIGINS } from '../collab/origins'
 
 describe('createDirtyTracker', () => {
   it('marks the document dirty on its first ordinary Yjs update', () => {
@@ -73,6 +74,51 @@ describe('createDirtyTracker', () => {
 
     expect(tracker.isDirty()).toBe(false)
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  // Regression: opening a document is labelled LOAD, and the tracker's default
+  // ignore set predates src/collab/origins.ts, so it did not know about LOAD.
+  // Four cross-* e2e suites then saw a freshly opened board report
+  // "Не сохранено". App passes NON_EDIT_ORIGINS to keep the two in step.
+  it('does not dirty the document for any origin in NON_EDIT_ORIGINS', () => {
+    const doc = new Y.Doc()
+    const onChange = vi.fn()
+    const tracker = createDirtyTracker(doc, onChange, NON_EDIT_ORIGINS)
+    const elements = doc.getArray('elements')
+
+    for (const origin of NON_EDIT_ORIGINS) {
+      doc.transact(() => elements.push([`loaded via ${String(origin)}`]), origin)
+    }
+
+    expect(tracker.isDirty()).toBe(false)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('still dirties the document for a local edit when an ignore set is supplied', () => {
+    const doc = new Y.Doc()
+    const onChange = vi.fn()
+    const tracker = createDirtyTracker(doc, onChange, NON_EDIT_ORIGINS)
+
+    doc.transact(() => doc.getArray('elements').push(['edit']), LOAD)
+    expect(tracker.isDirty()).toBe(false)
+
+    doc.transact(() => doc.getArray('elements').push(['edit']), LOCAL_EDIT)
+    expect(tracker.isDirty()).toBe(true)
+    expect(onChange).toHaveBeenCalledWith(true)
+  })
+
+  it('keeps its historical default when no ignore set is supplied', () => {
+    const doc = new Y.Doc()
+    const onChange = vi.fn()
+    const tracker = createDirtyTracker(doc, onChange)
+
+    doc.transact(() => doc.getArray('elements').push(['opened']), LOAD)
+    expect(tracker.isDirty()).toBe(true)
+
+    tracker.markSaved()
+    doc.transact(() => doc.getArray('elements').push(['replayed']), RECOVERY_ORIGIN)
+    expect(tracker.isDirty()).toBe(false)
+    expect(onChange.mock.calls).toEqual([[true], [false]])
   })
 
   it('guards beforeunload only while dirty', () => {

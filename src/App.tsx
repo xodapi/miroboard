@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
-import { LOAD, LOCAL_CLIPBOARD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE } from './collab/origins'
+import { LOAD, LOCAL_CLIPBOARD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE, NON_EDIT_ORIGINS } from './collab/origins'
 import { PASTE_OFFSET, parseClipboard, preparePaste, serialiseSelection } from './collab/clipboard'
 import { PARTICIPANT_COLORS, initialsOf, readProfile, withColor, withName, writeProfile, type UserProfile } from './collab/user-profile'
 import {
@@ -473,7 +473,9 @@ export default function App() {
     const meta = ydoc.getMap<unknown>('meta')
     const profileConfig = ydoc.getMap<unknown>('profileConfig')
     yElements.current = yarray
-    dirtyTrackerRef.current = createDirtyTracker(ydoc, setIsDirty)
+    // NON_EDIT_ORIGINS rather than the tracker's default: opening a document is
+    // labelled LOAD, and a load must not report unsaved changes.
+    dirtyTrackerRef.current = createDirtyTracker(ydoc, setIsDirty, NON_EDIT_ORIGINS)
     captureTriggersRef.current = createCaptureTriggers({
       ydoc,
       capture: appendCheckpoint,
