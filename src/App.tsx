@@ -4,7 +4,7 @@ import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_
 import { commitElementUpdate } from './persistence/updates'
 import { LOAD, LOCAL_CLIPBOARD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE, NON_EDIT_ORIGINS } from './collab/origins'
 import { PASTE_OFFSET, parseClipboard, preparePaste, serialiseSelection } from './collab/clipboard'
-import { PARTICIPANT_COLORS, initialsOf, readProfile, withColor, withName, writeProfile, type UserProfile } from './collab/user-profile'
+import { readProfile, writeProfile, type UserProfile } from './collab/user-profile'
 import {
   clearSelection, idsOf, isSelected as isIdSelected, primaryOf, removeFromSelection, retainExisting,
   selectMany, selectOnly, toggleInSelection, unionSelection, type Selection,
@@ -24,6 +24,9 @@ import { BpmnTaskProperties } from './components/BpmnTaskProperties'
 import { BpmnFlowProperties } from './components/BpmnFlowProperties'
 import { ColorPicker } from './components/ColorPicker'
 import { BottomToolbar } from './components/BottomToolbar'
+import { ProfileButton, ProfilePanel } from './components/ProfilePanel'
+import { OnboardingTour } from './components/OnboardingTour'
+import { Toast, type ToastTone } from './components/Toast'
 import { MoreMenu } from './components/MoreMenu'
 import { ContextMenu } from './components/ContextMenu'
 import { createTheme } from './board/theme'
@@ -88,7 +91,7 @@ export default function App() {
   const [showLearningModules, setShowLearningModules] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('board')
-  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' | 'info' } | null>(null)
+  const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null)
   const [tourStep, setTourStep] = useState(() => {
     try { return localStorage.getItem('miro-onboarding-seen') ? -1 : 0 } catch { return -1 }
   })
@@ -166,7 +169,7 @@ export default function App() {
   const compactHistoryOnSaveRef = useRef(false)
   const undoManagerRef = useRef<Y.UndoManager | null>(null)
   const profileConfigRef = useRef<Y.Map<unknown> | null>(null); const profileConfigJsonRef = useRef(''); const profileConfigHydratingRef = useRef(false)
-  const showToast = useCallback((message: string, tone: 'success' | 'error' | 'info' = 'info') => {
+  const showToast = useCallback((message: string, tone: ToastTone = 'info') => {
     setToast({ message, tone })
     window.setTimeout(() => setToast(null), 4200)
   }, [])
@@ -1959,70 +1962,11 @@ export default function App() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18" /></svg>
           </button>
           {/* Participant profile */}
-          <button
-            onClick={() => setShowProfile(value => !value)}
-            data-testid="profile-button"
-            aria-label="Профиль участника"
-            aria-expanded={showProfile}
-            className={`size-8 grid place-items-center rounded-full text-[12px] font-bold text-white shadow-sm transition ring-2 ring-black/5 hover:ring-black/20 ${showProfile ? 'ring-black/30' : ''}`}
-            style={{ backgroundColor: userProfile.color }}
-            title={`Профиль: ${userProfile.name}`}
-          >
-            {initialsOf(userProfile.name)}
-          </button>
+          <ProfileButton profile={userProfile} expanded={showProfile} onToggle={() => setShowProfile(value => !value)} />
         </div>
       </div>
-      {showProfile && (
-        <div
-          className={`absolute right-4 top-14 z-[60] w-72 rounded-2xl border p-3 shadow-xl ${dk ? 'border-slate-600 bg-slate-800' : 'border-black/5 bg-white'}`}
-          data-ui
-          data-testid="profile-panel"
-        >
-          <div className="flex items-center gap-2">
-            <span className="grid size-9 place-items-center rounded-full text-[14px] font-bold text-white shadow-sm" style={{ backgroundColor: userProfile.color }}>
-              {initialsOf(userProfile.name)}
-            </span>
-            <div className="min-w-0">
-              <div className={`truncate text-[13px] font-semibold ${dk ? 'text-slate-100' : 'text-slate-800'}`}>{userProfile.name}</div>
-              <div className={`truncate text-[10px] ${textSec}`}>Локальный профиль · {userProfile.id.slice(0, 8)}</div>
-            </div>
-          </div>
-          <label className={`mt-3 block text-[11px] font-medium ${textSec}`} htmlFor="profile-name">Имя участника</label>
-          <input
-            id="profile-name"
-            data-testid="profile-name-input"
-            value={userProfile.name}
-            maxLength={40}
-            onChange={event => updateUserProfile(withName(userProfile, event.target.value))}
-            className={`mt-1 h-8 w-full rounded-lg border px-2 text-[12px] outline-none focus:border-violet-400 ${dk ? 'border-slate-600 bg-slate-900 text-slate-100' : 'border-black/10 bg-white text-slate-800'}`}
-            placeholder="Как вас подписывать"
-          />
-          <div className={`mt-3 text-[11px] font-medium ${textSec}`}>Цвет</div>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {PARTICIPANT_COLORS.map(candidate => (
-              <button
-                key={candidate}
-                data-testid={`profile-color-${candidate.slice(1)}`}
-                onClick={() => updateUserProfile(withColor(userProfile, candidate))}
-                aria-label={`Цвет ${candidate}`}
-                aria-pressed={userProfile.color === candidate}
-                className={`size-6 rounded-full transition ring-2 ${userProfile.color === candidate ? (dk ? 'ring-white' : 'ring-slate-800') : 'ring-black/5 hover:ring-black/20'}`}
-                style={{ backgroundColor: candidate }}
-              />
-            ))}
-          </div>
-          <p className={`mt-3 text-[10px] leading-relaxed ${textSec}`}>
-            Имя и цвет хранятся только на этом устройстве и используются для подписи
-            созданных объектов (<code>createdBy</code>). В файл документа попадает
-            идентификатор автора; обезличить его можно при экспорте.
-          </p>
-        </div>
-      )}
-      {toast && (
-        <div className={`absolute right-4 top-16 z-[60] max-w-sm rounded-2xl border px-4 py-3 text-sm font-medium shadow-xl ${toast.tone === 'error' ? 'border-red-200 bg-red-50 text-red-800' : toast.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-violet-200 bg-violet-50 text-violet-800'}`} data-ui aria-live="polite">
-          <div className="flex items-start gap-3"><span>{toast.tone === 'error' ? '!' : toast.tone === 'success' ? '✓' : 'i'}</span><span>{toast.message}</span><button onClick={() => setToast(null)} className="ml-auto text-base leading-none">×</button></div>
-        </div>
-      )}
+      {showProfile && <ProfilePanel profile={userProfile} theme={theme} onChange={updateUserProfile} />}
+      {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
       <HistoryPreviewBanner darkMode={dk} snapshot={previewSnapshot} onRestore={restorePreview} onClose={closeTimeline} />
       {pendingOpen && (
         <UnsavedChangesDialog
@@ -2043,31 +1987,7 @@ export default function App() {
           }}
         />
       )}
-      {tourStep >= 0 && (
-        <div className="absolute inset-0 z-[70] grid place-items-center bg-slate-900/45 p-4 backdrop-blur-sm" data-ui>
-          {(() => {
-            const steps = [
-              ['Добро пожаловать', 'MiroBoard объединяет свободную доску, BPMN-моделирование и воспроизводимую симуляцию. Начните с режима «Доска» или загрузите учебный модуль.'],
-              ['Режимы работы', 'В шапке переключаются «Доска», «BPMN» и «Симуляция». В BPMN-режиме слева появляются команды моделирования, проверки и симуляции.'],
-              ['Потоки и свойства', 'Выберите «Поток», кликните источник и затем цель. Выбранная задача или стрелка открывает справа свойства: время, ресурсы, условия и вероятность.'],
-              ['Проверяемый результат', 'Симуляция показывает длительность, SLA, стоимость, загрузку и очереди. «История» содержит commits и releases, которые формируются при build из Git.'],
-            ] as const
-            const [title, text] = steps[tourStep] ?? steps[0]
-            return <section className="w-full max-w-md rounded-[28px] bg-white p-7 shadow-2xl">
-              <div className="mb-4 flex gap-1">{steps.map((_, index) => <span key={index} className={`h-1.5 flex-1 rounded-full ${index <= tourStep ? 'bg-violet-600' : 'bg-slate-200'}`} />)}</div>
-              <div className="mb-2 text-xs font-bold uppercase tracking-[0.14em] text-violet-600">Тур {tourStep + 1} из {steps.length}</div>
-              <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
-              <p className="mt-3 text-sm leading-6 text-slate-600">{text}</p>
-              <div className="mt-7 flex items-center justify-between">
-                <button onClick={finishTour} className="text-sm font-semibold text-slate-500 hover:text-slate-800">Пропустить</button>
-                <button onClick={() => tourStep === steps.length - 1 ? finishTour() : setTourStep(tourStep + 1)} className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-violet-700">
-                  {tourStep === steps.length - 1 ? 'Начать работу' : 'Далее'}
-                </button>
-              </div>
-            </section>
-          })()}
-        </div>
-      )}
+      {tourStep >= 0 && <OnboardingTour step={tourStep} onNext={setTourStep} onFinish={finishTour} />}
       {/* ===== CANVAS ===== */}
       <div ref={canvasRef} data-testid="canvas" className="absolute inset-0 touch-none"
         onPointerDown={handlePointerDown} onPointerMove={handlePointerMove}
