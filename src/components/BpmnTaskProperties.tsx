@@ -1,5 +1,6 @@
 import type { BoardElement } from '../board/types'
 import type { Theme } from '../board/theme'
+import { parseBounded } from '../board/numeric-input'
 
 export interface BpmnTaskPropertiesProps {
   task: BoardElement
@@ -32,8 +33,17 @@ export function BpmnTaskProperties({ task, theme, onUpdate }: BpmnTaskProperties
   const label = `text-[11px] font-semibold ${theme.textSecondary}`
   const update = (updates: Partial<BoardElement>) => onUpdate(task.id, updates)
 
-  /** Seconds in the UI, milliseconds in the document; negatives are clamped. */
-  const msFromSeconds = (value: string) => Math.max(0, Number(value) * 1000)
+  /** Seconds in the UI, milliseconds in the document. */
+  const msFromSeconds = (value: string) => {
+    const seconds = parseBounded(value, { min: 0 })
+    return seconds === undefined ? undefined : Math.round(seconds * 1000)
+  }
+
+  /** Applies a spread bound only when the field holds a usable number. */
+  const updateSpread = (key: 'bpmnDurationMinMs' | 'bpmnDurationModeMs' | 'bpmnDurationMaxMs', value: string) => {
+    const ms = msFromSeconds(value)
+    if (ms !== undefined) update({ [key]: ms })
+  }
 
   return (
     <aside
@@ -52,8 +62,10 @@ export function BpmnTaskProperties({ task, theme, onUpdate }: BpmnTaskProperties
           step="0.1"
           value={(task.bpmnDurationMs ?? 1000) / 1000}
           onChange={event => {
-            const seconds = Number(event.target.value)
-            if (Number.isFinite(seconds) && seconds >= 0) {
+            const seconds = parseBounded(event.target.value, { min: 0 })
+            // The maximum is a cap rather than a rejection: typing a big number
+            // should land on the ceiling, not be refused mid-keystroke.
+            if (seconds !== undefined) {
               update({ bpmnDurationMs: Math.round(Math.min(seconds, MAX_DURATION_SECONDS) * 1000) })
             }
           }}
@@ -83,7 +95,7 @@ export function BpmnTaskProperties({ task, theme, onUpdate }: BpmnTaskProperties
               <input
                 type="number" min="0"
                 value={(task.bpmnDurationMinMs ?? 1000) / 1000}
-                onChange={event => update({ bpmnDurationMinMs: msFromSeconds(event.target.value) })}
+                onChange={event => updateSpread('bpmnDurationMinMs', event.target.value)}
                 className={`ml-1 ${fieldClass(theme, 'w-14')}`}
               />
             </label>
@@ -92,7 +104,7 @@ export function BpmnTaskProperties({ task, theme, onUpdate }: BpmnTaskProperties
                 <input
                   type="number" min="0"
                   value={(task.bpmnDurationModeMs ?? 1000) / 1000}
-                  onChange={event => update({ bpmnDurationModeMs: msFromSeconds(event.target.value) })}
+                  onChange={event => updateSpread('bpmnDurationModeMs', event.target.value)}
                   className={`ml-1 ${fieldClass(theme, 'w-14')}`}
                 />
               </label>
@@ -101,7 +113,7 @@ export function BpmnTaskProperties({ task, theme, onUpdate }: BpmnTaskProperties
               <input
                 type="number" min="0"
                 value={(task.bpmnDurationMaxMs ?? 1000) / 1000}
-                onChange={event => update({ bpmnDurationMaxMs: msFromSeconds(event.target.value) })}
+                onChange={event => updateSpread('bpmnDurationMaxMs', event.target.value)}
                 className={`ml-1 ${fieldClass(theme, 'w-14')}`}
               />
             </label>
@@ -122,9 +134,11 @@ export function BpmnTaskProperties({ task, theme, onUpdate }: BpmnTaskProperties
             type="number" min="0" step="0.01"
             value={task.bpmnCostPerHour ?? ''}
             onChange={event => {
+              // Clearing the field is meaningful here: it removes the cost.
               const raw = event.target.value
-              const cost = raw === '' ? undefined : Number(raw)
-              if (cost === undefined || (Number.isFinite(cost) && cost >= 0)) update({ bpmnCostPerHour: cost })
+              if (raw.trim() === '') { update({ bpmnCostPerHour: undefined }); return }
+              const cost = parseBounded(raw, { min: 0 })
+              if (cost !== undefined) update({ bpmnCostPerHour: cost })
             }}
             className={`ml-1 ${fieldClass(theme, 'w-16')}`}
           />
@@ -135,8 +149,8 @@ export function BpmnTaskProperties({ task, theme, onUpdate }: BpmnTaskProperties
             type="number" min="1" max="1000" step="1"
             value={task.bpmnResourceCapacity ?? 1}
             onChange={event => {
-              const capacity = Number(event.target.value)
-              if (Number.isInteger(capacity) && capacity >= 1 && capacity <= 1000) update({ bpmnResourceCapacity: capacity })
+              const capacity = parseBounded(event.target.value, { min: 1, max: 1000, integer: true })
+              if (capacity !== undefined) update({ bpmnResourceCapacity: capacity })
             }}
             className={`ml-1 ${fieldClass(theme, 'w-14')}`}
           />
@@ -147,8 +161,8 @@ export function BpmnTaskProperties({ task, theme, onUpdate }: BpmnTaskProperties
             type="number" min="-100" max="100" step="1"
             value={task.bpmnPriority ?? 0}
             onChange={event => {
-              const priority = Number(event.target.value)
-              if (Number.isInteger(priority) && priority >= -100 && priority <= 100) update({ bpmnPriority: priority })
+              const priority = parseBounded(event.target.value, { min: -100, max: 100, integer: true })
+              if (priority !== undefined) update({ bpmnPriority: priority })
             }}
             className="ml-1 w-14 rounded-lg border border-slate-200 px-2 py-1 text-[12px] outline-none"
           />

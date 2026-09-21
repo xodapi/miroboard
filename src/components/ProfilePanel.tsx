@@ -1,4 +1,4 @@
-import { PARTICIPANT_COLORS, initialsOf, withColor, withName, type UserProfile } from '../collab/user-profile'
+import { PARTICIPANT_COLORS, initialOf, withColor, withName, type UserProfile } from '../collab/user-profile'
 import type { Theme } from '../board/theme'
 
 export interface ProfileButtonProps {
@@ -19,7 +19,7 @@ export function ProfileButton({ profile, expanded, onToggle }: ProfileButtonProp
       style={{ backgroundColor: profile.color }}
       title={`Профиль: ${profile.name}`}
     >
-      {initialsOf(profile.name)}
+      {initialOf(profile.name)}
     </button>
   )
 }
@@ -46,7 +46,7 @@ export function ProfilePanel({ profile, theme, onChange }: ProfilePanelProps) {
     >
       <div className="flex items-center gap-2">
         <span className="grid size-9 place-items-center rounded-full text-[14px] font-bold text-white shadow-sm" style={{ backgroundColor: profile.color }}>
-          {initialsOf(profile.name)}
+          {initialOf(profile.name)}
         </span>
         <div className="min-w-0">
           <div className={`truncate text-[13px] font-semibold ${theme.dark ? 'text-slate-100' : 'text-slate-800'}`}>{profile.name}</div>

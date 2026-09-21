@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_PROFILE_NAME, LEGACY_AUTHOR_ID_KEY, PARTICIPANT_COLORS, PROFILE_STORAGE_KEY,
-  colorForId, createProfile, initialsOf, readProfile, withColor, withName, writeProfile,
+  colorForId, createProfile, initialOf, readProfile, withColor, withName, writeProfile,
 } from './user-profile'
 
 function memoryStorage(initial: Record<string, string> = {}): Storage {
@@ -79,9 +79,9 @@ describe('user profile', () => {
   })
 
   it('derives a single avatar initial', () => {
-    expect(initialsOf('Алиса')).toBe('А')
-    expect(initialsOf('  bob  ')).toBe('B')
-    expect(initialsOf('')).toBe('•')
-    expect(initialsOf('🚀 start')).toBe('🚀')
+    expect(initialOf('Алиса')).toBe('А')
+    expect(initialOf('  bob  ')).toBe('B')
+    expect(initialOf('')).toBe('•')
+    expect(initialOf('🚀 start')).toBe('🚀')
   })
 })

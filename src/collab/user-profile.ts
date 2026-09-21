@@ -51,8 +51,15 @@ export function colorForId(id: string): string {
   return PARTICIPANT_COLORS[hash(id) % PARTICIPANT_COLORS.length]
 }
 
-/** Single initial for the avatar; falls back to a neutral glyph. */
-export function initialsOf(name: string): string {
+/**
+ * The single leading character for an avatar, upper-cased.
+ *
+ * Singular by design: the avatar is a 32px circle and one glyph reads cleanly at
+ * that size, including for names that are one word or start with an emoji. It
+ * was called initialsOf, which implied the usual two-letter treatment and set
+ * the wrong expectation for anyone reading a call site.
+ */
+export function initialOf(name: string): string {
   const trimmed = name.trim()
   if (!trimmed) return '•'
   return [...trimmed][0].toUpperCase()

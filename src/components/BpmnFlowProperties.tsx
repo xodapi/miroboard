@@ -1,5 +1,6 @@
 import type { BoardElement } from '../board/types'
 import type { Theme } from '../board/theme'
+import { parseBounded } from '../board/numeric-input'
 import { PROPERTY_PANEL_CLASS } from './BpmnTaskProperties'
 
 export interface BpmnFlowPropertiesProps {
@@ -62,11 +63,12 @@ export function BpmnFlowProperties({ flow, isXorBranch, theme, onUpdate }: BpmnF
               type="number" min="0" max="1" step="0.01"
               value={flow.bpmnFlow?.probability ?? ''}
               onChange={event => {
+                // Clearing the field is meaningful: it drops the explicit
+                // probability and lets the branch fall back to the default.
                 const raw = event.target.value
-                const probability = raw === '' ? undefined : Number(raw)
-                if (probability === undefined || (Number.isFinite(probability) && probability >= 0 && probability <= 1)) {
-                  patch({ probability })
-                }
+                if (raw.trim() === '') { patch({ probability: undefined }); return }
+                const probability = parseBounded(raw, { min: 0, max: 1 })
+                if (probability !== undefined) patch({ probability })
               }}
               className={`w-14 ${field}`}
             />

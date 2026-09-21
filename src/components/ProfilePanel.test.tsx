@@ -38,7 +38,7 @@ describe('ProfileButton', () => {
     const onToggle = vi.fn()
     act(() => { root.render(<ProfileButton profile={profile} expanded={false} onToggle={onToggle} />) })
     const button = container.querySelector<HTMLButtonElement>('[data-testid="profile-button"]')!
-    // initialsOf is plural in name but returns a single leading letter, so the
+    // initialOf is plural in name but returns a single leading letter, so the
     // avatar for "Анна Петрова" reads "А", not "АП".
     expect(button.textContent).toBe('А')
     expect(button.getAttribute('aria-expanded')).toBe('false')

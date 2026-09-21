@@ -77,18 +77,56 @@ describe('BpmnTaskProperties', () => {
     expect(onUpdate).not.toHaveBeenCalled()
   })
 
-  it('never writes NaN, whatever the field reports', () => {
+  it('ignores unparseable text instead of zeroing the duration', () => {
+    // A number input reports '' — not the typed text — for anything it cannot
+    // parse, and Number('') is 0. The obvious guards (isFinite, >= 0) all pass,
+    // so "abc" used to silently set the duration to zero.
     const onUpdate = vi.fn()
     render(<BpmnTaskProperties task={task()} theme={theme} onUpdate={onUpdate} />)
 
-    // A number input reports '' for unparseable text, so this arrives as 0 and
-    // zeroes the duration rather than being ignored. Documented rather than
-    // changed: this refactor moves markup, and a zero-duration task is a
-    // meaningful (if odd) model, unlike a NaN one which would poison the run.
     type(container.querySelector('#bpmn-duration') as HTMLInputElement, 'abc')
-    for (const [, updates] of onUpdate.mock.calls) {
-      expect(Number.isNaN(updates.bpmnDurationMs)).toBe(false)
+    expect(onUpdate).not.toHaveBeenCalled()
+  })
+
+  it('leaves the duration alone while the field is empty', () => {
+    // Clearing the field to retype is not a request for a zero-duration task.
+    const onUpdate = vi.fn()
+    render(<BpmnTaskProperties task={task()} theme={theme} onUpdate={onUpdate} />)
+
+    type(container.querySelector('#bpmn-duration') as HTMLInputElement, '')
+    expect(onUpdate).not.toHaveBeenCalled()
+  })
+
+  it('still accepts a deliberate zero', () => {
+    const onUpdate = vi.fn()
+    render(<BpmnTaskProperties task={task()} theme={theme} onUpdate={onUpdate} />)
+
+    type(container.querySelector('#bpmn-duration') as HTMLInputElement, '0')
+    expect(onUpdate).toHaveBeenCalledWith('t1', { bpmnDurationMs: 0 })
+  })
+
+  it('ignores unparseable text in every numeric field', () => {
+    // Capacity, priority and the distribution bounds all had the same shape of
+    // guard as the duration did, and the same blind spot.
+    const onUpdate = vi.fn()
+    render(<BpmnTaskProperties task={task({ bpmnDurationDistribution: 'triangular' })} theme={theme} onUpdate={onUpdate} />)
+
+    for (const input of container.querySelectorAll('input[type="number"]')) {
+      type(input as HTMLInputElement, 'abc')
     }
+    expect(onUpdate).not.toHaveBeenCalled()
+  })
+
+  it('clears the cost when the field is emptied, since that removes it', () => {
+    // Cost is optional, so an empty field is a real instruction here — unlike
+    // duration, where empty just means "mid-edit".
+    const onUpdate = vi.fn()
+    render(<BpmnTaskProperties task={task({ bpmnCostPerHour: 50 })} theme={theme} onUpdate={onUpdate} />)
+
+    const cost = [...container.querySelectorAll('input[type="number"]')]
+      .find(input => (input as HTMLInputElement).step === '0.01') as HTMLInputElement
+    type(cost, '')
+    expect(onUpdate).toHaveBeenCalledWith('t1', { bpmnCostPerHour: undefined })
   })
 
   it('caps the duration at an hour', () => {
