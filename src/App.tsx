@@ -26,6 +26,7 @@ import { ColorPicker } from './components/ColorPicker'
 import { BoardHeader } from './components/BoardHeader'
 import { ZoomControls, ElementCount } from './components/ZoomControls'
 import { CanvasBackground } from './components/CanvasBackground'
+import { ChangedInPreview, ResizeHandles } from './components/element-chrome'
 import { useSimulationSettings } from './board/use-simulation-settings'
 import { elementsInScope, fitTransform, screenToWorld as toWorld, wheelZoomFactor, zoomAround } from './board/viewport'
 import { BottomToolbar } from './components/BottomToolbar'
@@ -1575,7 +1576,7 @@ export default function App() {
       const isBottleneck = el.bpmnNodeType === 'task' && visibleBottleneckRole !== null && el.bpmnResourceRole === visibleBottleneckRole
       return (
         <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-          {isChangedInPreview && <rect x={-7} y={-7} width={width + 14} height={height + 14} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={12} />}
+          {isChangedInPreview && <ChangedInPreview invScale={invS} x={-7} y={-7} width={width + 14} height={height + 14} radius={12} />}
           {el.bpmnNodeType === 'startEvent' && <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={3} />}
           {el.bpmnNodeType === 'endEvent' && <>
             <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={5} />
@@ -1610,7 +1611,7 @@ export default function App() {
         const d = smoothPathD(el.points)
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none">
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={6} />}
             <path d={d} fill="none" stroke={el.color} strokeWidth={el.stroke}
               strokeLinecap="round" strokeLinejoin="round" className="pointer-events-stroke"
               style={{ paintOrder: 'stroke', ...(el.stroke && el.stroke > 6 ? { filter: `blur(${el.stroke > 10 ? 1 : 0}px)` } : {}) }} />
@@ -1624,7 +1625,7 @@ export default function App() {
       case 'sticky':
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={14} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={14} />}
             <rect width={el.w} height={el.h} fill={el.fill} rx={10}
               style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.12))' }} />
             <rect width={el.w} height={el.h} fill={el.fill} rx={10} />
@@ -1644,17 +1645,14 @@ export default function App() {
               <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
                 fill="none" stroke="#4D96FF" strokeWidth={2 * invS} rx={12} />
               {/* Resize handles: single selection only, multi-resize needs an anchor */}
-              {([['nw', -6, -6], ['ne', (el.w || 0) - 2, -6], ['sw', -6, (el.h || 0) - 2], ['se', (el.w || 0) - 2, (el.h || 0) - 2]] as [string, number, number][]).map(([c, cx, cy]) => (
-                <circle key={c} data-resize={c} cx={cx} cy={cy} r={7 * invS}
-                  fill="white" stroke="#4D96FF" strokeWidth={2 * invS} className="cursor-nwse-resize" style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.2))' }} />
-              ))}
+              <ResizeHandles invScale={invS} width={el.w || 0} height={el.h || 0} />
             </>}
           </g>
         )
       case 'text':
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 200) + 12} height={(el.h || 60) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 200) + 12} height={(el.h || 60) + 12} radius={6} />}
             <foreignObject width={el.w || 200} height={el.h || 60}>
               <div className="w-full h-full select-none"
                 onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}>
@@ -1679,7 +1677,7 @@ export default function App() {
             onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseUp={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}>
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={8} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={8} />}
             <rect width={el.w} height={el.h} fill={el.fill || 'transparent'} stroke={el.color}
               strokeWidth={el.stroke} rx={4}
               onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }} />
@@ -1712,7 +1710,7 @@ export default function App() {
             onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseUp={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}>
-            {isChangedInPreview && <rect x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={8} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={8} />}
             <ellipse cx={(el.w || 0) / 2} cy={(el.h || 0) / 2} rx={Math.abs((el.w || 0) / 2)} ry={Math.abs((el.h || 0) / 2)}
               fill={el.fill || 'transparent'} stroke={el.color} strokeWidth={el.stroke}
               onDoubleClick={() => { setEditingText(el.id); setEditValue(el.text || '') }} />
@@ -1747,7 +1745,7 @@ export default function App() {
         const hs = 12
         return (
           <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-            {isChangedInPreview && <rect x={Math.min(0, x2) - 7} y={Math.min(0, y2) - 7} width={Math.abs(x2) + 14} height={Math.abs(y2) + 14} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, x2) - 7} y={Math.min(0, y2) - 7} width={Math.abs(x2) + 14} height={Math.abs(y2) + 14} radius={6} />}
             <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} />
             <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
               fill={el.color} />
@@ -1768,7 +1766,7 @@ export default function App() {
       case 'line':
         return (
           <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
-            {isChangedInPreview && <rect x={Math.min(0, el.w || 0) - 7} y={Math.min(0, el.h || 0) - 7} width={Math.abs(el.w || 0) + 14} height={Math.abs(el.h || 0) + 14} fill="none" stroke="#F97316" strokeWidth={3 * invS} strokeDasharray={`${6 * invS}`} rx={6} />}
+            {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, el.w || 0) - 7} y={Math.min(0, el.h || 0) - 7} width={Math.abs(el.w || 0) + 14} height={Math.abs(el.h || 0) + 14} radius={6} />}
             <line x1={0} y1={0} x2={el.w || 0} y2={el.h || 0} stroke={el.color} strokeWidth={el.stroke} strokeLinecap="round" />
             {isSelected && <rect x={Math.min(0, el.w || 0) - 4} y={Math.min(0, el.h || 0) - 4}
               width={Math.abs(el.w || 0) + 8} height={Math.abs(el.h || 0) + 8}
