@@ -949,6 +949,12 @@ export default function App() {
   const visibleSimulationResult = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationResult : null
   const visibleSimulationSummary = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationSummary : null
   const visibleBottleneckRole = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bottleneckRole : null
+  /**
+   * The BPMN validity badge describes the live document, which is not what a
+   * history preview has on screen. Hiding it there matches the simulation
+   * summaries just above, which are already blanked for the same reason.
+   */
+  const showBpmnStatus = !previewSnapshot && elements.some(element => element.bpmnNodeType)
 
   useEffect(() => {
     if (!__MIROBOARD_DEBUG_HOOK__) return
@@ -1782,7 +1788,7 @@ export default function App() {
         tool={tool}
         bpmnFlowSourceId={bpmnFlowSourceId}
         selectionCount={selectionCount}
-        hasBpmnNodes={elements.some(element => element.bpmnNodeType)}
+        hasBpmnNodes={showBpmnStatus}
         bpmnIssues={bpmnIssues}
         bpmnRunSummary={bpmnRunSummary}
         simulationSummary={visibleSimulationSummary}

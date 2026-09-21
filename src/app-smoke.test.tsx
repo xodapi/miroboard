@@ -561,6 +561,24 @@ describe('App smoke', () => {
       expect(container.textContent).not.toContain('Начните творить')
     })
 
+    it('hides the BPMN validity badge, which describes the live document', () => {
+      // The BPMN template creates real bpmnNodeType elements, which is what
+      // makes the badge appear at all.
+      const openTemplates = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('Начать с шаблона'))!
+      act(() => { openTemplates.click() })
+      const bpmn = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('BPMN 2.0'))!
+      act(() => { bpmn.click() })
+      expect(byTestId('bpmn-status')).not.toBeNull()
+
+      markSnapshot()
+      openSnapshot()
+
+      // The badge reports on the live document; the canvas is showing a
+      // snapshot. Rather than describe the wrong board, it steps aside — as
+      // the simulation summaries beside it already do.
+      expect(byTestId('bpmn-status')).toBeNull()
+    })
+
     it('does not let Ctrl+A select the live document while previewing history', () => {
       placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
       placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
