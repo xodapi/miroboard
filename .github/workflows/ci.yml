@@ -67,6 +67,10 @@ jobs:
             node scripts/summarize-playwright-report.mjs playwright-report
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # Run it again for the workflow commands: annotations are only parsed
+          # from a step's stdout, and they are the one CI channel readable
+          # without access to the log/artifact blob storage.
+          node scripts/summarize-playwright-report.mjs playwright-report --annotations
 
       - name: Upload Playwright report
         if: always()

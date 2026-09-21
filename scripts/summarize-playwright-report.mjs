@@ -9,14 +9,23 @@
  * run. Used by the 'Summarize end-to-end results' step in
  * `.github/workflows/ci.yml`.
  *
- * Usage: node scripts/summarize-playwright-report.mjs [reportDir]
+ * Usage: node scripts/summarize-playwright-report.mjs [reportDir] [--annotations]
+ *
+ * With --annotations it prints GitHub workflow commands (`::error::`) instead of
+ * prose. That is not a convenience: annotations are the only CI channel this
+ * repo can actually read back, because both job logs and run artifacts are
+ * served from blob storage that is unreachable from a sandbox, while
+ * annotations come from the ordinary REST API.
+ *
  * Always exits 0 — summarising must never change the job conclusion.
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 
-const reportDir = process.argv[2] ?? 'playwright-report'
+const args = process.argv.slice(2)
+const annotationsOnly = args.includes('--annotations')
+const reportDir = args.find(arg => !arg.startsWith('--')) ?? 'playwright-report'
 const indexPath = join(reportDir, 'index.html')
 
 function giveUp(reason) {
@@ -142,6 +151,42 @@ for (const file of index.files ?? []) {
 }
 
 const stats = index.stats ?? {}
+
+/**
+ * Workflow-command escaping. A property also cannot contain ':' or ',', and a
+ * message cannot contain a newline, so both are percent-encoded.
+ */
+function escapeProperty(value) {
+  return value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A').replaceAll(':', '%3A').replaceAll(',', '%2C')
+}
+
+function escapeMessage(value) {
+  return value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')
+}
+
+// GitHub keeps at most 10 annotations of a level per step; the rest is reported
+// as a count so nothing silently disappears.
+const ANNOTATION_LIMIT = 10
+
+if (annotationsOnly) {
+  if (!failures.length) {
+    console.log(`::notice title=Playwright::all ${passed} end-to-end tests passed`)
+    process.exit(0)
+  }
+  for (const failure of failures.slice(0, ANNOTATION_LIMIT)) {
+    const title = escapeProperty(`e2e ${failure.label}`.slice(0, 140))
+    const message = escapeMessage(failure.error || `test failed (${failure.outcome})`)
+    console.log(`::error title=${title}::${message.slice(0, 400)}`)
+  }
+  const hidden = failures.length - ANNOTATION_LIMIT
+  console.log(
+    hidden > 0
+      ? `::notice title=Playwright::${failures.length} e2e tests failed, ${hidden} more not annotated`
+      : `::notice title=Playwright::${failures.length} of ${stats.total ?? '?'} e2e tests failed`,
+  )
+  process.exit(0)
+}
+
 console.log(
   `total: ${stats.total ?? passed + skipped + failures.length}, ` +
     `passed: ${passed}, failed: ${failures.length}, flaky: ${flaky}, skipped: ${skipped}`,
