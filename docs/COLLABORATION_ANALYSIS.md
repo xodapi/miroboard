@@ -486,14 +486,30 @@ BPMN XML, `.mboard` save/load, история с таймлайном, симу�
 | 0.2 | Множественное выделение: `selectedIds: Set<string>`, marquee, Shift+клик | M | ✅ сделано: `src/collab/selection.ts`, `src/collab/marquee.ts`; marquee, Shift+клик, Shift+marquee, групповой drag, Delete/Ctrl+D/Ctrl+A/стрелки, счётчик выделения |
 | 0.3 | Буфер обмена: Ctrl+C/V/X, JSON в `clipboard`, дублировать несколько | S | ✅ `src/collab/clipboard.ts`: формат `application/x-miroboard+json`, валидация чужого JSON, новые id + перепривязка `bpmnFlow`, вставка одной транзакцией с origin `LOCAL_CLIPBOARD`; стрелки теперь тоже двигают выделение одной транзакцией |
 | 0.4 | Явные origins транзакций (`LOCAL_EDIT`, `LOCAL_GESTURE`, `RECOVERY`, …) | M | ✅ сделано: `src/collab/origins.ts`, UndoManager переведён на allow-list локальных origins |
-| 0.5 | Декомпозиция `App.tsx`: canvas-render, tool-state-machine, selection, viewport, panels | XL | 🟡 начато: логика выделения и геометрия marquee вынесены в `src/collab/`; `App.tsx` ~2600 строк |
+| 0.5 | Декомпозиция `App.tsx`: canvas-render, tool-state-machine, selection, viewport, panels | XL | 🟡 начато, но файл не уменьшился: в `src/collab/` вынесены чистые функции (selection, marquee, clipboard, origins, user-profile), а не компоненты. `App.tsx` = 2862 строки — подключение выделения и буфера добавило больше, чем вынесено |
 | 0.6 | Командный слой: все мутации через `commands/*` с явной транзакцией | M | ⬜ origins уже проставлены во всех точках записи — командный слой можно вводить механически |
 
-Покрытие Этапа 0 (на момент выполнения): 197 unit-тестов, включая jsdom-smoke
-всего приложения (`src/app-smoke.test.tsx`) и browser-level набор
-`tests/multi-select.spec.ts` (9 сценариев, запускается в CI).
+Покрытие Этапа 0 (на момент выполнения): 227 unit-тестов, включая jsdom-smoke
+всего приложения (`src/app-smoke.test.tsx`) и два browser-level набора —
+`tests/multi-select.spec.ts` (9 сценариев) и `tests/clipboard.spec.ts`
+(6 сценариев), оба запускаются в CI.
 
-**Критерий готовности:** 148 unit + 88 e2e тестов зелёные; `App.tsx < 800` строк;
+**Извлечённый урок (0.4).** После введения origins в CI покраснели четыре
+cross-* набора: тулбар показывал «Не сохранено» сразу после открытия файла.
+Причина — `applyOpenOutcome` был переведён с `RECOVERY_ORIGIN` на более честный
+`LOAD`, а грязный трекер остался со своим прежним захардкоженным списком
+игнорируемых origins, в котором `LOAD` не было. Открытие файла стало
+считаться правкой. Исправлено: `createDirtyTracker(ydoc, onChange, ignoredOrigins)`,
+`App` передаёт `NON_EDIT_ORIGINS` — политикой владеет один модуль
+(`src/collab/origins.ts`), а не каждый потребитель по-своему.
+
+Вывод для 0.5/0.6: при выносе кода из `App.tsx` поведение нужно переносить
+целиком, включая его инварианты. Локальные тесты этого не поймали — jsdom не
+воспроизводит асинхронный приход LOAD-апдейта через y-indexeddb, — поймал
+только CI, и только бисекция по собственным коммитам ветки назвала виновника.
+Поэтому в CI добавлены аннотации с состоянием страницы в момент падения.
+
+**Критерий готовности:** все unit- и e2e-тесты зелёные; `App.tsx < 800` строк;
 выделение множественное; копирование/вставка работают; в консоли нет дубликатов
 ключей React на доске из 500 элементов.
 
