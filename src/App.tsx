@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
-import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, snap_to_grid, validate_bpmn } from './wasm/board-core/board_core'
+import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, validate_bpmn } from './wasm/board-core/board_core'
 import { commitElementUpdate } from './persistence/updates'
 import { LOAD, LOCAL_CLIPBOARD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE, NON_EDIT_ORIGINS } from './collab/origins'
 import { PASTE_OFFSET, parseClipboard, preparePaste, serialiseSelection } from './collab/clipboard'
@@ -33,158 +33,25 @@ import { serialise } from './format/mboard'
 import type { DocHistory, DocMeta, HistorySnapshot, ProfileConfig } from './format/types'
 import { HelpPanel } from './HelpPanel'
 import './help-panel.css'
-import basicFixedExample from '../examples/basic-fixed.json'
-import parallelQueueExample from '../examples/parallel-queue.json'
-import slaCalendarExample from '../examples/sla-calendar.json'
-import batchWorkloadExample from '../examples/batch-workload.json'
-import priorityQueueExample from '../examples/priority-queue.json'
-import fifoPriorityExample from '../examples/fifo-vs-priority.json'
+import { bpmnEdgeAnchor, simplifyPath, smoothPathD, snapVal } from './board/geometry'
+import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeInfo } from './board/gesture'
+import { genId } from './board/id'
+import { COLORS, CONTEXT_MENU_ITEMS, EMOJIS, STICKY_COLORS } from './board/palette'
+import { EDUCATIONAL_EXAMPLES } from './board/examples'
+import type {
+  ArrivalClassDraft, BoardElement, BpmnNodeType, BpmnSimulationResult, ContextMenuAction, EducationalExample,
+  ImportedBpmnModel, PendingOpen, Point, RolePolicyDraft, Tool, WorkspaceMode,
+} from './board/types'
 declare global {
   interface Window {
     __MIROBOARD_DEBUG__?: { version: string; createBpmnModel: () => unknown; validateBpmn: () => unknown; exportBpmnXml: () => string; runBpmn: () => unknown; simulateBpmn: (seed: number | string | bigint, runs: number) => BpmnSimulationResult; getElements: () => BoardElement[] }
   }
 }
-type Point = { x: number; y: number }
-type Tool = 'select' | 'pan' | 'pen' | 'marker' | 'eraser' | 'sticky' | 'text' | 'rect' | 'circle' | 'arrow' | 'line' | 'laser' | 'emoji' | 'bpmnStart' | 'bpmnTask' | 'bpmnEnd' | 'bpmnGateway' | 'bpmnParallel' | 'bpmnSequence'
-type BpmnNodeType = 'startEvent' | 'endEvent' | 'task' | 'xorGateway' | 'andGateway' | 'orGateway'
-type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
 const GITHUB_REPOSITORY = 'https://github.com/xodapi/miroboard'
 declare const __MIROBOARD_VERSION__: string
 declare const __MIROBOARD_HISTORY__: { commit: string; date: string; title: string; release?: string }[]
 declare const __MIROBOARD_DEBUG_HOOK__: boolean
-type ImportedBpmnModel = {
-  nodes: { id: string; type: string; name?: string; x?: number; y?: number; width?: number; height?: number; durationMs?: number; durationDistribution?: 'fixed' | 'uniform' | 'triangular'; durationMinMs?: number; durationModeMs?: number; durationMaxMs?: number; resourceRole?: string; costPerHour?: number; resourceCapacity?: number; priority?: number }[]
-  flows: { id: string; sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }[]
-  arrivalClasses?: { count: number; intervalMs: number; priority: number }[]
-  resourceRoles?: { name: string; capacity: number; queuePolicy?: QueuePolicy }[]
-}
-type QueuePolicy = 'fifo' | 'priority'
-type ArrivalClassDraft = { count: string; intervalSec: string; priority: string }
-type RolePolicyDraft = { capacity: string; queuePolicy: QueuePolicy }
-type BpmnSimulationResult = {
-  seed: number; runs: number; completedRuns: number; simulationInstances: number; arrivalIntervalMs: number
-  minDurationMs: number; meanDurationMs: number; standardDeviationMs: number
-  p50DurationMs: number; p90DurationMs: number; p95DurationMs: number; maxDurationMs: number; meanCost: number
-  slaTargetMs?: number; onTimeRate?: number; roleUtilization: { role: string; capacity: number; meanWorkloadMs: number; meanWaitingMs: number; utilization: number }[]; priorityClasses: { priority: number; instances: number; meanWaitingMs: number; meanDurationMs: number }[]
-}
-type EducationalExample = { title: string; explanation: string; checks: string[]; model: ImportedBpmnModel }
-const EDUCATIONAL_EXAMPLES = [basicFixedExample, parallelQueueExample, slaCalendarExample, batchWorkloadExample, priorityQueueExample, fifoPriorityExample] as unknown as EducationalExample[]
-interface BoardElement {
-  id: string
-  type: 'path' | 'sticky' | 'rect' | 'circle' | 'arrow' | 'line' | 'text' | 'emoji'
-  x: number
-  y: number
-  w?: number
-  h?: number
-  points?: Point[]
-  text?: string
-  color: string
-  stroke?: number
-  fill?: string
-  rotation?: number
-  createdBy?: string
-  emoji?: string
-  zIndex?: number
-  bpmnNodeType?: BpmnNodeType
-  bpmnDurationMs?: number
-  bpmnDurationDistribution?: 'fixed' | 'uniform' | 'triangular'
-  bpmnDurationMinMs?: number
-  bpmnDurationModeMs?: number
-  bpmnDurationMaxMs?: number
-  bpmnResourceRole?: string
-  bpmnCostPerHour?: number
-  bpmnResourceCapacity?: number
-  bpmnPriority?: number
-  bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
-}
-const COLORS = [
-  '#FF5D5D', '#FF9F43', '#FFD93D',
-  '#6BCB77', '#4D96FF', '#9D65C9',
-  '#EC4899', '#000000', '#FFFFFF'
-]
-const STICKY_COLORS = [
-  '#FFD93D', '#6BCB77', '#4D96FF',
-  '#FF9F43', '#9D65C9', '#FF5D5D',
-  '#F9F871', '#A0E7E5'
-]
-const EMOJIS = ['👍', '❤️', '⭐', '🔥', '💡', '✅', '❌', '🎯', '📌', '❓', '💪', '🎉', '🚀', '💯', '⚡', '🏆', '👀', '🤔', '💬', '🧠']
-type ContextMenuAction = 'edit' | 'duplicate' | 'front' | 'back' | 'delete'
-type PendingOpen = { proceed: () => Promise<void> }
-const CONTEXT_MENU_ITEMS: { label: string; action: ContextMenuAction; danger?: boolean }[] = [
-  { label: '✏️ Редактировать', action: 'edit' },
-  { label: '📋 Дублировать', action: 'duplicate' },
-  { label: '⬆️ На передний план', action: 'front' },
-  { label: '⬇️ На задний план', action: 'back' },
-  { label: '🗑️ Удалить', action: 'delete', danger: true },
-]
-function genId() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID()
-  }
-  // Fallback for environments without crypto.randomUUID
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const bytes = new Uint8Array(16)
-    crypto.getRandomValues(bytes)
-    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('').slice(0, 16)
-  }
-  // Final fallback (should never reach in modern browsers)
-  return Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9)
-}
-function pointToLineDistance(p: Point, a: Point, b: Point): number {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const len = Math.sqrt(dx * dx + dy * dy)
-  if (len === 0) return Math.hypot(p.x - a.x, p.y - a.y)
-  return Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / len
-}
-function simplifyPath(points: Point[], tolerance = 2): Point[] {
-  if (points.length <= 2) return points
-  let maxDist = 0, maxIdx = 0
-  const first = points[0], last = points[points.length - 1]
-  for (let i = 1; i < points.length - 1; i++) {
-    const d = pointToLineDistance(points[i], first, last)
-    if (d > maxDist) { maxDist = d; maxIdx = i }
-  }
-  if (maxDist > tolerance) {
-    const left = simplifyPath(points.slice(0, maxIdx + 1), tolerance)
-    const right = simplifyPath(points.slice(maxIdx), tolerance)
-    return [...left.slice(0, -1), ...right]
-  }
-  return [first, last]
-}
-function smoothPathD(points: Point[]): string {
-  if (points.length < 2) return ''
-  if (points.length === 2) return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`
-  let d = `M ${points[0].x} ${points[0].y}`
-  for (let i = 1; i < points.length - 1; i++) {
-    const mx = (points[i].x + points[i + 1].x) / 2
-    const my = (points[i].y + points[i + 1].y) / 2
-    d += ` Q ${points[i].x} ${points[i].y} ${mx} ${my}`
-  }
-  d += ` L ${points[points.length - 1].x} ${points[points.length - 1].y}`
-  return d
-}
-function snapVal(v: number, grid = 20) { return snap_to_grid(v, grid) }
-function bpmnEdgeAnchor(element: BoardElement, towardX: number, towardY: number): Point {
-  const width = element.w || 0
-  const height = element.h || 0
-  const centerX = element.x + width / 2
-  const centerY = element.y + height / 2
-  const dx = towardX - centerX
-  const dy = towardY - centerY
-  if (dx === 0 && dy === 0) return { x: centerX, y: centerY }
-  const halfWidth = width / 2
-  const halfHeight = height / 2
-  let scale: number
-  if (element.bpmnNodeType === 'startEvent' || element.bpmnNodeType === 'endEvent') {
-    scale = Math.min(halfWidth, halfHeight) / Math.hypot(dx, dy)
-  } else if (element.bpmnNodeType === 'xorGateway' || element.bpmnNodeType === 'andGateway' || element.bpmnNodeType === 'orGateway') {
-    scale = 1 / (Math.abs(dx) / halfWidth + Math.abs(dy) / halfHeight)
-  } else {
-    scale = 1 / Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight)
-  }
-  return { x: centerX + dx * scale, y: centerY + dy * scale }
-}
+
 export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -262,14 +129,15 @@ export default function App() {
   }, [])
   // Drag state. One gesture moves the whole selection, so it carries the start
   // frame of every dragged element instead of a single one.
-  const [dragInfo, setDragInfo] = useState<{
-    startX: number; startY: number; items: { id: string; x: number; y: number }[]
-  } | null>(null)
+  //
+  // Refs rather than state: nothing renders from them, and reading gesture
+  // geometry from state made the outcome depend on whether React had committed
+  // the pointermove renders before pointerup arrived — a flick released inside
+  // one frame finished with the pointerdown geometry and silently did nothing
+  // (see src/board/gesture.ts).
+  const dragInfoRef = useRef<DragInfo | null>(null)
   // Resize state
-  const [resizeInfo, setResizeInfo] = useState<{
-    id: string; corner: string; startX: number; startY: number;
-    elX: number; elY: number; elW: number; elH: number
-  } | null>(null)
+  const resizeInfoRef = useRef<ResizeInfo | null>(null)
   // Gesture frames stay local until pointer-up, preventing one Yjs item rewrite
   // (and one gc:false tombstone) per pointer event.
   const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> }[] | null>(null)
@@ -1294,11 +1162,11 @@ export default function App() {
       if (resizeHandle && selectedElementId) {
         const el = elements.find(candidate => candidate.id === selectedElementId)
         if (el) {
-          setResizeInfo({
-            id: selectedElementId, corner: resizeHandle.dataset.resize!,
+          resizeInfoRef.current = {
+            id: selectedElementId, corner: resizeHandle.dataset.resize as ResizeCorner,
             startX: point.x, startY: point.y,
-            elX: el.x, elY: el.y, elW: el.w || 0, elH: el.h || 0
-          })
+            elX: el.x, elY: el.y, elW: el.w || 0, elH: el.h || 0,
+          }
           return
         }
       }
@@ -1323,10 +1191,10 @@ export default function App() {
           .map(id => elements.find(candidate => candidate.id === id))
           .filter((candidate): candidate is BoardElement => Boolean(candidate))
         if (dragged.length) {
-          setDragInfo({
+          dragInfoRef.current = {
             startX: point.x, startY: point.y,
             items: dragged.map(item => ({ id: item.id, x: item.x, y: item.y })),
-          })
+          }
         }
         const longPress = { timer: null as number | null, x: e.clientX, y: e.clientY, startedAt: performance.now() }
         longPress.timer = window.setTimeout(() => {
@@ -1477,30 +1345,18 @@ export default function App() {
       return
     }
     // Resize
-    if (resizeInfo) {
-      const dx = point.x - resizeInfo.startX
-      const dy = point.y - resizeInfo.startY
-      const c = resizeInfo.corner
-      let newX = resizeInfo.elX, newY = resizeInfo.elY
-      let newW = resizeInfo.elW, newH = resizeInfo.elH
-      if (c === 'se') { newW = Math.max(30, resizeInfo.elW + dx); newH = Math.max(30, resizeInfo.elH + dy) }
-      else if (c === 'sw') { newX = resizeInfo.elX + dx; newW = Math.max(30, resizeInfo.elW - dx); newH = Math.max(30, resizeInfo.elH + dy) }
-      else if (c === 'ne') { newY = resizeInfo.elY + dy; newW = Math.max(30, resizeInfo.elW + dx); newH = Math.max(30, resizeInfo.elH - dy) }
-      else if (c === 'nw') { newX = resizeInfo.elX + dx; newY = resizeInfo.elY + dy; newW = Math.max(30, resizeInfo.elW - dx); newH = Math.max(30, resizeInfo.elH - dy) }
-      if (snapGrid) { newX = snapVal(newX); newY = snapVal(newY); newW = snapVal(newW); newH = snapVal(newH) }
-      const frame = [{ id: resizeInfo.id, updates: { x: newX, y: newY, w: newW, h: newH } }]
+    const resize = resizeInfoRef.current
+    if (resize) {
+      const frame = resizeFrame(resize, point, snapGrid ? snapVal : undefined)
       transientFrameRef.current = frame
       setTransientFrame(frame)
       return
     }
     // Drag: one delta applied to every dragged element, so a multi-selection
     // moves as a group and stays internally consistent.
-    if (dragInfo) {
-      const rawX = point.x - dragInfo.startX
-      const rawY = point.y - dragInfo.startY
-      const deltaX = snapGrid ? snapVal(dragInfo.items[0].x + rawX) - dragInfo.items[0].x : rawX
-      const deltaY = snapGrid ? snapVal(dragInfo.items[0].y + rawY) - dragInfo.items[0].y : rawY
-      const frame = dragInfo.items.map(item => ({ id: item.id, updates: { x: item.x + deltaX, y: item.y + deltaY } }))
+    const drag = dragInfoRef.current
+    if (drag) {
+      const frame = dragFrame(drag, point, snapGrid ? snapVal : undefined)
       transientFrameRef.current = frame
       setTransientFrame(frame)
       return
@@ -1518,8 +1374,8 @@ export default function App() {
         updateElement(selectedElementId, { w, h })
       }
     }
-  }, [isPanning, panStart, isDrawing, tool, selectedElementId, elements, screenToWorld, updateElement, dragInfo, resizeInfo, snapGrid, bpmnFlowSourceId])
-  const handlePointerUp = useCallback(() => {
+  }, [isPanning, panStart, isDrawing, tool, selectedElementId, elements, screenToWorld, updateElement, snapGrid, bpmnFlowSourceId])
+  const handlePointerUp = useCallback((e?: React.PointerEvent) => {
     // Cancel long press
     if (longPressRef.current) {
       if (performance.now() - longPressRef.current.startedAt < 500) {
@@ -1540,7 +1396,20 @@ export default function App() {
         createdBy: userProfile.id
       })
     }
-    const frame = transientFrameRef.current
+    // Where the pointer actually is. A cancelled gesture has no meaningful
+    // release point, so it keeps whatever the last move produced.
+    const releasedAt = e && e.type !== 'pointercancel' ? screenToWorld(e.clientX, e.clientY) : null
+    const snap = snapGrid ? snapVal : undefined
+    // Recompute the final frame from the release point instead of trusting the
+    // last committed pointermove: the gesture has to land where the user let go,
+    // whatever React has rendered by then.
+    const frame = releasedAt
+      ? resizeInfoRef.current
+        ? resizeFrame(resizeInfoRef.current, releasedAt, snap)
+        : dragInfoRef.current
+          ? dragFrame(dragInfoRef.current, releasedAt, snap)
+          : transientFrameRef.current
+      : transientFrameRef.current
     // One commit per gesture, labelled as such: the drag itself stays local
     // (transientFrame) so a 3-second drag is a single undo step, not 180.
     if (frame?.length) {
@@ -1551,12 +1420,16 @@ export default function App() {
     }
     transientFrameRef.current = null
     setTransientFrame(null)
-    // Finish the marquee: select what the rect covers.
+    // Finish the marquee: select what the rect covers, measured to the release
+    // point for the same reason as the frame above.
     const pendingMarquee = marqueeRef.current
-    if (pendingMarquee && marquee) {
-      const picked = selectInRect(elements, marquee, 'intersect')
-      setSelectedIds(current => (pendingMarquee.shift ? unionSelection(current, picked) : selectMany(picked)))
-      if (!pendingMarquee.shift) setAnchorId(picked.length ? picked[picked.length - 1] : null)
+    if (pendingMarquee) {
+      const rect = releasedAt ? normaliseRect(pendingMarquee.from, releasedAt) : marquee
+      if (rect) {
+        const picked = selectInRect(elements, rect, 'intersect')
+        setSelectedIds(current => (pendingMarquee.shift ? unionSelection(current, picked) : selectMany(picked)))
+        if (!pendingMarquee.shift) setAnchorId(picked.length ? picked[picked.length - 1] : null)
+      }
     }
     marqueeRef.current = null
     setMarquee(null)
@@ -1565,9 +1438,9 @@ export default function App() {
     setIsPanning(false)
     setPanStart(null)
     setLastPinchDist(null)
-    setDragInfo(null)
-    setResizeInfo(null)
-  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, userProfile.id, marquee, elements, ydoc])
+    dragInfoRef.current = null
+    resizeInfoRef.current = null
+  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, userProfile.id, marquee, elements, ydoc, screenToWorld, snapGrid])
   // Touch pinch
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {

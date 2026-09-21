@@ -189,6 +189,38 @@ describe('App smoke', () => {
     expect(transforms()).toEqual([shift(before[0], 50, 20), shift(before[1], 50, 20)])
   })
 
+  // The two tests below are the reason gesture geometry lives in
+  // src/board/gesture.ts. Both dispatch pointerdown and pointerup with nothing
+  // in between, which is what a flick is: React has rendered nothing since the
+  // press, so a handler that finishes the gesture from state would use the
+  // geometry captured at pointerdown — a zero-size marquee that selects nothing,
+  // and no drag frame at all.
+  it('finishes a flicked marquee that never rendered an intermediate move', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+
+    key('v')
+    const canvas = byTestId('canvas')!
+    pointer(canvas, 'pointerdown', { clientX: 5, clientY: 5 })
+    pointer(canvas, 'pointerup', { clientX: 600, clientY: 500 })
+
+    expect(byTestId('selection-count')!.textContent).toContain('2')
+  })
+
+  it('finishes a flicked group drag at the release point', () => {
+    placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+    placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+    dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+    expect(byTestId('selection-count')!.textContent).toContain('2')
+
+    const before = transforms()
+    const first = container.querySelector('g[data-id]')!
+    pointer(first, 'pointerdown', { clientX: 120, clientY: 120 })
+    pointer(first, 'pointerup', { clientX: 170, clientY: 140 })
+
+    expect(transforms()).toEqual([shift(before[0], 50, 20), shift(before[1], 50, 20)])
+  })
+
   it('clears a multi-selection on Escape', () => {
     placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
     placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
