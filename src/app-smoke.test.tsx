@@ -551,6 +551,56 @@ describe('App smoke', () => {
       expect(shape.getAttribute('width')).toBe('300')
       expect(byTestId('align-guide')).toBeNull()
     })
+
+    it('resizes a rectangle from the north-west corner, and a circle the same way', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+      const rect = container.querySelector('g[data-id]')!
+      pointer(rect, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(rect, 'pointerup', { clientX: 110, clientY: 110 })
+      expect([...container.querySelectorAll('[data-resize]')].map(grip => grip.getAttribute('data-resize'))).toEqual(['nw', 'ne', 'sw', 'se'])
+
+      const handle = container.querySelector('[data-resize="nw"]')!
+      pointer(handle, 'pointerdown', { clientX: 100, clientY: 100 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 70, clientY: 80 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 70, clientY: 80 })
+      expect(rect.getAttribute('transform')).toBe('translate(70,80)')
+      expect(rect.querySelector('rect')!.getAttribute('width')).toBe('130')
+      expect(rect.querySelector('rect')!.getAttribute('height')).toBe('80')
+
+      key('o')
+      pointer(byTestId('canvas')!, 'pointerdown', { clientX: 400, clientY: 300 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 500, clientY: 360 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 500, clientY: 360 })
+      key('v')
+      const circle = container.querySelectorAll('g[data-id]')[1]!
+      pointer(circle, 'pointerdown', { clientX: 420, clientY: 320 })
+      pointer(circle, 'pointerup', { clientX: 420, clientY: 320 })
+      expect([...container.querySelectorAll('[data-resize]')].map(grip => grip.getAttribute('data-resize'))).toEqual(['nw', 'ne', 'sw', 'se'])
+    })
+
+    it('gives a BPMN task the same four corners', () => {
+      const openTemplates = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Начать с шаблона'))!
+      act(() => { openTemplates.click() })
+      const bpmn = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('BPMN 2.0'))!
+      act(() => { bpmn.click() })
+      const task = [...container.querySelectorAll('g[data-id]')].find(node => node.textContent?.includes('Выполнить'))!
+      pointer(task, 'pointerdown', { clientX: 260, clientY: 180 })
+      pointer(task, 'pointerup', { clientX: 260, clientY: 180 })
+      expect([...container.querySelectorAll('[data-resize]')].map(grip => grip.getAttribute('data-resize'))).toEqual(['nw', 'ne', 'sw', 'se'])
+    })
+
+    it('does not put corner grips on a freeform arrow', () => {
+      // Drawing selects the new mark. A corner grip would be on screen without
+      // a further click; the stroke is not a box, so there must be none.
+      key('a')
+      pointer(byTestId('canvas')!, 'pointerdown', { clientX: 100, clientY: 100 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 200, clientY: 160 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 200, clientY: 160 })
+      key('v')
+      expect(container.querySelector('g[data-id]')).not.toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+    })
   })
 
   describe('groups', () => {

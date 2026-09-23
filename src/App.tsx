@@ -1880,6 +1880,13 @@ export default function App() {
     const invS = 1 / transform.scale
     const isChangedInPreview = isPreview && !liveElementIds.has(el.id)
     const moveCursor = isPreview || isLocked(el) ? 'cursor-default' : 'cursor-move'
+    // One box, four corners. A path and an arrow are not a box: the stroke is
+    // the points or the endpoints, and pulling a corner would not scale them.
+    const cornerGrips = (width: number, height: number) => (
+      isSelected && selectionCount === 1 && !el.locked
+        ? <ResizeHandles invScale={invS} width={width} height={height} />
+        : null
+    )
     if (el.bpmnNodeType) {
       const width = el.w || 80
       const height = el.h || 80
@@ -1917,6 +1924,7 @@ export default function App() {
           {isBottleneck && <text x={width - 10} y={15} textAnchor="end" fontSize="10" fontWeight="700" fill="#EA580C">⚠ bottleneck</text>}
           {isSelected && <rect x={-4} y={-4} width={width + 8} height={height + 8}
             fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={isEvent ? width / 2 : 6} />}
+          {cornerGrips(width, height)}
         </g>
       )
     }
@@ -1955,8 +1963,7 @@ export default function App() {
             {isSelected && selectionCount === 1 && <>
               <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
                 fill="none" stroke="#4D96FF" strokeWidth={2 * invS} rx={12} />
-              {/* Resize handles: single selection only, and never on a lock. */}
-              {!el.locked && <ResizeHandles invScale={invS} width={el.w || 0} height={el.h || 0} />}
+              {cornerGrips(el.w || 0, el.h || 0)}
             </>}
           </g>
         )
@@ -1979,6 +1986,7 @@ export default function App() {
             </foreignObject>
             {isSelected && <rect x={-4} y={-4} width={(el.w || 200) + 8} height={(el.h || 60) + 8}
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
+            {cornerGrips(el.w || 200, el.h || 60)}
           </g>
         )
       case 'rect':
@@ -2004,10 +2012,7 @@ export default function App() {
               <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
                 fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={6} />
             )}
-            {isSelected && selectionCount === 1 && !el.locked && ([['se', (el.w || 0), (el.h || 0)]] as [string, number, number][]).map(([c, cx, cy]) => (
-              <circle key={c} data-resize={c} cx={cx} cy={cy} r={7 * invS}
-                fill="white" stroke="#4D96FF" strokeWidth={2 * invS} style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.2))' }} />
-            ))}
+            {cornerGrips(el.w || 0, el.h || 0)}
           </g>
         )
       case 'circle':
@@ -2031,6 +2036,7 @@ export default function App() {
             </foreignObject>
             {isSelected && <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
+            {cornerGrips(el.w || 0, el.h || 0)}
           </g>
         )
       case 'arrow':
@@ -2092,6 +2098,7 @@ export default function App() {
             </foreignObject>
             {isSelected && <rect x={-2} y={-2} width={(el.w || 48) + 4} height={(el.h || 48) + 4}
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={6} />}
+            {cornerGrips(el.w || 48, el.h || 48)}
           </g>
         )
       default: return null
