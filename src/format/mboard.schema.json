@@ -200,6 +200,9 @@
         },
         "createdBy": {
           "type": "string"
+        },
+        "locked": {
+          "type": "boolean"
         }
       }
     },

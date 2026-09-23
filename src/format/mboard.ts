@@ -23,9 +23,13 @@ export interface BoardElement {
   stroke?: number
   fill?: string
   rotation?: number
+  /** When true, the node does not move, resize or rotate. Never set on a connector. */
+  locked?: boolean
   createdBy?: string
   emoji?: string
   zIndex?: number
+  /** Shared group token. Persisted as `parentId`. Never set on a connector. */
+  groupId?: string
   bpmnNodeType?: BpmnNodeType
   bpmnDurationMs?: number
   bpmnDurationDistribution?: 'fixed' | 'uniform' | 'triangular'
@@ -59,6 +63,12 @@ export interface DeserialiseOutput {
 
 const elementExtras = new WeakMap<object, Record<string, unknown>>()
 const documentExtras = new WeakMap<object, Record<string, unknown>>()
+
+/** Group token written to `parentId`. Empty and connector tokens stay null. */
+function persistedGroupId(element: BoardElement): string | null {
+  if (element.bpmnFlow) return null
+  return typeof element.groupId === 'string' && element.groupId.length > 0 ? element.groupId : null
+}
 
 function defined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T
@@ -112,13 +122,14 @@ export function toDocElement(element: BoardElement): DocElement {
       id: element.id,
       order: 0,
       kind: element.type,
-      parentId: null,
+      parentId: persistedGroupId(element),
       frame: { x: element.x, y: element.y, w: element.w ?? null, h: element.h ?? null, rotation: element.rotation ?? 0 },
       z: element.zIndex ?? 0,
       style: { color: element.color, fill: element.fill ?? null, stroke: element.stroke ?? null },
       content: defined({ text: element.text, points: element.points, emoji: element.emoji }),
       profileData,
       createdBy: element.createdBy,
+      locked: element.bpmnFlow ? undefined : element.locked === true ? true : undefined,
     }),
   }
 }
@@ -141,6 +152,8 @@ export function fromDocNode(node: DocNode): BoardElement {
     points: node.content.points,
     emoji: node.content.emoji,
     createdBy: node.createdBy,
+    groupId: typeof node.parentId === 'string' && node.parentId.length > 0 ? node.parentId : undefined,
+    locked: node.locked === true ? true : undefined,
     // Checked rather than cast: the Rust engine's enum refuses to deserialise
     // an unknown value, taking validation of the whole model down with it. The
     // original is preserved below, so a nodeType from a newer version survives
@@ -209,6 +222,7 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
 export function canonicalElement(element: BoardElement): BoardElement {
   const result = { ...element } as BoardElement
   if (result.rotation === 0) delete result.rotation
+  if (result.locked !== true) delete result.locked
   if (result.zIndex === undefined) result.zIndex = 0
   if (result.bpmnFlow) {
     result.x = 0
@@ -223,6 +237,10 @@ export function canonicalElement(element: BoardElement): BoardElement {
     delete result.createdBy
     delete result.emoji
     delete result.points
+    // Connectors are edges. Edges have no parentId, so a token on a flow is
+    // not part of the projection.
+    delete result.groupId
+    delete result.locked
   }
   return result
 }
@@ -275,7 +293,7 @@ export function deserialise(file: MboardFile): DeserialiseOutput {
 }
 
 const ROOT_KEYS = new Set(['format', 'schemaVersion', 'meta', 'nodes', 'edges', 'profileConfig', 'history', 'assets'])
-const NODE_KEYS = new Set(['id', 'order', 'kind', 'parentId', 'frame', 'z', 'style', 'content', 'profileData', 'createdBy'])
+const NODE_KEYS = new Set(['id', 'order', 'kind', 'parentId', 'frame', 'z', 'style', 'content', 'profileData', 'createdBy', 'locked'])
 const EDGE_KEYS = new Set(['id', 'order', 'kind', 'source', 'target', 'waypoints', 'style', 'content', 'profileData'])
 
 function unknownKeys(value: Record<string, unknown>, known: Set<string>): Record<string, unknown> {

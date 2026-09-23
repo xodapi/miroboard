@@ -8,6 +8,8 @@
  * 2px outline would otherwise render 8px thick.
  */
 
+import { frameTransform } from '../board/rotate'
+
 /** Orange, matching HistoryPreviewBanner. */
 const CHANGED_STROKE = '#F97316'
 /** The selection blue used across the board. */
@@ -100,6 +102,46 @@ export function ResizeHandles({ invScale, width, height }: ResizeHandlesProps) {
           className="cursor-nwse-resize"
           style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.2))' }}
         />
+      ))}
+    </>
+  )
+}
+
+export interface LockBadgeElement {
+  id: string
+  x: number
+  y: number
+  w?: number
+  h?: number
+  rotation?: number
+  locked?: boolean
+}
+
+/**
+ * A padlock at the top-right of every locked object.
+ *
+ * Drawn once for the board rather than inside each shape branch, and scaled
+ * by the inverse viewport so it stays the same size on screen. It does not
+ * take pointer events: a click still hits the object underneath, which is
+ * how the object is selected in order to unlock it.
+ */
+export function LockBadges({ elements, invScale }: { elements: readonly LockBadgeElement[]; invScale: number }) {
+  const locked = elements.filter(element => element.locked === true)
+  if (!locked.length) return null
+  return (
+    <>
+      {locked.map(element => (
+        <g key={element.id} transform={frameTransform(element)} pointerEvents="none">
+          <g
+            data-testid="lock-badge"
+            data-lock={element.id}
+            transform={`translate(${Math.max(element.w ?? 0, 0)},0) scale(${invScale})`}
+          >
+            <circle r="9" fill="#0f172a" />
+            <path d="M-3.2 -1.4 v-1.5 a3.2 3.2 0 0 1 6.4 0 v1.5" fill="none" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
+            <rect x="-4" y="-1.4" width="8" height="5.6" rx="1.1" fill="white" />
+          </g>
+        </g>
       ))}
     </>
   )

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { canonicalElement, deserialise, fromDocEdge, fromDocNode, serialise, toDocElement, type BoardElement } from './mboard'
+import type { DocHistory, DocMeta } from './types'
 
 const node: BoardElement = {
   id: 'fractional-sticky',
@@ -38,7 +39,62 @@ const edge: BoardElement = {
   },
 }
 
+const meta: DocMeta = {
+  id: 'doc_lock', title: 'Lock', createdAt: '2026-08-13T00:00:00.000Z', updatedAt: '2026-08-13T00:00:00.000Z',
+  createdWith: { version: '0.16.0', commit: 'test' }, profiles: ['core'],
+}
+const history: DocHistory = {
+  yjsState: null, snapshots: [],
+  retention: { keepAllNamed: true, keepLastAuto: 20, decayBucketsHours: [], maxSnapshots: 120, maxHistoryRatio: 3 },
+}
+
+describe('locked', () => {
+  it('omits an unlocked node and never writes the field on a connector', () => {
+    const open = toDocElement({ id: 'open', type: 'rect', x: 1, y: 2, color: '#000' })
+    const explicitFalse = toDocElement({ id: 'open', type: 'rect', x: 1, y: 2, color: '#000', locked: false })
+    if (!('node' in open) || !('node' in explicitFalse)) throw new Error('expected node')
+    expect(open.node).not.toHaveProperty('locked')
+    expect(explicitFalse.node).not.toHaveProperty('locked')
+
+    const locked = toDocElement({ id: 'shut', type: 'rect', x: 1, y: 2, color: '#000', locked: true })
+    if (!('node' in locked)) throw new Error('expected node')
+    expect(locked.node.locked).toBe(true)
+    expect(canonicalElement(fromDocNode(locked.node))).toEqual(
+      canonicalElement({ id: 'shut', type: 'rect', x: 1, y: 2, color: '#000', locked: true }),
+    )
+    expect(fromDocNode({ ...open.node, locked: false })).not.toHaveProperty('locked')
+
+    const flow = toDocElement({
+      id: 'flow', type: 'arrow', x: 4, y: 5, color: '#000', locked: true,
+      bpmnFlow: { sourceId: 'a', targetId: 'b' },
+    })
+    expect('node' in flow).toBe(false)
+    expect(JSON.stringify(flow)).not.toContain('locked')
+
+    const unlocked = serialise({
+      elements: [{ id: 'n', type: 'rect', x: 0, y: 0, color: '#000' }],
+      meta, profileConfig: {}, history,
+    })
+    const falseFlag = serialise({
+      elements: [{ id: 'n', type: 'rect', x: 0, y: 0, color: '#000', locked: false }],
+      meta, profileConfig: {}, history,
+    })
+    expect(unlocked).toEqual(falseFlag)
+    expect(unlocked.schemaVersion).toBe(1)
+    expect(unlocked.nodes[0]).not.toHaveProperty('locked')
+    expect(unlocked.edges).toEqual([])
+  })
+})
+
 describe('canonicalElement', () => {
+  it('round-trips a group token as parentId', () => {
+    const grouped = { ...node, groupId: 'grp_shared' }
+    const doc = toDocElement(grouped)
+    if (!('node' in doc)) throw new Error('expected node')
+    expect(doc.node.parentId).toBe('grp_shared')
+    expect(canonicalElement(fromDocNode(doc.node))).toEqual(canonicalElement(grouped))
+  })
+
   it('round-trips every documented node field without coordinate or style drift', () => {
     const doc = toDocElement(node)
     if (!('node' in doc)) throw new Error('expected node')

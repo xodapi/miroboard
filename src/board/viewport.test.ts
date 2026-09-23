@@ -6,7 +6,7 @@ const { clampScale } = vi.hoisted(() => ({
 }))
 vi.mock('../wasm/board-core/board_core', () => ({ clamp_scale: clampScale }))
 
-const { elementsInScope, fitTransform, screenToWorld, wheelZoomFactor, zoomAround } = await import('./viewport')
+const { centerOn, elementsInScope, fitTransform, screenToWorld, wheelZoomFactor, zoomAround } = await import('./viewport')
 type BoardElement = Parameters<typeof fitTransform>[0][number]
 
 const element = (over: Partial<BoardElement> = {}): BoardElement => ({
@@ -106,6 +106,19 @@ describe('fitTransform', () => {
     const huge = fitTransform([element({ w: 100_000, h: 100_000 })], viewport)
     expect(tiny.scale).toBeLessThanOrEqual(5)
     expect(huge.scale).toBeGreaterThanOrEqual(0.15)
+  })
+})
+
+describe('centerOn', () => {
+  it('puts the box centre at the viewport centre without changing scale', () => {
+    const transform = centerOn(
+      { x: 0, y: 0, scale: 2 },
+      { x: 1000, y: 2000, w: 100, h: 100 },
+      { width: 800, height: 600 },
+    )
+    expect(transform.scale).toBe(2)
+    expect(1050 * transform.scale + transform.x).toBeCloseTo(400)
+    expect(2050 * transform.scale + transform.y).toBeCloseTo(300)
   })
 })
 

@@ -1,6 +1,8 @@
 import * as Y from 'yjs'
 import { LOCAL_EDIT } from '../collab/origins'
 import { commitElementUpdate } from '../persistence/updates'
+import { dissolveAfter, expandIds, retargetGroupIds, type GroupWrite } from './group'
+import { isLocked, withLock } from './lock'
 import type { BoardElement } from './types'
 
 /**
@@ -41,35 +43,110 @@ export function updateElement(
   return commitElementUpdate(doc, elements, id, updates, origin)
 }
 
-/** Returns false when the id is not on the board, so callers can skip follow-up state. */
+/**
+ * Returns false when the id is not on the board, so callers can skip follow-up state.
+ *
+ * A grouped element takes the rest of its group with it, and any connector
+ * that touched a removed endpoint is removed too — leaving it would save a
+ * dangling edge, which the format rejects.
+ */
 export function deleteElement(doc: Y.Doc, elements: Elements, id: string, origin: unknown = LOCAL_EDIT): boolean {
-  const index = elements.toArray().findIndex(element => element.id === id)
-  if (index < 0) return false
-  doc.transact(() => { elements.delete(index, 1) }, origin)
-  return true
+  if (!elements.toArray().some(element => element.id === id)) return false
+  return commitRemoval(doc, elements, [id], origin) > 0
 }
 
 /**
  * Deletes a whole selection in one transaction.
  *
- * Walks backwards so each delete cannot shift the indices of the ones still to
- * come — the forward loop is the classic way this silently skips elements.
+ * The selection is expanded first: a grouped member takes its group, and a
+ * connector that lost an endpoint is removed with it. The walk itself goes
+ * backwards so each delete cannot shift the indices of the ones still to come.
  * Returns how many were removed; zero means no transaction was opened at all,
  * which keeps a delete of nothing from marking the document dirty.
  */
 export function deleteElements(doc: Y.Doc, elements: Elements, ids: Iterable<string>, origin: unknown = LOCAL_EDIT): number {
-  const wanted = new Set(ids)
-  if (!wanted.size) return 0
+  const wanted = [...ids]
+  if (!wanted.length) return 0
+  return commitRemoval(doc, elements, wanted, origin)
+}
 
-  const present = elements.toArray().filter(element => wanted.has(element.id)).length
-  if (!present) return 0
-
+/**
+ * One transaction: drop group tokens that would be left with a single member,
+ * then delete. The count is how many elements were actually removed, including
+ * group mates and connectors that lost an endpoint — not only the ids the
+ * caller named.
+ */
+function commitRemoval(doc: Y.Doc, elements: Elements, ids: Iterable<string>, origin: unknown): number {
+  const list = elements.toArray()
+  const present = new Set(list.map(element => element.id))
+  const removing = new Set(expandIds(list, ids).filter(id => present.has(id)))
+  if (!removing.size) return 0
+  for (const element of list) {
+    const flow = element.bpmnFlow
+    if (flow && !removing.has(element.id) && (removing.has(flow.sourceId) || removing.has(flow.targetId))) {
+      removing.add(element.id)
+    }
+  }
+  const clears = dissolveAfter(list, removing)
   doc.transact(() => {
+    applyMembership(elements, clears)
     for (let index = elements.length - 1; index >= 0; index -= 1) {
-      if (wanted.has(elements.get(index).id)) elements.delete(index, 1)
+      if (removing.has(elements.get(index).id)) elements.delete(index, 1)
     }
   }, origin)
-  return present
+  return removing.size
+}
+
+/**
+ * Writes group membership in one transaction.
+ *
+ * A write without `groupId` deletes the key. Setting it to `undefined` would
+ * leave the field on the record, and the next clone would keep the element
+ * grouped. A no-op — every named element already holds the requested token —
+ * opens no transaction.
+ */
+export function writeGroupMembership(
+  doc: Y.Doc,
+  elements: Elements,
+  writes: readonly GroupWrite[],
+  origin: unknown = LOCAL_EDIT,
+): number {
+  if (!writes.length) return 0
+  const byId = new Map(writes.map(write => [write.id, write.groupId]))
+  const willChange = elements.toArray().some(element => byId.has(element.id) && withMembership(element, byId.get(element.id)) !== element)
+  if (!willChange) return 0
+  let changed = 0
+  doc.transact(() => {
+    changed = applyMembership(elements, writes)
+  }, origin)
+  return changed
+}
+
+function applyMembership(elements: Elements, writes: readonly GroupWrite[]): number {
+  if (!writes.length) return 0
+  const byId = new Map(writes.map(write => [write.id, write.groupId]))
+  let changed = 0
+  for (let index = 0; index < elements.length; index += 1) {
+    const current = elements.get(index)
+    if (!byId.has(current.id)) continue
+    const next = withMembership(current, byId.get(current.id))
+    if (next === current) continue
+    elements.delete(index, 1)
+    elements.insert(index, [next])
+    changed += 1
+  }
+  return changed
+}
+
+function withMembership(element: BoardElement, groupId: string | undefined): BoardElement {
+  if (element.bpmnFlow || !groupId) {
+    if (!('groupId' in element)) return element
+    const next = { ...element }
+    delete next.groupId
+    return next
+  }
+  if (element.groupId === groupId) return element
+  return { ...element, groupId }
 }
 
 /**
@@ -115,7 +192,10 @@ export function moveElements(
   if (!wanted.size) return 0
   if (delta.x === 0 && delta.y === 0) return 0
 
-  const picked = elements.toArray().filter(element => wanted.has(element.id))
+  // A locked element stays put even when the rest of the selection moves.
+  // Skipping it here covers the arrow keys; the pointer path never puts a
+  // locked id into the gesture in the first place.
+  const picked = elements.toArray().filter(element => wanted.has(element.id) && !isLocked(element))
   if (!picked.length) return 0
 
   doc.transact(() => {
@@ -124,6 +204,40 @@ export function moveElements(
     }
   }, origin)
   return picked.length
+}
+
+/**
+ * Locks or unlocks a selection in one transaction.
+ *
+ * Unlock deletes the key rather than writing `false`, so an unlocked element
+ * serialises exactly as it did before the field existed. A connector is
+ * skipped. A no-op opens no transaction.
+ */
+export function setLocked(
+  doc: Y.Doc,
+  elements: Elements,
+  ids: Iterable<string>,
+  locked: boolean,
+  origin: unknown = LOCAL_EDIT,
+): number {
+  const wanted = new Set(ids)
+  if (!wanted.size) return 0
+  const willChange = elements.toArray().some(element => wanted.has(element.id) && withLock(element, locked) !== element)
+  if (!willChange) return 0
+
+  let changed = 0
+  doc.transact(() => {
+    for (let index = 0; index < elements.length; index += 1) {
+      const current = elements.get(index)
+      if (!wanted.has(current.id)) continue
+      const next = withLock(current, locked)
+      if (next === current) continue
+      elements.delete(index, 1)
+      elements.insert(index, [next])
+      changed += 1
+    }
+  }, origin)
+  return changed
 }
 
 /**
@@ -153,16 +267,19 @@ export function duplicateElements(
   if (!picked.length) return []
 
   const created: string[] = []
-  doc.transact(() => {
-    picked.forEach((element, index) => {
-      const offset = DUPLICATE_OFFSET * (index + 1)
-      const id = nextId()
-      created.push(id)
-      const copy: BoardElement = { ...element, id, x: element.x + offset, y: element.y + offset }
-      if (createdBy !== undefined) copy.createdBy = createdBy
-      elements.push([copy])
-    })
-  }, origin)
+  const copies: BoardElement[] = []
+  picked.forEach((element, index) => {
+    const offset = DUPLICATE_OFFSET * (index + 1)
+    const id = nextId()
+    created.push(id)
+    const copy: BoardElement = { ...element, id, x: element.x + offset, y: element.y + offset }
+    if (createdBy !== undefined) copy.createdBy = createdBy
+    copies.push(copy)
+  })
+  // A copied group must not stay in the source group, or the next click on a
+  // copy would select the originals too. Lone copies drop the token.
+  const stamped = retargetGroupIds(copies, () => nextId())
+  doc.transact(() => { elements.push(stamped) }, origin)
   return created
 }
 

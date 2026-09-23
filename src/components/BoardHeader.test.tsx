@@ -100,6 +100,25 @@ describe('BoardHeader', () => {
     expect(byTitle('Открыть Monte Carlo симуляцию').disabled).toBe(true)
   })
 
+  it('offers lock only when the caller has a lockable selection', () => {
+    render()
+    expect(container.querySelector('[data-testid="lock-toggle"]')).toBeNull()
+
+    const onToggleLock = vi.fn()
+    render({ lockLabel: 'Заблокировать', onToggleLock })
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="lock-toggle"]')!
+    expect(button.textContent).toBe('Заблокировать')
+    expect(button.getAttribute('aria-pressed')).toBe('false')
+    act(() => { button.click() })
+    expect(onToggleLock).toHaveBeenCalledTimes(1)
+
+    render({ lockLabel: 'Разблокировать', onToggleLock })
+    expect(container.querySelector('[data-testid="lock-toggle"]')!.getAttribute('aria-pressed')).toBe('true')
+
+    render({ lockLabel: 'Заблокировать', onToggleLock, isPreview: true })
+    expect(container.querySelector('[data-testid="lock-toggle"]')).toBeNull()
+  })
+
   it('hides the selection count for zero or one element', () => {
     // One selected element already shows its own handles; the badge is only
     // informative once a marquee has grabbed several.

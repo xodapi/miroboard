@@ -42,6 +42,23 @@ export function wheelZoomFactor(deltaY: number): number {
   return -deltaY > 0 ? WHEEL_IN : WHEEL_OUT
 }
 
+/**
+ * Pans so a world box sits in the middle of the viewport, keeping the scale.
+ *
+ * Search uses this. Changing the zoom to frame one sticky would throw away
+ * the scale the user just set; they asked to *go to* the match, not to refit
+ * the board.
+ */
+export function centerOn(transform: Transform, bounds: { x: number; y: number; w: number; h: number }, viewport: Viewport): Transform {
+  const cx = bounds.x + bounds.w / 2
+  const cy = bounds.y + bounds.h / 2
+  return {
+    scale: transform.scale,
+    x: viewport.width / 2 - cx * transform.scale,
+    y: viewport.height / 2 - cy * transform.scale,
+  }
+}
+
 export interface Viewport {
   width: number
   height: number

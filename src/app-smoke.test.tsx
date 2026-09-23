@@ -498,6 +498,208 @@ describe('App smoke', () => {
     })
   })
 
+  describe('search list and resize alignment', () => {
+    function placeSticky(at: { x: number; y: number }) {
+      key('s')
+      pointer(byTestId('canvas')!, 'pointerdown', { clientX: at.x, clientY: at.y })
+      const field = container.querySelector<HTMLTextAreaElement>('[data-testid="element-text-input"]')
+      // React listens for focusout, not a synthetic blur, so call the real method.
+      if (field) act(() => { field.blur() })
+    }
+
+    it('lists search hits and jumps to the one that was clicked', () => {
+      placeSticky({ x: 200, y: 200 })
+      placeSticky({ x: 800, y: 700 })
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(2)
+
+      key('f', { ctrlKey: true })
+      const input = container.querySelector('[data-testid="board-search"] input') as HTMLInputElement
+      expect(input).not.toBeNull()
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'Заметка')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+
+      const rows = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="search-result"]')]
+      expect(rows).toHaveLength(2)
+      expect(rows[0].getAttribute('aria-current')).toBe('true')
+
+      const before = container.querySelector('svg > g')?.getAttribute('transform')
+      act(() => { rows[1].click() })
+      expect(rows[1].isConnected ? container.querySelectorAll('[data-testid="search-result"]')[1].getAttribute('aria-current') : null).toBe('true')
+      expect(container.querySelector('svg > g')?.getAttribute('transform')).not.toBe(before)
+      expect(byTestId('search-hit')).not.toBeNull()
+    })
+
+    it('snaps a resize edge to a neighbour instead of stopping where the pointer was', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      key('v')
+      const first = container.querySelector('g[data-id]')!
+      pointer(first, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(first, 'pointerup', { clientX: 110, clientY: 110 })
+
+      const handle = container.querySelector('[data-resize="se"]')!
+      expect(handle).not.toBeNull()
+      pointer(handle, 'pointerdown', { clientX: 200, clientY: 160 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 398, clientY: 160 })
+      expect(byTestId('align-guide')).not.toBeNull()
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 398, clientY: 160 })
+
+      // Right edge lands on the neighbour's left edge (400), not at the pointer (398).
+      const shape = first.querySelector('rect')!
+      expect(shape.getAttribute('width')).toBe('300')
+      expect(byTestId('align-guide')).toBeNull()
+    })
+  })
+
+  describe('groups', () => {
+    function ids(): string[] {
+      return [...container.querySelectorAll('g[data-id]')].map(node => (node as HTMLElement).dataset.id!)
+    }
+
+    function placeTwo() {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+    }
+
+    it('groups a selection with Ctrl+G and selects the whole group from one click', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+
+      key('g', { ctrlKey: true })
+      expect(container.textContent).toContain('Сгруппировано')
+      expect(byTestId('group-outline')).not.toBeNull()
+
+      key('Escape')
+      expect(byTestId('selection-count')).toBeNull()
+      expect(byTestId('group-outline')).toBeNull()
+
+      // Click the first rectangle, not a hit-test of the canvas: the second
+      // rectangle is far away, so only group membership can pull it in.
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerup', { clientX: 110, clientY: 110 })
+      expect(byTestId('selection-count')!.textContent).toContain('2')
+      expect(byTestId('group-outline')).not.toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+    })
+
+    it('moves both members when one of them is dragged', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('Escape')
+
+      const before = transforms()
+      const first = container.querySelector('g[data-id]')!
+      pointer(first, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 170, clientY: 140 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 170, clientY: 140 })
+
+      expect(transforms()).toEqual([shift(before[0], 50, 20), shift(before[1], 50, 20)])
+    })
+
+    it('marquee of one member still selects the whole group', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('Escape')
+
+      dragMarquee({ x: 80, y: 80 }, { x: 220, y: 180 })
+      expect(byTestId('selection-count')!.textContent).toContain('2')
+      expect(byTestId('group-outline')).not.toBeNull()
+    })
+
+    it('deletes the whole group from one selected member', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('Escape')
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerup', { clientX: 110, clientY: 110 })
+
+      key('Delete')
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
+    })
+
+    it('ungroups with Ctrl+Shift+G so the next click selects one object', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('G', { ctrlKey: true, shiftKey: true, code: 'KeyG' })
+      expect(container.textContent).toContain('Группа снята')
+
+      key('Escape')
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerup', { clientX: 110, clientY: 110 })
+      expect(byTestId('selection-count')).toBeNull()
+      expect(byTestId('group-outline')).toBeNull()
+      expect(container.querySelector('[data-resize]')).not.toBeNull()
+    })
+
+    it('shift-click removes the whole group, not one member', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      expect(byTestId('selection-count')!.textContent).toContain('2')
+      expect(byTestId('selection-anchor')).not.toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+
+      const first = container.querySelector('g[data-id]')!
+      pointer(first, 'pointerdown', { clientX: 110, clientY: 110, shiftKey: true })
+      pointer(first, 'pointerup', { clientX: 110, clientY: 110, shiftKey: true })
+
+      expect(byTestId('selection-count')).toBeNull()
+      expect(byTestId('selection-anchor')).toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(2)
+    })
+
+    it('still groups when the layout reports a different character for the G key', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('п', { ctrlKey: true, code: 'KeyG' })
+      expect(container.textContent).toContain('Сгруппировано')
+      expect(byTestId('group-outline')).not.toBeNull()
+    })
+
+    it('refuses to group fewer than two objects', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerup', { clientX: 110, clientY: 110 })
+      key('g', { ctrlKey: true })
+      expect(container.textContent).toContain('Для группы нужно хотя бы два объекта')
+      expect(byTestId('group-outline')).toBeNull()
+    })
+
+    it('gives a duplicated group its own token', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('d', { ctrlKey: true })
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(4)
+
+      // Paste/duplicate offsets by 20, so the copies overlap the sources.
+      // Dispatch on the third element rather than hit-testing a point.
+      key('Escape')
+      const copies = [...container.querySelectorAll('g[data-id]')]
+      pointer(copies[2], 'pointerdown', { clientX: 105, clientY: 105 })
+      pointer(copies[2], 'pointerup', { clientX: 105, clientY: 105 })
+      expect(byTestId('selection-count')!.textContent).toContain('2')
+
+      const before = transforms()
+      pointer(copies[2], 'pointerdown', { clientX: 130, clientY: 130 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 180, clientY: 150 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 180, clientY: 150 })
+      const after = transforms()
+      expect(after[0]).toBe(before[0])
+      expect(after[1]).toBe(before[1])
+      expect(after[2]).toBe(shift(before[2], 50, 20))
+      expect(after[3]).toBe(shift(before[3], 50, 20))
+      expect(ids()).toHaveLength(4)
+    })
+  })
+
   describe('clipboard', () => {
     /** Ctrl+V awaits the (usually unavailable) system clipboard, so it needs an async act. */
     async function keyAsync(k: string, init: KeyboardEventInit = {}) {
@@ -608,6 +810,84 @@ describe('App smoke', () => {
       } finally {
         vi.useRealTimers()
       }
+    })
+  })
+
+  describe('object lock', () => {
+    function writtenBySave() {
+      let written = ''
+      const handle = {
+        kind: 'file',
+        name: 'board.mboard',
+        async createWritable() {
+          return { write: async (value: string) => { written = value }, close: async () => undefined }
+        },
+        async getFile() {
+          return { name: 'board.mboard', type: 'application/json', size: written.length, text: async () => written }
+        },
+      }
+      Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: async () => handle })
+      return () => written
+    }
+
+    function lockSelected() {
+      const button = byTestId('lock-toggle')
+      expect(button?.textContent).toBe('Заблокировать')
+      act(() => { button!.click() })
+    }
+
+    it('does not move a locked rect by drag or arrow, and saves locked: true', async () => {
+      const written = writtenBySave()
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+      expect(container.querySelector('[data-resize]')).not.toBeNull()
+      expect(byTestId('rotate-handle')).not.toBeNull()
+
+      lockSelected()
+      expect(container.textContent).toContain('Заблокировано')
+      expect(byTestId('lock-badge')).not.toBeNull()
+      expect(byTestId('lock-toggle')!.textContent).toBe('Разблокировать')
+      expect(byTestId('lock-toggle')!.getAttribute('aria-pressed')).toBe('true')
+      expect(container.querySelector('[data-resize]')).toBeNull()
+      expect(byTestId('rotate-handle')).toBeNull()
+      const shape = container.querySelector('g[data-id]')!
+      expect(shape.getAttribute('class')).toContain('cursor-default')
+      expect(shape.getAttribute('class')).not.toContain('cursor-move')
+
+      const before = transforms()
+      pointer(shape, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 180, clientY: 150 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 180, clientY: 150 })
+      key('ArrowRight')
+      expect(transforms()).toEqual(before)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      const saved = JSON.parse(written())
+      expect(saved.schemaVersion).toBe(1)
+      expect(saved.nodes[0].locked).toBe(true)
+
+      act(() => { byTestId('lock-toggle')!.click() })
+      expect(container.textContent).toContain('Разблокировано')
+      expect(byTestId('lock-badge')).toBeNull()
+      key('ArrowRight')
+      expect(transforms()).toEqual([shift(before[0], 1, 0)])
+    })
+
+    it('still deletes and erases a locked object', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+      lockSelected()
+      key('Delete')
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
+
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+      lockSelected()
+      key('e')
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 120, clientY: 120 })
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
     })
   })
 

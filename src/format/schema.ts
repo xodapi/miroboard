@@ -84,6 +84,7 @@ function validateNode(value: unknown, index: number, errors: string[]): void {
   validateString(requireField(node, 'kind', errors), `${path}.kind`, errors)
   const parentId = requireField(node, 'parentId', errors)
   if (parentId !== null && typeof parentId !== 'string') errors.push(`${path}.parentId must be a string or null`)
+  if ('locked' in node && typeof node.locked !== 'boolean') errors.push(`${path}.locked must be a boolean`)
   const frame = validateObject(requireField(node, 'frame', errors), `${path}.frame`, errors)
   if (frame) {
     for (const field of ['x', 'y', 'rotation']) validateNumber(requireField(frame, field, errors), `${path}.frame.${field}`, errors)

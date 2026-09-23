@@ -108,6 +108,30 @@ describe('loadMboard', () => {
     })
   })
 
+  it('accepts a boolean lock and rejects a non-boolean one without coercing it', () => {
+    const source = validDocument()
+    const node = source.nodes[0] as typeof source.nodes[0] & { locked?: unknown }
+    node.locked = true
+    expect(loadMboard(source).ok).toBe(true)
+    node.locked = false
+    expect(loadMboard(source)).toEqual({ ok: true, file: source })
+    node.locked = 'true'
+    expect(loadMboard(source)).toEqual({
+      ok: false,
+      failure: { kind: 'invalid', errors: ['nodes[0].locked must be a boolean'] },
+    })
+  })
+
+  it('accepts a group token in parentId that is not a node id', () => {
+    // Groups have no container element. Rejecting a parentId that does not
+    // name a node would make every grouped document invalid.
+    const source = validDocument()
+    ;(source.nodes[0] as { parentId: string | null }).parentId = 'grp_not-a-node'
+    source.nodes.push({ ...source.nodes[0], id: 'node-2', order: 2, parentId: 'grp_not-a-node' } as unknown as typeof source.nodes[0])
+
+    expect(loadMboard(source)).toEqual({ ok: true, file: source })
+  })
+
   it('accepts a valid empty document with empty arrays intact', () => {
     const source = validDocument()
     source.nodes = []

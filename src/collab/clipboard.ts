@@ -23,6 +23,7 @@
  */
 import type { BoardElement } from '../format/mboard'
 import { isBpmnNodeType, isElementType } from '../board/types'
+import { retargetGroupIds } from '../board/group'
 
 /** Declared media type of a miroboard clipboard payload. */
 export const CLIPBOARD_MIME = 'application/x-miroboard+json'
@@ -130,6 +131,14 @@ export function sanitiseElement(value: unknown): BoardElement | null {
     }
   }
 
+  // A non-empty token only. Connectors are not members, and an empty string
+  // would persist as a group that click-expansion ignores.
+  if (!element.bpmnFlow && typeof raw.groupId === 'string' && raw.groupId.length > 0) {
+    element.groupId = raw.groupId
+  }
+  // Only an explicit true. `false`, a string, or a connector must not become a lock.
+  if (!element.bpmnFlow && raw.locked === true) element.locked = true
+
   return element
 }
 
@@ -195,6 +204,9 @@ export interface PasteOptions {
  * after the paste. A flow whose endpoints are not both inside the payload is
  * dropped: keeping it would either dangle or, worse, reconnect to an unrelated
  * board element that happens to carry the same id.
+ *
+ * Group tokens are remapped the same way. Pasting must not join the source
+ * group, or a click on the paste would select the originals.
  */
 export function preparePaste(elements: readonly BoardElement[], options: PasteOptions = {}): BoardElement[] {
   const offset = options.offset ?? { x: PASTE_OFFSET, y: PASTE_OFFSET }
@@ -205,22 +217,24 @@ export function preparePaste(elements: readonly BoardElement[], options: PasteOp
     idMap.set(element.id, makeId(element.id, index))
   })
 
-  return elements.map(element => {
-    const pasted: BoardElement = {
+  let groupIndex = elements.length
+  const pasted = elements.map(element => {
+    const next: BoardElement = {
       ...element,
       id: idMap.get(element.id) ?? element.id,
       x: element.x + offset.x,
       y: element.y + offset.y,
     }
-    if (options.createdBy !== undefined) pasted.createdBy = options.createdBy
+    if (options.createdBy !== undefined) next.createdBy = options.createdBy
     if (element.bpmnFlow) {
       const sourceId = idMap.get(element.bpmnFlow.sourceId)
       const targetId = idMap.get(element.bpmnFlow.targetId)
-      if (sourceId && targetId) pasted.bpmnFlow = { ...element.bpmnFlow, sourceId, targetId }
-      else delete pasted.bpmnFlow
+      if (sourceId && targetId) next.bpmnFlow = { ...element.bpmnFlow, sourceId, targetId }
+      else delete next.bpmnFlow
     }
-    return pasted
+    return next
   })
+  return retargetGroupIds(pasted, groupId => makeId(groupId, groupIndex++))
 }
 
 /**

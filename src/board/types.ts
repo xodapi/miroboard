@@ -135,9 +135,19 @@ export interface BoardElement {
   stroke?: number
   fill?: string
   rotation?: number
+  /**
+   * When true, drag, nudge, resize and rotate leave the element where it is.
+   * Absent means unlocked. Never set on a connector.
+   */
+  locked?: boolean
   createdBy?: string
   emoji?: string
   zIndex?: number
+  /**
+   * Shared group token. Absent when the element is ungrouped. Persisted as
+   * `parentId`; not a node id, and never set on a connector.
+   */
+  groupId?: string
   bpmnNodeType?: BpmnNodeType
   bpmnDurationMs?: number
   bpmnDurationDistribution?: 'fixed' | 'uniform' | 'triangular'
@@ -158,7 +168,7 @@ export interface BoardElement {
   }
 }
 
-export type ContextMenuAction = 'edit' | 'duplicate' | 'front' | 'back' | 'delete'
+export type ContextMenuAction = 'edit' | 'duplicate' | 'lock' | 'front' | 'back' | 'delete'
 
 /** A destructive open that the user has already agreed to, waiting to run. */
 export type PendingOpen = { proceed: () => Promise<void> }

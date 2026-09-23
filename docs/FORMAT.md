@@ -71,8 +71,20 @@ written explicitly as `null` (for example `frame.w`, `frame.h`, `style.fill`, an
 empty arrays, `0`, negative numbers, large integers, fractions, and `false` are real
 values and are never treated as missing. The normaliser rejects cyclic objects with
 `Cannot normalise cyclic structure` rather than recursing indefinitely.
-- `parentId` is always written as `null` and top-level `assets` is always `{}` in v1.
-  Containers and assets are not supported yet.
+- `parentId` is a group token or `null`. Nodes that share a non-empty token are
+  one group: the app selects, moves, copies and deletes them together. The token
+  is not a node id and is not required to reference anything in the document —
+  v1 groups have no container element, so a dangling `parentId` is valid.
+  An empty string is not a group; readers treat it as ungrouped and the next
+  save writes `null`. Edges have no `parentId`; a connector is not a member and
+  travels with a group only while both of its endpoints are. Top-level `assets`
+  is always `{}`. Frames, nested groups and containers are not supported yet.
+
+`locked` is optional and node-only. Absence and an explicit `false` both mean
+unlocked: the node may move, resize and rotate. Only `true` is written. A save
+canonicalises `false` to absence, so an unlocked file stays identical to one
+from before the field existed. A non-boolean value is invalid and is not
+coerced. Edges never carry `locked`, because a connector follows its endpoints.
 - A `bpmnFlow` becomes an edge. `sourceId` and `targetId` are structural endpoints;
   `flowType`, `condition`, `probability`, and `isDefault` are nested under
   `profileData.bpmn`. Arrows and lines without `bpmnFlow` remain nodes.
@@ -110,12 +122,13 @@ array index; released v1 files must always include it.
 
 The element round-trip property compares `fromDoc(toDoc(element))` through the
 exported `canonicalElement()` projection. Nodes retain every renderer- and
-profile-visible field; an omitted rotation is equivalent to `rotation: 0`, and
-an omitted z-index is equivalent to `zIndex: 0`. BPMN flow elements are rendered
-from their endpoints, so their in-memory `x` and `y` are canonicalised to zero,
-and node-only fields (`w`, `h`, `fill`, `points`, `emoji`, `createdBy`, and
-`zIndex`) are not part of an edge's projection. This is the complete documented
-lossy projection, not a general-purpose field filter.
+profile-visible field, including `groupId` (the in-memory name of `parentId`);
+an omitted rotation is equivalent to `rotation: 0`, and an omitted z-index is
+equivalent to `zIndex: 0`. BPMN flow elements are rendered from their endpoints,
+so their in-memory `x` and `y` are canonicalised to zero, and node-only fields
+(`w`, `h`, `fill`, `points`, `emoji`, `createdBy`, `zIndex`, and `groupId`) are
+not part of an edge's projection. This is the complete documented lossy
+projection, not a general-purpose field filter.
 
 Edges may carry `waypoints` and `content.offset`; both are preserved exactly
 through adapter conversion and represent manually routed geometry and label

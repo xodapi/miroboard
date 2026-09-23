@@ -10,8 +10,9 @@ import * as Y from 'yjs'
 import { LOCAL_EDIT, LOCAL_GESTURE } from '../collab/origins'
 import {
   addElement, bringToFront, deleteElement, deleteElements, duplicateElements,
-  moveElements, updateElement, updateElements, type Elements,
+  moveElements, setLocked, updateElement, updateElements, writeGroupMembership, type Elements,
 } from './commands'
+import { planGroup, planUngroup } from './group'
 import type { BoardElement } from './types'
 
 const element = (id: string, over: Partial<BoardElement> = {}): BoardElement => ({
@@ -131,6 +132,31 @@ describe('deleteElements', () => {
     expect(deleteElements(doc, elements, [])).toBe(0)
     expect(updates.value).toBe(0)
   })
+
+  it('deletes a group and every connector that touched it, as one undo step', () => {
+    const flow = (id: string, sourceId: string, targetId: string): BoardElement => ({
+      id, type: 'arrow', x: 0, y: 0, color: '#000', bpmnFlow: { sourceId, targetId },
+    })
+    const { doc, elements } = board([
+      element('a', { groupId: 'g' }),
+      element('b', { groupId: 'g' }),
+      element('c'),
+      flow('ab', 'a', 'b'),
+      flow('ac', 'a', 'c'),
+    ])
+    const undo = new Y.UndoManager(elements, { captureTimeout: 0, trackedOrigins: new Set<unknown>([LOCAL_EDIT]) })
+    const updates = countUpdates(doc)
+
+    expect(deleteElement(doc, elements, 'a')).toBe(true)
+    expect(updates.value).toBe(1)
+    expect(ids(elements)).toEqual(['c'])
+
+    undo.undo()
+    expect(ids(elements)).toEqual(['a', 'b', 'c', 'ab', 'ac'])
+    expect(elements.get(0).groupId).toBe('g')
+    expect(elements.get(1).groupId).toBe('g')
+    expect(elements.get(1)).not.toHaveProperty('groupId', undefined)
+  })
 })
 
 describe('updateElements', () => {
@@ -178,6 +204,53 @@ describe('moveElements', () => {
     const updates = countUpdates(doc)
     expect(moveElements(doc, elements, ['a'], { x: 0, y: 0 })).toBe(0)
     expect(updates.value).toBe(0)
+  })
+
+  it('leaves a locked element where it is, and opens no transaction when nothing else moves', () => {
+    const { doc, elements } = board([
+      element('a', { locked: true, x: 0, y: 0 }),
+      element('b', { x: 10, y: 0 }),
+    ])
+    const updates = countUpdates(doc)
+    expect(moveElements(doc, elements, ['a'], { x: 5, y: 1 })).toBe(0)
+    expect(updates.value).toBe(0)
+    expect(elements.get(0)).toMatchObject({ x: 0, y: 0, locked: true })
+
+    expect(moveElements(doc, elements, ['a', 'b'], { x: 5, y: 1 })).toBe(1)
+    expect(updates.value).toBe(1)
+    expect(elements.toArray().map(item => [item.x, item.y])).toEqual([[0, 0], [15, 1]])
+  })
+})
+
+describe('setLocked', () => {
+  it('writes true and deletes the key on unlock', () => {
+    const { doc, elements } = board([element('a'), element('b', { locked: true })])
+    const updates = countUpdates(doc)
+    expect(setLocked(doc, elements, ['a', 'b'], true)).toBe(1)
+    expect(updates.value).toBe(1)
+    expect(elements.get(0).locked).toBe(true)
+    expect(elements.get(1).locked).toBe(true)
+
+    expect(setLocked(doc, elements, ['a'], false)).toBe(1)
+    expect(elements.get(0)).not.toHaveProperty('locked')
+    expect(elements.get(1).locked).toBe(true)
+  })
+
+  it('does not lock a connector and opens no transaction when nothing changes', () => {
+    const flow = { id: 'f', type: 'arrow' as const, x: 0, y: 0, color: '#000', bpmnFlow: { sourceId: 'a', targetId: 'b' } }
+    const { doc, elements } = board([element('a', { locked: true }), flow])
+    const updates = countUpdates(doc)
+    expect(setLocked(doc, elements, ['a'], true)).toBe(0)
+    expect(setLocked(doc, elements, ['f'], true)).toBe(0)
+    expect(setLocked(doc, elements, [], true)).toBe(0)
+    expect(updates.value).toBe(0)
+    expect(elements.get(1)).not.toHaveProperty('locked')
+  })
+
+  it('copies the lock with the element', () => {
+    const { doc, elements } = board([element('a', { locked: true })])
+    duplicateElements(doc, elements, ['a'], () => 'copy')
+    expect(elements.toArray().find(item => item.id === 'copy')!.locked).toBe(true)
   })
 })
 
@@ -232,6 +305,57 @@ describe('duplicateElements', () => {
     const { doc, elements } = board([element('a')])
     const updates = countUpdates(doc)
     expect(duplicateElements(doc, elements, [], () => 'x')).toEqual([])
+    expect(updates.value).toBe(0)
+  })
+
+  it('gives a duplicated group a new token so the copies do not join the source', () => {
+    const { doc, elements } = board([element('a', { groupId: 'g' }), element('b', { groupId: 'g' })])
+    let counter = 0
+    duplicateElements(doc, elements, ['a', 'b'], () => `copy-${counter++}`)
+    const copies = elements.toArray().filter(element => element.id.startsWith('copy'))
+    expect(copies.map(element => element.groupId)).toEqual(['copy-2', 'copy-2'])
+    expect(elements.get(0).groupId).toBe('g')
+    expect(elements.get(1).groupId).toBe('g')
+  })
+})
+
+describe('writeGroupMembership', () => {
+  it('groups and dissolves leftovers in one undo step, deleting the key rather than setting it undefined', () => {
+    const { doc, elements } = board([
+      element('a'),
+      element('b'),
+      element('c', { groupId: 'old' }),
+      element('d', { groupId: 'old' }),
+    ])
+    const undo = new Y.UndoManager(elements, { captureTimeout: 0, trackedOrigins: new Set<unknown>([LOCAL_EDIT]) })
+    const updates = countUpdates(doc)
+    const plan = planGroup(elements.toArray(), ['a', 'c'], 'grp_new')
+    expect(plan.kind).toBe('group')
+    if (plan.kind !== 'group') return
+
+    expect(writeGroupMembership(doc, elements, plan.writes)).toBe(3)
+    expect(updates.value).toBe(1)
+    expect(elements.toArray().map(element => element.groupId ?? null)).toEqual(['grp_new', null, 'grp_new', null])
+    expect(elements.get(1)).not.toHaveProperty('groupId')
+    expect(elements.get(3)).not.toHaveProperty('groupId')
+
+    undo.undo()
+    expect(elements.toArray().map(element => element.groupId ?? null)).toEqual([null, null, 'old', 'old'])
+  })
+
+  it('ungroups every member when only one was named', () => {
+    const { doc, elements } = board([element('a', { groupId: 'g' }), element('b', { groupId: 'g' })])
+    const writes = planUngroup(elements.toArray(), ['b'])
+    writeGroupMembership(doc, elements, writes)
+    expect(elements.toArray().every(element => !('groupId' in element))).toBe(true)
+  })
+
+  it('opens no transaction when the write would change nothing', () => {
+    const { doc, elements } = board([element('a', { groupId: 'g' })])
+    const updates = countUpdates(doc)
+    expect(writeGroupMembership(doc, elements, [{ id: 'a', groupId: 'g' }])).toBe(0)
+    expect(writeGroupMembership(doc, elements, [{ id: 'missing' }])).toBe(0)
+    expect(writeGroupMembership(doc, elements, [])).toBe(0)
     expect(updates.value).toBe(0)
   })
 })

@@ -7,7 +7,7 @@ import { PASTE_OFFSET, parseClipboard, preparePaste, serialiseSelection } from '
 import { readProfile, writeProfile, type UserProfile } from './collab/user-profile'
 import {
   clearSelection, idsOf, isSelected as isIdSelected, primaryOf, removeFromSelection, retainExisting,
-  selectMany, selectOnly, toggleInSelection, unionSelection, type Selection,
+  selectMany, selectOnly, unionSelection, type Selection,
 } from './collab/selection'
 import { normaliseRect, selectInRect, type Bounds } from './collab/marquee'
 import { useFileDrop } from './hooks/useFileDrop'
@@ -24,13 +24,23 @@ import { BpmnTaskProperties } from './components/BpmnTaskProperties'
 import { BpmnFlowProperties } from './components/BpmnFlowProperties'
 import { ColorPicker } from './components/ColorPicker'
 import { BoardHeader } from './components/BoardHeader'
+import { BoardSearch } from './components/BoardSearch'
 import { ZoomControls, ElementCount } from './components/ZoomControls'
 import { CanvasBackground } from './components/CanvasBackground'
-import { ChangedInPreview, ResizeHandles } from './components/element-chrome'
+import { ChangedInPreview, LockBadges, ResizeHandles } from './components/element-chrome'
 import { ElementTextEditor } from './components/ElementTextEditor'
 import { useSimulationSettings } from './board/use-simulation-settings'
-import { elementsInScope, fitTransform, screenToWorld as toWorld, wheelZoomFactor, zoomAround } from './board/viewport'
+import { centerOn, elementsInScope, fitTransform, screenToWorld as toWorld, wheelZoomFactor, zoomAround } from './board/viewport'
+import { ALIGN_SCREEN_PX, snapDragFrames, snapResizeFrames, type Guide } from './board/align'
+import { hitBounds, searchBoard, stepIndex } from './board/search'
+import { readUiPreferences, writeUiPreferences } from './board/preferences'
+import {
+  frontierAdvice, frontierRole, frontierRuns, markFrontier, roleCapacity, sweepCapacities, withRoleCapacity,
+  type FrontierPoint,
+} from './board/frontier'
 import * as commands from './board/commands'
+import { clickTargets, expandIds, groupOutlines, planGroup, planUngroup, toggleGrouped } from './board/group'
+import { isLocked, selectionLockAction } from './board/lock'
 import { BottomToolbar } from './components/BottomToolbar'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingTour } from './components/OnboardingTour'
@@ -56,6 +66,7 @@ import { HelpPanel } from './HelpPanel'
 import './help-panel.css'
 import { bpmnEdgeAnchor, simplifyPath, smoothPathD, snapVal } from './board/geometry'
 import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeInfo } from './board/gesture'
+import { canRotate, frameTransform, rotationFromPointer, type RotateInfo } from './board/rotate'
 import { genId } from './board/id'
 import { STICKY_COLORS } from './board/palette'
 import type {
@@ -77,8 +88,11 @@ export default function App() {
   const svgRef = useRef<SVGSVGElement>(null)
   const [tool, setTool] = useState<Tool>('select')
   const [bpmnFlowSourceId, setBpmnFlowSourceId] = useState<string | null>(null)
-  const [color, setColor] = useState('#000000')
-  const [strokeWidth, setStrokeWidth] = useState(3)
+  // Device preferences, read once. A later effect writes them back. They are
+  // not document state: a shared .mboard must not carry one person's theme.
+  const [uiPrefs] = useState(() => readUiPreferences(localStorage))
+  const [color, setColor] = useState(uiPrefs.color)
+  const [strokeWidth, setStrokeWidth] = useState(uiPrefs.strokeWidth)
   const [elements, setElements] = useState<BoardElement[]>([])
   const [selectedIds, setSelectedIds] = useState<Selection>(clearSelection)
   /** The element property panels and resize handles act on: single selection only. */
@@ -94,7 +108,7 @@ export default function App() {
   const [lastPinchDist, setLastPinchDist] = useState<number | null>(null)
   const [editingText, setEditingText] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
-  const [darkMode, setDarkMode] = useState(false)
+  const [darkMode, setDarkMode] = useState(uiPrefs.darkMode)
   const [showTemplates, setShowTemplates] = useState(false)
   const [showLearningModules, setShowLearningModules] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -121,6 +135,7 @@ export default function App() {
   const [bpmnSimulationResult, setBpmnSimulationResult] = useState<BpmnSimulationResult | null>(null)
   const [bottleneckRole, setBottleneckRole] = useState<string | null>(null)
   const [simulationResultFingerprint, setSimulationResultFingerprint] = useState<string | null>(null)
+  const [frontierTrace, setFrontierTrace] = useState<{ fingerprint: string; role: string; advice: string; runs: number; points: FrontierPoint[] } | null>(null)
   const simulation = useSimulationSettings()
   // Stable across renders (it is the raw setState), so the long-lived
   // profileConfig observer can capture it without re-subscribing.
@@ -128,12 +143,17 @@ export default function App() {
   const [bpmnProfileActive, setBpmnProfileActive] = useState(false)
   const [showEmoji, setShowEmoji] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState('👍')
-  const [snapGrid, setSnapGrid] = useState(false)
+  const [snapGrid, setSnapGrid] = useState(uiPrefs.snapGrid)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   // Mirrors the UndoManager stacks. Kept in state so the toolbar buttons do not
   // read the manager ref while rendering.
   const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false })
-  const [showMiniMap, setShowMiniMap] = useState(true)
+  const [showMiniMap, setShowMiniMap] = useState(uiPrefs.showMiniMap)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchIndex, setSearchIndex] = useState(0)
+  const [searchFocusNonce, setSearchFocusNonce] = useState(0)
+  const [alignGuides, setAlignGuides] = useState<Guide[]>([])
   const [laserPos, setLaserPos] = useState<Point | null>(null)
   const chooseTool = useCallback((nextTool: Tool) => {
     setTool(nextTool)
@@ -153,6 +173,7 @@ export default function App() {
   const dragInfoRef = useRef<DragInfo | null>(null)
   // Resize state
   const resizeInfoRef = useRef<ResizeInfo | null>(null)
+  const rotateInfoRef = useRef<RotateInfo | null>(null)
   // Gesture frames stay local until pointer-up, preventing one Yjs item rewrite
   // (and one gc:false tombstone) per pointer event.
   const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> }[] | null>(null)
@@ -354,6 +375,9 @@ export default function App() {
     setUserProfile(next)
     writeProfile(localStorage, next)
   }, [])
+  useEffect(() => {
+    writeUiPreferences(localStorage, { darkMode, snapGrid, showMiniMap, color, strokeWidth })
+  }, [darkMode, snapGrid, showMiniMap, color, strokeWidth])
   useEffect(() => {
     const yarray = ydoc.getArray<BoardElement>('elements')
     const meta = ydoc.getMap<unknown>('meta')
@@ -728,7 +752,10 @@ export default function App() {
    */
   const duplicateSelection = useCallback((origin?: unknown): string[] => {
     if (previewSnapshot || !yElements.current) return []
-    return commands.duplicateElements(ydoc, yElements.current, selectedIds, genId, origin ?? LOCAL_EDIT, userProfile.id)
+    // Read the document, not the last render: a shortcut can land mid-drag,
+    // after flushGesture has written positions the React state has not seen.
+    const live = yElements.current.toArray()
+    return commands.duplicateElements(ydoc, yElements.current, expandIds(live, selectedIds), genId, origin ?? LOCAL_EDIT, userProfile.id)
   }, [selectedIds, previewSnapshot, ydoc, userProfile.id])
 
   /**
@@ -737,8 +764,52 @@ export default function App() {
    */
   const moveSelection = useCallback((delta: { x: number; y: number }) => {
     if (previewSnapshot || !yElements.current) return
-    commands.moveElements(ydoc, yElements.current, selectedIds, delta)
+    const live = yElements.current.toArray()
+    commands.moveElements(ydoc, yElements.current, expandIds(live, selectedIds), delta)
   }, [selectedIds, previewSnapshot, ydoc])
+
+  /**
+   * Locks or unlocks the named elements. Unlock deletes the key, so the file
+   * only grows a `locked` field while the object is actually locked.
+   */
+  const applyLock = useCallback((ids: readonly string[], locked: boolean) => {
+    if (previewSnapshot || !yElements.current) return
+    const live = yElements.current.toArray()
+    const lockable = ids.filter(id => {
+      const element = live.find(candidate => candidate.id === id)
+      return Boolean(element && !element.bpmnFlow)
+    })
+    const changed = commands.setLocked(ydoc, yElements.current, lockable, locked)
+    if (changed) showToast(locked ? 'Заблокировано' : 'Разблокировано', 'success')
+  }, [previewSnapshot, showToast, ydoc])
+
+  /** Ctrl+G. One transaction, one token, no container element. */
+  const groupSelection = useCallback(() => {
+    if (previewSnapshot || !yElements.current) return
+    const plan = planGroup(elements, selectedIds, `grp_${genId()}`)
+    if (plan.kind === 'too-small') {
+      showToast('Для группы нужно хотя бы два объекта', 'info')
+      return
+    }
+    if (plan.kind === 'already') {
+      showToast('Уже одна группа', 'info')
+      return
+    }
+    commands.writeGroupMembership(ydoc, yElements.current, plan.writes)
+    showToast('Сгруппировано', 'success')
+  }, [elements, previewSnapshot, selectedIds, showToast, ydoc])
+
+  /** Ctrl+Shift+G. Clears every member of each group the selection touches. */
+  const ungroupSelection = useCallback(() => {
+    if (previewSnapshot || !yElements.current) return
+    const writes = planUngroup(elements, selectedIds)
+    if (!writes.length) {
+      showToast('Выделение не в группе', 'info')
+      return
+    }
+    commands.writeGroupMembership(ydoc, yElements.current, writes)
+    showToast('Группа снята', 'success')
+  }, [elements, previewSnapshot, selectedIds, showToast, ydoc])
 
   /**
    * The in-memory clipboard. A `file://` deployment — the primary way this app
@@ -750,7 +821,9 @@ export default function App() {
 
   /** Ctrl+C. Returns how many elements were copied, so the caller knows whether to take over the shortcut. */
   const copySelection = useCallback((): number => {
-    const picked = elements.filter(element => selectedIds.has(element.id))
+    const source = yElements.current?.toArray() ?? elements
+    const wanted = new Set(expandIds(source, selectedIds))
+    const picked = source.filter(element => wanted.has(element.id))
     if (!picked.length) return 0
     const payload = serialiseSelection(picked)
     internalClipboardRef.current = payload
@@ -810,13 +883,17 @@ export default function App() {
       targets.forEach(bringToFront)
     } else if (action === 'back') {
       targets.forEach(sendToBack)
+    } else if (action === 'lock') {
+      const live = yElements.current?.toArray() ?? elements
+      const kind = selectionLockAction(live, new Set(targets))
+      if (kind) applyLock(targets, kind === 'lock')
     } else if (targets.length > 1) {
       deleteSelected()
     } else {
       deleteElement(id)
     }
     setContextMenu(null)
-  }, [elements, selectedIds, duplicateSelection, bringToFront, sendToBack, deleteElement, deleteSelected])
+  }, [elements, selectedIds, duplicateSelection, bringToFront, sendToBack, deleteElement, deleteSelected, applyLock])
 
   const { canUndo, canRedo } = undoState
 
@@ -977,6 +1054,59 @@ export default function App() {
   const visibleSimulationResult = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationResult : null
   const visibleSimulationSummary = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bpmnSimulationSummary : null
   const visibleBottleneckRole = !previewSnapshot && simulationResultFingerprint === simulationFingerprint ? bottleneckRole : null
+  const traceFrontier = useCallback(() => {
+    if (previewSnapshot) return void showToast('Симуляция недоступна во время просмотра истории.', 'info')
+    const model = createSimulationBpmnModel()
+    const role = frontierRole(model, bottleneckRole)
+    if (!role) {
+      setFrontierTrace(null)
+      showToast('Нет роли ресурса: фронтир сравнивает мощность, а не рисунок.', 'info')
+      return
+    }
+    const requested = Number(simulation.runs)
+    if (!Number.isInteger(requested) || requested < 1 || requested > 10000) {
+      showToast('Количество прогонов должно быть целым числом от 1 до 10000.', 'error')
+      return
+    }
+    const runs = frontierRuns(requested)
+    try {
+      const samples = sweepCapacities(roleCapacity(model, role)).map(capacity => {
+        const result = JSON.parse(simulate_bpmn_seed_string(
+          JSON.stringify(withRoleCapacity(model, role, capacity)),
+          simulation.seed,
+          runs,
+        )) as BpmnSimulationResult
+        return {
+          capacity,
+          meanDurationMs: result.meanDurationMs,
+          p95DurationMs: result.p95DurationMs,
+          meanCost: result.meanCost,
+          onTimeRate: result.onTimeRate,
+        }
+      })
+      const points = markFrontier(samples)
+      setFrontierTrace({
+        fingerprint: simulationFingerprint,
+        role,
+        advice: frontierAdvice(role, points, model.slaTargetMs),
+        runs,
+        points,
+      })
+    } catch (error) {
+      setFrontierTrace(null)
+      showToast(error instanceof Error ? error.message : 'Не удалось построить фронтир.', 'error')
+    }
+  }, [bottleneckRole, createSimulationBpmnModel, previewSnapshot, simulation.runs, simulation.seed, simulationFingerprint, showToast])
+  const visibleFrontier = !previewSnapshot && frontierTrace?.fingerprint === simulationFingerprint ? frontierTrace : null
+  const applyFrontierCapacity = useCallback((capacity: number) => {
+    const role = visibleFrontier?.role
+    if (!role) return
+    simulation.setRolePolicies(current => ({
+      ...current,
+      [role]: { capacity: String(capacity), queuePolicy: current[role]?.queuePolicy ?? 'fifo' },
+    }))
+    showToast(`Мощность «${role}»: ${capacity}. Фронтир нужно построить заново.`, 'success')
+  }, [showToast, simulation.setRolePolicies, visibleFrontier?.role])
   /**
    * The BPMN validity badge describes the live document, which is not what a
    * history preview has on screen. Hiding it there matches the simulation
@@ -1151,11 +1281,26 @@ export default function App() {
     }
 
     if (tool === 'select') {
+      // The rotate handle sits outside the element, so it must be claimed before
+      // the empty-canvas branch starts a marquee.
+      const rotateHandle = target.closest('[data-rotate]')
+      if (rotateHandle) {
+        const rotateId = rotateHandle.getAttribute('data-rotate')
+        const rotating = rotateId ? elements.find(candidate => candidate.id === rotateId) : undefined
+        if (rotating && !isLocked(rotating) && canRotate(rotating)) {
+          rotateInfoRef.current = {
+            id: rotating.id,
+            cx: rotating.x + (rotating.w || 0) / 2,
+            cy: rotating.y + (rotating.h || 0) / 2,
+          }
+          return
+        }
+      }
       // Check resize handle
       const resizeHandle = target.closest('[data-resize]') as HTMLElement
       if (resizeHandle && selectedElementId) {
         const el = elements.find(candidate => candidate.id === selectedElementId)
-        if (el) {
+        if (el && !isLocked(el)) {
           resizeInfoRef.current = {
             id: selectedElementId, corner: resizeHandle.dataset.resize as ResizeCorner,
             startX: point.x, startY: point.y,
@@ -1168,22 +1313,29 @@ export default function App() {
       const el = target.closest('[data-id]') as HTMLElement
       if (el) {
         const elId = el.dataset.id!
+        const mates = clickTargets(elements, elId)
         if (e.shiftKey) {
-          // Shift-click toggles membership and never starts a drag: the user is
-          // building a set, not moving it.
-          setSelectedIds(current => toggleInSelection(current, elId))
+          // Shift-click toggles the whole group, never one member of it, and
+          // never starts a drag: the user is building a set, not moving it.
+          setSelectedIds(current => toggleGrouped(current, elements, elId))
           setAnchorId(elId)
           return
         }
-        // Clicking inside an existing multi-selection keeps it, so the whole
-        // group can be dragged. Clicking outside replaces it.
-        if (!selectedIds.has(elId)) {
-          setSelectedIds(selectOnly(elId))
-          setAnchorId(elId)
+        // A grouped element selects every member. Clicking inside an existing
+        // selection keeps the rest of it, so an ungrouped multi-select still
+        // drags together. Clicking outside replaces the selection.
+        const already = selectedIds.has(elId)
+        const kept = already ? [...new Set([...idsOf(selectedIds), ...mates])] : mates
+        if (!already || kept.length !== selectedIds.size) {
+          setSelectedIds(selectMany(kept))
+          if (!already) setAnchorId(elId)
         }
-        const dragged = (selectedIds.has(elId) ? idsOf(selectedIds) : [elId])
+        const grabbed = elements.find(candidate => candidate.id === elId)
+        // Grabbing a locked object selects it and does not drag the rest of
+        // the selection. A locked mate of an unlocked grab stays where it is.
+        const dragged = grabbed && isLocked(grabbed) ? [] : expandIds(elements, kept)
           .map(id => elements.find(candidate => candidate.id === id))
-          .filter((candidate): candidate is BoardElement => Boolean(candidate))
+          .filter((candidate): candidate is BoardElement => Boolean(candidate) && !isLocked(candidate))
         if (dragged.length) {
           dragInfoRef.current = {
             startX: point.x, startY: point.y,
@@ -1195,7 +1347,7 @@ export default function App() {
           if (longPressRef.current === longPress) longPressRef.current = null
           // A long press outside the current selection retargets it, so the
           // context menu never acts on a set the user cannot see.
-          if (!selectedIds.has(elId)) selectElement(elId)
+          if (!selectedIds.has(elId)) setSelectedIds(selectMany(mates))
           setContextMenu({ x: point.x, y: point.y, id: elId })
           if ('vibrate' in navigator) navigator.vibrate(30)
         }, 500)
@@ -1329,6 +1481,13 @@ export default function App() {
         longPressRef.current = null
       }
     }
+    const rotate = rotateInfoRef.current
+    if (rotate) {
+      const frame = [{ id: rotate.id, updates: { rotation: rotationFromPointer(rotate, point, e.shiftKey) } }]
+      transientFrameRef.current = frame
+      setTransientFrame(frame)
+      return
+    }
     if (isPanning && panStart) {
       setTransform(t => ({ ...t, x: e.clientX - panStart.x, y: e.clientY - panStart.y }))
       return
@@ -1341,18 +1500,30 @@ export default function App() {
     // Resize
     const resize = resizeInfoRef.current
     if (resize) {
-      const frame = resizeFrame(resize, point, snapGrid ? snapVal : undefined)
+      // Same rule as a drag: a neighbour edge wins over the grid, and the
+      // guide is not written into the document.
+      const raw = resizeFrame(resize, point)
+      const aligned = snapResizeFrames(raw, elements, resize.id, resize.corner, ALIGN_SCREEN_PX / transform.scale)
+      const frame = aligned.guides.length || !snapGrid ? aligned.frames : resizeFrame(resize, point, snapVal)
       transientFrameRef.current = frame
       setTransientFrame(frame)
+      setAlignGuides(aligned.guides.length || !snapGrid ? [...aligned.guides] : [])
       return
     }
     // Drag: one delta applied to every dragged element, so a multi-selection
     // moves as a group and stays internally consistent.
     const drag = dragInfoRef.current
     if (drag) {
-      const frame = dragFrame(drag, point, snapGrid ? snapVal : undefined)
+      // Alignment wins over the grid when a neighbour is within a few screen
+      // pixels: "flush with this sticky" is the intent, the lattice is the
+      // fallback. The guide itself is not written anywhere — see align.ts.
+      const raw = dragFrame(drag, point)
+      const movingIds = new Set(drag.items.map(item => item.id))
+      const aligned = snapDragFrames(raw, elements, movingIds, ALIGN_SCREEN_PX / transform.scale)
+      const frame = aligned.guides.length || !snapGrid ? aligned.frames : dragFrame(drag, point, snapVal)
       transientFrameRef.current = frame
       setTransientFrame(frame)
+      setAlignGuides(aligned.guides.length || !snapGrid ? [...aligned.guides] : [])
       return
     }
     if (!isDrawing) return
@@ -1368,7 +1539,7 @@ export default function App() {
         updateElement(selectedElementId, { w, h })
       }
     }
-  }, [isPanning, panStart, isDrawing, tool, selectedElementId, elements, screenToWorld, updateElement, snapGrid, bpmnFlowSourceId])
+  }, [isPanning, panStart, isDrawing, tool, selectedElementId, elements, screenToWorld, updateElement, snapGrid, bpmnFlowSourceId, transform.scale])
   const handlePointerUp = useCallback((e?: React.PointerEvent) => {
     // Cancel long press
     if (longPressRef.current) {
@@ -1393,17 +1564,26 @@ export default function App() {
     // Where the pointer actually is. A cancelled gesture has no meaningful
     // release point, so it keeps whatever the last move produced.
     const releasedAt = e && e.type !== 'pointercancel' ? screenToWorld(e.clientX, e.clientY) : null
-    const snap = snapGrid ? snapVal : undefined
     // Recompute the final frame from the release point instead of trusting the
     // last committed pointermove: the gesture has to land where the user let go,
-    // whatever React has rendered by then.
-    const frame = releasedAt
-      ? resizeInfoRef.current
-        ? resizeFrame(resizeInfoRef.current, releasedAt, snap)
-        : dragInfoRef.current
-          ? dragFrame(dragInfoRef.current, releasedAt, snap)
-          : transientFrameRef.current
-      : transientFrameRef.current
+    // whatever React has rendered by then. A drag uses the same alignment rule
+    // as pointermove, or the guide the user saw would snap back on release.
+    const drag = dragInfoRef.current
+    const resize = resizeInfoRef.current
+    const rotate = rotateInfoRef.current
+    let frame = transientFrameRef.current
+    if (releasedAt && rotate) {
+      frame = [{ id: rotate.id, updates: { rotation: rotationFromPointer(rotate, releasedAt, Boolean(e?.shiftKey)) } }]
+    } else if (releasedAt && resize) {
+      const raw = resizeFrame(resize, releasedAt)
+      const aligned = snapResizeFrames(raw, elements, resize.id, resize.corner, ALIGN_SCREEN_PX / transform.scale)
+      frame = aligned.guides.length || !snapGrid ? aligned.frames : resizeFrame(resize, releasedAt, snapVal)
+    } else if (releasedAt && drag) {
+      const raw = dragFrame(drag, releasedAt)
+      const movingIds = new Set(drag.items.map(item => item.id))
+      const aligned = snapDragFrames(raw, elements, movingIds, ALIGN_SCREEN_PX / transform.scale)
+      frame = aligned.guides.length || !snapGrid ? aligned.frames : dragFrame(drag, releasedAt, snapVal)
+    }
     // One commit per gesture, labelled as such: the drag itself stays local
     // (transientFrame) so a 3-second drag is a single undo step, not 180.
     if (frame?.length) {
@@ -1420,9 +1600,10 @@ export default function App() {
     if (pendingMarquee) {
       const rect = releasedAt ? normaliseRect(pendingMarquee.from, releasedAt) : marquee
       if (rect) {
-        const picked = selectInRect(elements, rect, 'intersect')
+        const hit = selectInRect(elements, rect, 'intersect')
+        const picked = expandIds(elements, hit)
         setSelectedIds(current => (pendingMarquee.shift ? unionSelection(current, picked) : selectMany(picked)))
-        if (!pendingMarquee.shift) setAnchorId(picked.length ? picked[picked.length - 1] : null)
+        if (!pendingMarquee.shift) setAnchorId(hit.length ? hit[hit.length - 1] : null)
       }
     }
     marqueeRef.current = null
@@ -1434,7 +1615,9 @@ export default function App() {
     setLastPinchDist(null)
     dragInfoRef.current = null
     resizeInfoRef.current = null
-  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, userProfile.id, marquee, elements, ydoc, screenToWorld, snapGrid])
+    rotateInfoRef.current = null
+    setAlignGuides([])
+  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, userProfile.id, marquee, elements, ydoc, screenToWorld, snapGrid, transform.scale])
   // Touch pinch
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -1469,6 +1652,20 @@ export default function App() {
   // Keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f' && !editingText) {
+        const field = e.target instanceof HTMLElement ? e.target : null
+        const inField = Boolean(field?.matches('input, textarea, select, [contenteditable="true"]'))
+        const inSearch = Boolean(field?.closest('[data-testid="board-search"]'))
+        // Steal the browser's find-in-page only for the canvas. A property
+        // panel input keeps the native shortcut; the search box itself re-focuses.
+        if (!inField || inSearch) {
+          e.preventDefault()
+          setSearchOpen(true)
+          setSearchFocusNonce(nonce => nonce + 1)
+          return
+        }
+      }
+      if (e.key === 'Escape' && searchOpen) { e.preventDefault(); setSearchOpen(false); return }
       if (e.key === 'Escape' && previewSnapshot) { e.preventDefault(); closeTimeline(); return }
       if (e.key === 'Escape') { e.preventDefault(); setSelectedIds(clearSelection()); setContextMenu(null); setShowBpmnPalette(false); setWorkspaceMode('board'); return }
       if (editingText) return
@@ -1510,6 +1707,17 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
         e.preventDefault()
         void pasteFromClipboard()
+        return
+      }
+      // Ctrl+G groups; Ctrl+Shift+G ungroups. `code` as well as `key`, so a
+      // Russian layout still hits the physical G key. Always preventDefault:
+      // otherwise the browser treats it as find-next.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key.toLowerCase() === 'g' || e.code === 'KeyG')) {
+        e.preventDefault()
+        if (!previewSnapshot) {
+          if (e.shiftKey) ungroupSelection()
+          else groupSelection()
+        }
         return
       }
       // Ctrl+A selects the whole board; arrow keys nudge the selection.
@@ -1557,7 +1765,7 @@ export default function App() {
     }
     window.addEventListener('keydown', h, true)
     return () => window.removeEventListener('keydown', h, true)
-  }, [selectedIds, deleteSelected, editingText, flushGesture, handleUndo, handleRedo, duplicateSelection, elements, moveSelection, copySelection, cutSelection, pasteFromClipboard, selectElements, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline])
+  }, [selectedIds, deleteSelected, editingText, flushGesture, handleUndo, handleRedo, duplicateSelection, elements, moveSelection, copySelection, cutSelection, pasteFromClipboard, selectElements, groupSelection, ungroupSelection, workspaceMode, fitToContent, showSimulationPanel, chooseTool, saveBoard, openBoard, previewSnapshot, closeTimeline, searchOpen])
   // ======================== RENDER ELEMENT ========================
   const isPreview = previewSnapshot !== null
   const liveElementIds = useMemo(() => new Set(elements.map(element => element.id)), [elements])
@@ -1570,7 +1778,43 @@ export default function App() {
       return updates ? { ...element, ...updates } : element
     })
   }, [baseRenderedElements, isPreview, transientFrame])
+  // Arrow rendering used to scan the whole list twice per edge. On a process
+  // diagram that is O(edges × nodes) every frame; the map makes it O(1).
+  const renderedById = useMemo(() => {
+    const index = new Map<string, BoardElement>()
+    for (const element of renderedElements) index.set(element.id, element)
+    return index
+  }, [renderedElements])
+  const searchHits = useMemo(
+    () => searchBoard(isPreview ? renderedElements : elements, searchQuery),
+    [elements, isPreview, renderedElements, searchQuery],
+  )
+  const activeSearchIndex = searchHits.length ? Math.min(searchIndex, searchHits.length - 1) : 0
+  const searchHitId = searchOpen && searchQuery.trim() && searchHits.length
+    ? searchHits[activeSearchIndex]?.id ?? null
+    : null
   const selectionCount = selectedIds.size
+  const lockAction = isPreview ? null : selectionLockAction(elements, selectedIds)
+  const menuTargets = contextMenu
+    ? (selectedIds.has(contextMenu.id) ? idsOf(selectedIds) : [contextMenu.id])
+    : []
+  const menuLock = contextMenu ? selectionLockAction(elements, new Set(menuTargets)) : null
+  const menuLockLabel = menuLock === 'unlock' ? '🔓 Разблокировать' : menuLock === 'lock' ? '🔒 Заблокировать' : null
+  const outlines = useMemo(
+    () => groupOutlines(renderedElements, selectedIds),
+    [renderedElements, selectedIds],
+  )
+  // Called from the search controls, not from an effect: a jump is a response
+  // to a keystroke, and an effect would also re-centre during a drag.
+  const jumpToSearchHit = (query: string, index: number) => {
+    const hits = searchBoard(isPreview ? renderedElements : elements, query)
+    const hit = hits[index]
+    if (!hit) return
+    const element = renderedById.get(hit.id)
+    if (!element) return
+    const bounds = hitBounds(element, renderedById)
+    setTransform(current => centerOn(current, bounds, { width: window.innerWidth, height: window.innerHeight }))
+  }
   /** Wires one element's text editing to the shared editor state. */
   const textEditorProps = (el: BoardElement) => ({
     text: el.text ?? '',
@@ -1586,6 +1830,7 @@ export default function App() {
     const isSelected = isIdSelected(selectedIds, el.id)
     const invS = 1 / transform.scale
     const isChangedInPreview = isPreview && !liveElementIds.has(el.id)
+    const moveCursor = isPreview || isLocked(el) ? 'cursor-default' : 'cursor-move'
     if (el.bpmnNodeType) {
       const width = el.w || 80
       const height = el.h || 80
@@ -1596,7 +1841,7 @@ export default function App() {
       const isEvent = el.bpmnNodeType === 'startEvent' || el.bpmnNodeType === 'endEvent'
       const isBottleneck = el.bpmnNodeType === 'task' && visibleBottleneckRole !== null && el.bpmnResourceRole === visibleBottleneckRole
       return (
-        <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+        <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}>
           {isChangedInPreview && <ChangedInPreview invScale={invS} x={-7} y={-7} width={width + 14} height={height + 14} radius={12} />}
           {el.bpmnNodeType === 'startEvent' && <circle cx={centerX} cy={centerY} r={Math.min(width, height) / 2 - 4} fill="white" stroke={el.color} strokeWidth={3} />}
           {el.bpmnNodeType === 'endEvent' && <>
@@ -1631,7 +1876,7 @@ export default function App() {
         if (!el.points || el.points.length < 2) return null
         const d = smoothPathD(el.points)
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none">
+          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className="touch-none">
             {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={6} />}
             <path d={d} fill="none" stroke={el.color} strokeWidth={el.stroke}
               strokeLinecap="round" strokeLinejoin="round" className="pointer-events-stroke"
@@ -1645,7 +1890,7 @@ export default function App() {
       }
       case 'sticky':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}>
             {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 0) + 12} height={(el.h || 0) + 12} radius={14} />}
             <rect width={el.w} height={el.h} fill={el.fill} rx={10}
               style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.12))' }} />
@@ -1661,14 +1906,14 @@ export default function App() {
             {isSelected && selectionCount === 1 && <>
               <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
                 fill="none" stroke="#4D96FF" strokeWidth={2 * invS} rx={12} />
-              {/* Resize handles: single selection only, multi-resize needs an anchor */}
-              <ResizeHandles invScale={invS} width={el.w || 0} height={el.h || 0} />
+              {/* Resize handles: single selection only, and never on a lock. */}
+              {!el.locked && <ResizeHandles invScale={invS} width={el.w || 0} height={el.h || 0} />}
             </>}
           </g>
         )
       case 'text':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}>
             {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 200) + 12} height={(el.h || 60) + 12} radius={6} />}
             <foreignObject width={el.w || 200} height={el.h || 60}>
               <div className="w-full h-full select-none"
@@ -1689,7 +1934,7 @@ export default function App() {
         )
       case 'rect':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}
+          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}
             onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
@@ -1706,19 +1951,19 @@ export default function App() {
                 />
               </div>
             </foreignObject>
-            {isSelected && <>
+            {isSelected && (
               <rect x={-2} y={-2} width={(el.w || 0) + 4} height={(el.h || 0) + 4}
                 fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={6} />
-              {([['se', (el.w || 0), (el.h || 0)]] as [string, number, number][]).map(([c, cx, cy]) => (
-                <circle key={c} data-resize={c} cx={cx} cy={cy} r={7 * invS}
-                  fill="white" stroke="#4D96FF" strokeWidth={2 * invS} style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.2))' }} />
-              ))}
-            </>}
+            )}
+            {isSelected && selectionCount === 1 && !el.locked && ([['se', (el.w || 0), (el.h || 0)]] as [string, number, number][]).map(([c, cx, cy]) => (
+              <circle key={c} data-resize={c} cx={cx} cy={cy} r={7 * invS}
+                fill="white" stroke="#4D96FF" strokeWidth={2 * invS} style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.2))' }} />
+            ))}
           </g>
         )
       case 'circle':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}
+          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}
             onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
@@ -1740,8 +1985,8 @@ export default function App() {
           </g>
         )
       case 'arrow': {
-        const source = el.bpmnFlow ? renderedElements.find(node => node.id === el.bpmnFlow?.sourceId) : undefined
-        const target = el.bpmnFlow ? renderedElements.find(node => node.id === el.bpmnFlow?.targetId) : undefined
+        const source = el.bpmnFlow ? renderedById.get(el.bpmnFlow.sourceId) : undefined
+        const target = el.bpmnFlow ? renderedById.get(el.bpmnFlow.targetId) : undefined
         const sourceCenter = source ? { x: source.x + (source.w || 0) / 2, y: source.y + (source.h || 0) / 2 } : undefined
         const targetCenter = target ? { x: target.x + (target.w || 0) / 2, y: target.y + (target.h || 0) / 2 } : undefined
         const start = source && targetCenter ? bpmnEdgeAnchor(source, targetCenter.x, targetCenter.y) : { x: el.x, y: el.y }
@@ -1753,7 +1998,7 @@ export default function App() {
         const angle = Math.atan2(y2, x2)
         const hs = 12
         return (
-          <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+          <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className={`touch-none ${moveCursor}`}>
             {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, x2) - 7} y={Math.min(0, y2) - 7} width={Math.abs(x2) + 14} height={Math.abs(y2) + 14} radius={6} />}
             <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} />
             <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
@@ -1774,7 +2019,7 @@ export default function App() {
       }
       case 'line':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className={`touch-none ${isPreview ? 'cursor-default' : 'cursor-move'}`}>
+          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}>
             {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, el.w || 0) - 7} y={Math.min(0, el.h || 0) - 7} width={Math.abs(el.w || 0) + 14} height={Math.abs(el.h || 0) + 14} radius={6} />}
             <line x1={0} y1={0} x2={el.w || 0} y2={el.h || 0} stroke={el.color} strokeWidth={el.stroke} strokeLinecap="round" />
             {isSelected && <rect x={Math.min(0, el.w || 0) - 4} y={Math.min(0, el.h || 0) - 4}
@@ -1784,7 +2029,7 @@ export default function App() {
         )
       case 'emoji':
         return (
-          <g key={el.id} data-id={el.id} transform={`translate(${el.x},${el.y})`} className="touch-none cursor-move">
+          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}>
             <foreignObject width={el.w || 48} height={el.h || 48}>
               <div className="w-full h-full flex items-center justify-center select-none" style={{ fontSize: Math.min((el.w || 48) * 0.8, 64) }}>
                 {el.emoji || '👍'}
@@ -1822,6 +2067,7 @@ export default function App() {
         tool={tool}
         bpmnFlowSourceId={bpmnFlowSourceId}
         selectionCount={selectionCount}
+        lockLabel={!isPreview && lockAction === 'unlock' ? 'Разблокировать' : !isPreview && lockAction === 'lock' ? 'Заблокировать' : null}
         hasBpmnNodes={showBpmnStatus}
         bpmnIssues={bpmnIssues}
         bpmnRunSummary={bpmnRunSummary}
@@ -1845,8 +2091,27 @@ export default function App() {
         onToggleDarkMode={() => setDarkMode(!dk)}
         onToggleMiniMap={() => setShowMiniMap(!showMiniMap)}
         onToggleProfile={() => setShowProfile(value => !value)}
+        onToggleLock={() => {
+          if (!lockAction) return
+          applyLock(idsOf(selectedIds), lockAction === 'lock')
+        }}
       />
       {showProfile && <ProfilePanel profile={userProfile} theme={theme} onChange={updateUserProfile} />}
+      <BoardSearch
+        theme={theme}
+        open={searchOpen}
+        query={searchQuery}
+        matchIndex={activeSearchIndex}
+        matchCount={searchHits.length}
+        focusNonce={searchFocusNonce}
+        onOpen={() => { setSearchOpen(true); setSearchFocusNonce(nonce => nonce + 1) }}
+        onClose={() => setSearchOpen(false)}
+        onQueryChange={value => { setSearchQuery(value); setSearchIndex(0); jumpToSearchHit(value, 0) }}
+        onNext={() => { const next = stepIndex(searchHits.length, activeSearchIndex, 1); setSearchIndex(next); jumpToSearchHit(searchQuery, next) }}
+        onPrev={() => { const next = stepIndex(searchHits.length, activeSearchIndex, -1); setSearchIndex(next); jumpToSearchHit(searchQuery, next) }}
+        hits={searchHits}
+        onPick={index => { setSearchIndex(index); jumpToSearchHit(searchQuery, index) }}
+      />
       {toast && <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />}
       <HistoryPreviewBanner darkMode={dk} snapshot={previewSnapshot} onRestore={restorePreview} onClose={closeTimeline} />
       {pendingOpen && (
@@ -1893,6 +2158,56 @@ export default function App() {
           <CanvasBackground dark={dk} snapGrid={snapGrid} transform={transform} />
           <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
             {renderedElements.map(renderElement)}
+            <LockBadges elements={renderedElements} invScale={1 / transform.scale} />
+            {searchHitId && (() => {
+              const hit = renderedById.get(searchHitId)
+              if (!hit) return null
+              const bounds = hitBounds(hit, renderedById)
+              return (
+                <rect
+                  data-testid="search-hit"
+                  x={bounds.x - 6} y={bounds.y - 6}
+                  width={bounds.w + 12} height={bounds.h + 12}
+                  fill="none" stroke="#F59E0B" strokeWidth={2 / transform.scale}
+                  pointerEvents="none"
+                />
+              )
+            })()}
+            {alignGuides.map(guide => (
+              guide.orientation === 'vertical'
+                ? <line key={`v${guide.position}`} data-testid="align-guide" x1={guide.position} y1={-20000} x2={guide.position} y2={20000} stroke="#E11D48" strokeWidth={1 / transform.scale} pointerEvents="none" />
+                : <line key={`h${guide.position}`} data-testid="align-guide" x1={-20000} y1={guide.position} x2={20000} y2={guide.position} stroke="#E11D48" strokeWidth={1 / transform.scale} pointerEvents="none" />
+            ))}
+            {!isPreview && tool === 'select' && selectionCount === 1 && selectedElementId && (() => {
+              const rotating = renderedById.get(selectedElementId)
+              if (!rotating || isLocked(rotating) || !canRotate(rotating)) return null
+              const width = rotating.w || 0
+              const cx = rotating.x + width / 2
+              const cy = rotating.y + (rotating.h || 0) / 2
+              const stem = 28 / transform.scale
+              return (
+                <g data-testid="rotate-handle" transform={rotating.rotation ? `rotate(${rotating.rotation} ${cx} ${cy})` : undefined}>
+                  <line x1={cx} y1={rotating.y} x2={cx} y2={rotating.y - stem} stroke="#7C3AED" strokeWidth={1.5 / transform.scale} pointerEvents="none" />
+                  <circle data-rotate={rotating.id} cx={cx} cy={rotating.y - stem} r={7 / transform.scale} fill="white" stroke="#7C3AED" strokeWidth={2 / transform.scale} />
+                </g>
+              )
+            })()}
+            {outlines.map(outline => (
+              <rect
+                key={outline.groupId}
+                data-testid="group-outline"
+                data-group={outline.groupId}
+                x={outline.x}
+                y={outline.y}
+                width={outline.w}
+                height={outline.h}
+                fill="none"
+                stroke="#7C3AED"
+                strokeWidth={1.5 / transform.scale}
+                strokeDasharray={`${6 / transform.scale} ${4 / transform.scale}`}
+                pointerEvents="none"
+              />
+            ))}
             {selectionCount > 1 && anchorId && (() => {
               const anchor = elements.find(element => element.id === anchorId)
               if (!anchor) return null
@@ -2058,6 +2373,7 @@ export default function App() {
           y={contextMenu.y}
           transform={transform}
           theme={theme}
+          lockLabel={menuLockLabel}
           onAction={action => handleContextMenuAction(action, contextMenu.id)}
         />
       )}
@@ -2104,6 +2420,12 @@ export default function App() {
         textSec={textSec}
         visibleBottleneckRole={visibleBottleneckRole}
         visibleSimulationResult={visibleSimulationResult}
+        frontierRole={visibleFrontier?.role ?? null}
+        frontierAdvice={visibleFrontier?.advice ?? null}
+        frontierPoints={visibleFrontier?.points ?? null}
+        frontierRuns={visibleFrontier?.runs ?? null}
+        onTraceFrontier={traceFrontier}
+        onApplyFrontierCapacity={applyFrontierCapacity}
         onClose={() => setShowSimulationPanel(false)}
         />
       )}

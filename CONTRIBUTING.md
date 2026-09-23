@@ -77,6 +77,12 @@ dist/            # результат сборки (один файл index.html
 
 - `dist/index.html` — единственный артефакт сборки. Убедитесь, что сборка не начинает генерировать дополнительные файлы.
 
+**Лицензии зависимостей:**
+
+- Продукт — MIT, коммерческое использование разрешено.
+- В `package.json` `dependencies` и в `wasm/board-core` допустимы только MIT и Apache-2.0 (включая «MIT OR Apache-2.0»). GPL, AGPL, MPL и проприетарные SDK не добавлять: они либо заразят сборку, либо запретят продажу.
+- AsciiDoc/Antora, Typst и Markdoc не подключать. Обоснование: [`docs/DOCUMENTATION_STACK.md`](docs/DOCUMENTATION_STACK.md).
+
 ### Процесс Pull Request
 
 1. Форкните репозиторий и создайте ветку от `main`.
@@ -175,6 +181,12 @@ dist/            # build output (single index.html)
 **Single-file build:**
 
 - `dist/index.html` is the only build artifact. Verify that your changes do not cause the build to emit additional files.
+
+**Dependency licenses:**
+
+- The product is MIT. Commercial use is allowed.
+- `dependencies` in `package.json` and crates in `wasm/board-core` must be MIT or Apache-2.0, including the "MIT OR Apache-2.0" dual license. Do not add GPL, AGPL, MPL, or a proprietary SDK: those either infect the build or block selling it.
+- Do not add AsciiDoc/Antora, Typst, or Markdoc. Rationale: [`docs/DOCUMENTATION_STACK.md`](docs/DOCUMENTATION_STACK.md).
 
 ### Pull request process
 

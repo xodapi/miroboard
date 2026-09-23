@@ -55,6 +55,11 @@ export interface DocNode {
   content: NodeContent
   profileData: Record<string, Record<string, unknown>>
   createdBy?: string
+  /**
+   * Optional. Only `true` is written. Absence and `false` both mean the node
+   * may move. Edges do not carry this field.
+   */
+  locked?: boolean
 }
 
 export interface EndpointRef {

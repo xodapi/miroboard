@@ -131,6 +131,28 @@ describe('sanitiseElement', () => {
     expect(element?.labelOffset).not.toHaveProperty('extra')
   })
 
+  it('keeps a non-empty group token and drops one that is empty, mistyped, or sitting on a connector', () => {
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', groupId: 'grp_1' })?.groupId).toBe('grp_1')
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', groupId: '' })).not.toHaveProperty('groupId')
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', groupId: 4 })).not.toHaveProperty('groupId')
+    const flow = sanitiseElement({
+      id: 'f', type: 'arrow', x: 0, y: 0, color: '#000', groupId: 'grp_1',
+      bpmnFlow: { sourceId: 'a', targetId: 'b' },
+    })
+    expect(flow).not.toHaveProperty('groupId')
+  })
+
+  it('keeps locked: true and never puts the flag on a connector', () => {
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', locked: true })?.locked).toBe(true)
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', locked: false })).not.toHaveProperty('locked')
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', locked: 'yes' })).not.toHaveProperty('locked')
+    const flow = sanitiseElement({
+      id: 'f', type: 'arrow', x: 0, y: 0, color: '#000', locked: true,
+      bpmnFlow: { sourceId: 'a', targetId: 'b' },
+    })
+    expect(flow).not.toHaveProperty('locked')
+  })
+
   it('keeps a bpmnFlow only when both endpoints are strings', () => {
     const kept = sanitiseElement({ id: 'f', type: 'arrow', x: 0, y: 0, color: '#000', bpmnFlow: { sourceId: 'a', targetId: 'b', flowType: 'message', probability: 0.5 } })
     expect(kept?.bpmnFlow).toEqual({ sourceId: 'a', targetId: 'b', flowType: 'message', probability: 0.5 })
@@ -184,6 +206,20 @@ describe('preparePaste', () => {
     const source = rect()
     preparePaste([source], { makeId: () => 'new', offset: { x: 50, y: 50 } })
     expect(source).toEqual(rect())
+  })
+
+  it('retargets a pasted group so the copies do not join the source group', () => {
+    const source = [rect({ id: 'a', groupId: 'g' }), rect({ id: 'b', groupId: 'g' })]
+    const pasted = preparePaste(source, { makeId: (sourceId, index) => `${sourceId}-${index}` })
+    expect(pasted.map(element => element.id)).toEqual(['a-0', 'b-1'])
+    expect(pasted[0].groupId).toBe('g-2')
+    expect(pasted[1].groupId).toBe(pasted[0].groupId)
+    expect(source[0].groupId).toBe('g')
+  })
+
+  it('drops a group token when the paste does not contain two members', () => {
+    const pasted = preparePaste([rect({ groupId: 'g' })], { makeId: () => 'new' })
+    expect(pasted[0]).not.toHaveProperty('groupId')
   })
 })
 
