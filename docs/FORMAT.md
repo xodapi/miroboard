@@ -80,6 +80,13 @@ values and are never treated as missing. The normaliser rejects cyclic objects w
   travels with a group only while both of its endpoints are. Top-level `assets`
   is always `{}`. Frames, nested groups and containers are not supported yet.
 
+`style.color` and `style.fill` are independent. `color` is the stroke, and for a
+BPMN node it is the accent the renderer draws. `fill` is the interior. A sticky
+note paints `fill` only; a rectangle or ellipse paints both. The string
+`transparent` means the user cleared the interior. A missing or `null` fill
+renders the same way. Neither spelling changes the schema: both are already
+legal v1 values.
+
 `locked` is optional and node-only. Absence and an explicit `false` both mean
 unlocked: the node may move, resize and rotate. Only `true` is written. A save
 canonicalises `false` to absence, so an unlocked file stays identical to one

@@ -41,6 +41,7 @@ import {
 import * as commands from './board/commands'
 import { clickTargets, expandIds, groupOutlines, planGroup, planUngroup, toggleGrouped } from './board/group'
 import { isLocked, selectionLockAction } from './board/lock'
+import { paintChannels, paintPatch } from './board/paint'
 import { BottomToolbar } from './components/BottomToolbar'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingTour } from './components/OnboardingTour'
@@ -1795,6 +1796,10 @@ export default function App() {
     : null
   const selectionCount = selectedIds.size
   const lockAction = isPreview ? null : selectionLockAction(elements, selectedIds)
+  const paintElement = !isPreview && !contextMenu && selectedElementId
+    ? elements.find(element => element.id === selectedElementId) ?? null
+    : null
+  const paint = paintElement ? paintChannels(paintElement) : []
   const menuTargets = contextMenu
     ? (selectedIds.has(contextMenu.id) ? idsOf(selectedIds) : [contextMenu.id])
     : []
@@ -2389,8 +2394,14 @@ export default function App() {
           onUpdate={updateElement}
         />
       )}
-      {selectedElementId && elements.find(e => e.id === selectedElementId && (e.type === 'sticky' || e.type === 'rect' || e.type === 'circle')) && !contextMenu && (
-        <ColorPicker theme={theme} onPick={color => updateSelected({ color, fill: color })} />
+      {paint.length > 0 && paintElement && (
+        <ColorPicker
+          theme={theme}
+          channels={paint}
+          fill={paintElement.fill}
+          stroke={paintElement.color}
+          onPick={(channel, value) => updateSelected(paintPatch(channel, value))}
+        />
       )}
       {/* ===== SIMULATION MODAL ===== */}
       {showSimulationPanel && !isPreview && (
