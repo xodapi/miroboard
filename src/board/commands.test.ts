@@ -10,7 +10,7 @@ import * as Y from 'yjs'
 import { LOCAL_EDIT, LOCAL_GESTURE } from '../collab/origins'
 import {
   addElement, bringToFront, deleteElement, deleteElements, duplicateElements,
-  moveElements, setLocked, updateElement, updateElements, writeGroupMembership, type Elements,
+  moveElements, setLocked, setStrokeStyle, updateElement, updateElements, writeGroupMembership, type Elements,
 } from './commands'
 import { planGroup, planUngroup } from './group'
 import type { BoardElement } from './types'
@@ -251,6 +251,42 @@ describe('setLocked', () => {
     const { doc, elements } = board([element('a', { locked: true })])
     duplicateElements(doc, elements, ['a'], () => 'copy')
     expect(elements.toArray().find(item => item.id === 'copy')!.locked).toBe(true)
+  })
+})
+
+describe('setStrokeStyle', () => {
+  it('writes a dash and a thicker stroke, then deletes the dash for solid', () => {
+    const { doc, elements } = board([element('a', { type: 'arrow' }), element('b', { type: 'line', stroke: 4 })])
+    const updates = countUpdates(doc)
+    expect(setStrokeStyle(doc, elements, ['a', 'b'], { dash: 'dashed', stroke: 7 })).toBe(2)
+    expect(updates.value).toBe(1)
+    expect(elements.get(0)).toMatchObject({ dash: 'dashed', stroke: 7, type: 'arrow' })
+    expect(elements.get(1)).toMatchObject({ dash: 'dashed', stroke: 7 })
+
+    expect(setStrokeStyle(doc, elements, ['a'], { dash: 'solid' })).toBe(1)
+    expect(elements.get(0)).not.toHaveProperty('dash')
+    expect(elements.get(1).dash).toBe('dashed')
+  })
+
+  it('turns a connector head off without dropping the flow, and ignores a rectangle', () => {
+    const flow = element('f', { type: 'arrow', bpmnFlow: { sourceId: 'a', targetId: 'b' } })
+    const { doc, elements } = board([element('a', { type: 'rect' }), flow])
+    const updates = countUpdates(doc)
+    expect(setStrokeStyle(doc, elements, ['a'], { dash: 'dashed' })).toBe(0)
+    expect(setStrokeStyle(doc, elements, ['f'], { arrowHead: 'none', dash: 'dashed' })).toBe(1)
+    expect(updates.value).toBe(1)
+    expect(elements.get(1).type).toBe('line')
+    expect(elements.get(1).dash).toBe('dashed')
+    expect(elements.get(1).bpmnFlow).toEqual({ sourceId: 'a', targetId: 'b' })
+    expect(elements.get(0)).not.toHaveProperty('dash')
+  })
+
+  it('opens no transaction when the line already has that style', () => {
+    const { doc, elements } = board([element('a', { type: 'arrow', stroke: 2 })])
+    const updates = countUpdates(doc)
+    expect(setStrokeStyle(doc, elements, ['a'], { arrowHead: 'triangle', dash: 'solid', stroke: 2 })).toBe(0)
+    expect(setStrokeStyle(doc, elements, [], { dash: 'dashed' })).toBe(0)
+    expect(updates.value).toBe(0)
   })
 })
 

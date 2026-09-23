@@ -97,6 +97,7 @@ function validateNode(value: unknown, index: number, errors: string[]): void {
     validateNullableNumber(requireField(style, 'stroke', errors), `${path}.style.stroke`, errors)
     const fill = requireField(style, 'fill', errors)
     if (fill !== null && typeof fill !== 'string') errors.push(`${path}.style.fill must be a string or null`)
+    validateDash(style, path, errors)
   }
   validateObject(requireField(node, 'content', errors), `${path}.content`, errors)
   const profileData = validateObject(requireField(node, 'profileData', errors), `${path}.profileData`, errors)
@@ -106,6 +107,12 @@ function validateNode(value: unknown, index: number, errors: string[]): void {
       errors.push(`${path} (${typeof node.id === 'string' ? node.id : '<invalid id>'}).profileData.bpmn.nodeType is required`)
     }
   }
+}
+
+/** Absence is solid. Any other spelling is invalid and is not coerced to dashed. */
+function validateDash(style: RecordValue, path: string, errors: string[]): void {
+  if (!('dash' in style)) return
+  if (style.dash !== 'dashed') errors.push(`${path}.style.dash must be "dashed" when present`)
 }
 
 function validateEndpoint(value: unknown, path: string, errors: string[]): void {
@@ -130,6 +137,7 @@ function validateEdge(value: unknown, index: number, errors: string[]): void {
     validateNullableNumber(requireField(style, 'stroke', errors), `${path}.style.stroke`, errors)
     const arrowHead = requireField(style, 'arrowHead', errors)
     if (arrowHead !== 'none' && arrowHead !== 'triangle') errors.push(`${path}.style.arrowHead must be "none" or "triangle"`)
+    validateDash(style, path, errors)
   }
   validateObject(requireField(edge, 'profileData', errors), `${path}.profileData`, errors)
 }

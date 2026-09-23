@@ -142,6 +142,12 @@ describe('sanitiseElement', () => {
     expect(flow).not.toHaveProperty('groupId')
   })
 
+  it('keeps a dashed stroke and drops any other dash spelling', () => {
+    expect(sanitiseElement({ id: 'a', type: 'arrow', x: 0, y: 0, color: '#000', dash: 'dashed' })?.dash).toBe('dashed')
+    expect(sanitiseElement({ id: 'a', type: 'line', x: 0, y: 0, color: '#000', dash: 'solid' })).not.toHaveProperty('dash')
+    expect(sanitiseElement({ id: 'a', type: 'arrow', x: 0, y: 0, color: '#000', dash: 1 })).not.toHaveProperty('dash')
+  })
+
   it('keeps locked: true and never puts the flag on a connector', () => {
     expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', locked: true })?.locked).toBe(true)
     expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', locked: false })).not.toHaveProperty('locked')

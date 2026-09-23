@@ -86,6 +86,49 @@ describe('locked', () => {
   })
 })
 
+describe('arrow style', () => {
+  it('keeps a solid arrow identical to a file that never had a dash field', () => {
+    const solid = toDocElement({ id: 'arrow', type: 'arrow', x: 1, y: 2, w: 40, h: 0, color: '#000', stroke: 2 })
+    if (!('node' in solid)) throw new Error('expected node')
+    expect(solid.node.style).toEqual({ color: '#000', fill: null, stroke: 2 })
+    expect(solid.node.style).not.toHaveProperty('dash')
+    expect(solid.node.kind).toBe('arrow')
+
+    const file = serialise({
+      elements: [{ id: 'arrow', type: 'arrow', x: 1, y: 2, color: '#000', stroke: 2 }],
+      meta, profileConfig: {}, history,
+    })
+    expect(file.schemaVersion).toBe(1)
+    expect(file.nodes[0].style).not.toHaveProperty('dash')
+    expect(deserialise(file).elements[0]).not.toHaveProperty('dash')
+  })
+
+  it('round-trips a dashed freeform arrow and a headless dashed connector', () => {
+    const dashed = { id: 'arrow', type: 'arrow' as const, x: 4, y: 5, w: 30, h: 10, color: '#111', stroke: 7, dash: 'dashed' as const }
+    const asNode = toDocElement(dashed)
+    if (!('node' in asNode)) throw new Error('expected node')
+    expect(asNode.node.style.dash).toBe('dashed')
+    expect(canonicalElement(fromDocNode(asNode.node))).toEqual(canonicalElement(dashed))
+
+    const flow = {
+      id: 'flow', type: 'line' as const, x: 9, y: 9, color: '#222', stroke: 4, dash: 'dashed' as const,
+      bpmnFlow: { sourceId: 'a', targetId: 'b' },
+    }
+    const asEdge = toDocElement(flow)
+    if (!('edge' in asEdge)) throw new Error('expected edge')
+    expect(asEdge.edge.style).toEqual({ color: '#222', stroke: 4, arrowHead: 'none', dash: 'dashed' })
+    expect(canonicalElement(fromDocEdge(asEdge.edge))).toEqual(canonicalElement(flow))
+
+    const saved = serialise({ elements: [dashed, flow], meta, profileConfig: {}, history })
+    expect(saved.schemaVersion).toBe(1)
+    const restored = deserialise(saved).elements
+    expect(restored.find(element => element.id === 'arrow')).toMatchObject({ type: 'arrow', dash: 'dashed', stroke: 7 })
+    expect(restored.find(element => element.id === 'flow')).toMatchObject({
+      type: 'line', dash: 'dashed', stroke: 4, bpmnFlow: { sourceId: 'a', targetId: 'b' },
+    })
+  })
+})
+
 describe('canonicalElement', () => {
   it('round-trips a group token as parentId', () => {
     const grouped = { ...node, groupId: 'grp_shared' }

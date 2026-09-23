@@ -93,6 +93,7 @@ export function sanitiseElement(value: unknown): BoardElement | null {
   if (isFiniteNumber(raw.w)) element.w = raw.w
   if (isFiniteNumber(raw.h)) element.h = raw.h
   if (isFiniteNumber(raw.stroke)) element.stroke = raw.stroke
+  if (raw.dash === 'dashed') element.dash = 'dashed'
   if (isFiniteNumber(raw.rotation)) element.rotation = raw.rotation
   if (isFiniteNumber(raw.zIndex)) element.zIndex = raw.zIndex
   if (typeof raw.text === 'string') element.text = raw.text

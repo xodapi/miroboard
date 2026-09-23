@@ -133,6 +133,11 @@ export interface BoardElement {
   text?: string
   color: string
   stroke?: number
+  /**
+   * Stroke pattern. Only `'dashed'` is stored; absence is a solid stroke.
+   * Meaningful on an arrow or a line, including a BPMN connector.
+   */
+  dash?: 'dashed'
   fill?: string
   rotation?: number
   /**

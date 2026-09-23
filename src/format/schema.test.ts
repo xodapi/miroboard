@@ -108,6 +108,29 @@ describe('loadMboard', () => {
     })
   })
 
+  it('accepts an optional dashed stroke and rejects any other spelling, without bumping the schema', () => {
+    const source = validDocument()
+    const nodeStyle = source.nodes[0].style as { dash?: unknown }
+    const edgeStyle = source.edges[0].style as { dash?: unknown }
+    nodeStyle.dash = 'dashed'
+    edgeStyle.dash = 'dashed'
+    const loaded = loadMboard(source)
+    expect(loaded.ok).toBe(true)
+    if (loaded.ok) expect(loaded.file.schemaVersion).toBe(1)
+
+    nodeStyle.dash = 'solid'
+    expect(loadMboard(source)).toEqual({
+      ok: false,
+      failure: { kind: 'invalid', errors: ['nodes[0].style.dash must be "dashed" when present'] },
+    })
+    nodeStyle.dash = 'dashed'
+    edgeStyle.dash = 'dotted'
+    expect(loadMboard(source)).toEqual({
+      ok: false,
+      failure: { kind: 'invalid', errors: ['edges[0].style.dash must be "dashed" when present'] },
+    })
+  })
+
   it('accepts a boolean lock and rejects a non-boolean one without coercing it', () => {
     const source = validDocument()
     const node = source.nodes[0] as typeof source.nodes[0] & { locked?: unknown }

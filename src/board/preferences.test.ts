@@ -33,6 +33,14 @@ describe('readUiPreferences', () => {
     })
   })
 
+  it('fills a missing line style from the defaults and rejects a bad spelling', () => {
+    const stored = memory({ [UI_PREFS_KEY]: JSON.stringify({ lineDash: 'nope', arrowHead: 'circle' }) })
+    expect(readUiPreferences(stored).lineDash).toBe('solid')
+    expect(readUiPreferences(stored).arrowHead).toBe('triangle')
+    const kept = memory({ [UI_PREFS_KEY]: JSON.stringify({ lineDash: 'dashed', arrowHead: 'none' }) })
+    expect(readUiPreferences(kept)).toMatchObject({ lineDash: 'dashed', arrowHead: 'none' })
+  })
+
   it('rejects a corrupt store, a non-object, and an out-of-range stroke', () => {
     expect(readUiPreferences(memory({ [UI_PREFS_KEY]: '{not json' }))).toEqual(DEFAULT_UI_PREFERENCES)
     expect(readUiPreferences(memory({ [UI_PREFS_KEY]: '[]' }))).toEqual(DEFAULT_UI_PREFERENCES)

@@ -15,6 +15,10 @@ export interface UiPreferences {
   readonly showMiniMap: boolean
   readonly color: string
   readonly strokeWidth: number
+  /** Creation default for the next arrow or line. Not written into the .mboard file. */
+  readonly lineDash: 'solid' | 'dashed'
+  /** Creation default for the next arrow or line. Not written into the .mboard file. */
+  readonly arrowHead: 'none' | 'triangle'
 }
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
@@ -23,6 +27,8 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   showMiniMap: true,
   color: '#000000',
   strokeWidth: 3,
+  lineDash: 'solid',
+  arrowHead: 'triangle',
 }
 
 const MAX_COLOR_LENGTH = 32
@@ -50,6 +56,14 @@ function flag(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
 }
 
+function lineDashOrDefault(value: unknown): UiPreferences['lineDash'] {
+  return value === 'dashed' ? 'dashed' : DEFAULT_UI_PREFERENCES.lineDash
+}
+
+function arrowHeadOrDefault(value: unknown): UiPreferences['arrowHead'] {
+  return value === 'none' || value === 'triangle' ? value : DEFAULT_UI_PREFERENCES.arrowHead
+}
+
 /** Never throws. A corrupt or missing store is a first run, not an error. */
 export function readUiPreferences(storage: Pick<Storage, 'getItem'>): UiPreferences {
   let raw: string | null = null
@@ -68,6 +82,8 @@ export function readUiPreferences(storage: Pick<Storage, 'getItem'>): UiPreferen
       showMiniMap: flag(parsed.showMiniMap, DEFAULT_UI_PREFERENCES.showMiniMap),
       color: colorOrDefault(parsed.color),
       strokeWidth: strokeOrDefault(parsed.strokeWidth),
+      lineDash: lineDashOrDefault(parsed.lineDash),
+      arrowHead: arrowHeadOrDefault(parsed.arrowHead),
     }
   } catch {
     return DEFAULT_UI_PREFERENCES

@@ -183,6 +183,9 @@
                 "number",
                 "null"
               ]
+            },
+            "dash": {
+              "const": "dashed"
             }
           }
         },
@@ -279,6 +282,9 @@
                 "none",
                 "triangle"
               ]
+            },
+            "dash": {
+              "const": "dashed"
             }
           }
         },

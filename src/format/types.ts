@@ -35,6 +35,11 @@ export interface NodeStyle {
   color: string
   fill: string | null
   stroke: number | null
+  /**
+   * Optional. Only `'dashed'` is written. Absence is a solid stroke.
+   * Not a required v1 field — schema stays 1.
+   */
+  dash?: 'dashed'
 }
 
 export interface NodeContent {
@@ -71,6 +76,8 @@ export interface EdgeStyle {
   color: string
   stroke: number | null
   arrowHead: 'none' | 'triangle'
+  /** Optional. Only `'dashed'` is written. Absence is a solid stroke. */
+  dash?: 'dashed'
 }
 
 export interface DocEdge {

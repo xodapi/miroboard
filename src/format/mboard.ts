@@ -21,6 +21,8 @@ export interface BoardElement {
   text?: string
   color: string
   stroke?: number
+  /** Only `'dashed'` is stored. Absence is a solid stroke. */
+  dash?: 'dashed'
   fill?: string
   rotation?: number
   /** When true, the node does not move, resize or rotate. Never set on a connector. */
@@ -78,6 +80,18 @@ function hasEntries(value: Record<string, unknown>): boolean {
   return Object.keys(value).length > 0
 }
 
+/**
+ * Writes `dash` only when the stroke is dashed, so a solid line matches an old file.
+ *
+ * The constraint is `object`, not `{ dash?: 'dashed' }`: a narrower constraint
+ * makes TypeScript check the style literal against that constraint alone and
+ * reject `color`.
+ */
+function withDash<T extends object>(style: T, element: BoardElement): T {
+  if (element.dash !== 'dashed') return style
+  return { ...style, dash: 'dashed' }
+}
+
 function bpmnNodeData(element: BoardElement): Record<string, unknown> {
   return defined({
     nodeType: element.bpmnNodeType,
@@ -105,7 +119,7 @@ export function toDocElement(element: BoardElement): DocElement {
         kind: 'connector',
         source: { nodeId: sourceId, anchor: 'auto' },
         target: { nodeId: targetId, anchor: 'auto' },
-        style: { color: element.color, stroke: element.stroke ?? null, arrowHead: element.type === 'arrow' ? 'triangle' as const : 'none' as const },
+        style: withDash({ color: element.color, stroke: element.stroke ?? null, arrowHead: element.type === 'arrow' ? 'triangle' as const : 'none' as const }, element),
         waypoints: element.waypoints,
         content: element.text === undefined && element.labelOffset === undefined
           ? undefined
@@ -125,7 +139,7 @@ export function toDocElement(element: BoardElement): DocElement {
       parentId: persistedGroupId(element),
       frame: { x: element.x, y: element.y, w: element.w ?? null, h: element.h ?? null, rotation: element.rotation ?? 0 },
       z: element.zIndex ?? 0,
-      style: { color: element.color, fill: element.fill ?? null, stroke: element.stroke ?? null },
+      style: withDash({ color: element.color, fill: element.fill ?? null, stroke: element.stroke ?? null }, element),
       content: defined({ text: element.text, points: element.points, emoji: element.emoji }),
       profileData,
       createdBy: element.createdBy,
@@ -148,6 +162,7 @@ export function fromDocNode(node: DocNode): BoardElement {
     color: node.style.color,
     fill: node.style.fill ?? undefined,
     stroke: node.style.stroke ?? undefined,
+    dash: node.style.dash === 'dashed' ? 'dashed' as const : undefined,
     text: node.content.text,
     points: node.content.points,
     emoji: node.content.emoji,
@@ -195,6 +210,7 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
     y: 0,
     color: edge.style.color,
     stroke: edge.style.stroke ?? undefined,
+    dash: edge.style.dash === 'dashed' ? 'dashed' as const : undefined,
     text: edge.content?.label,
     waypoints: edge.waypoints,
     labelOffset: edge.content?.offset,

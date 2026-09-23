@@ -23,6 +23,7 @@ import { ProjectHistoryModal } from './components/ProjectHistoryModal'
 import { BpmnTaskProperties } from './components/BpmnTaskProperties'
 import { BpmnFlowProperties } from './components/BpmnFlowProperties'
 import { ColorPicker } from './components/ColorPicker'
+import { StrokeStyleBar } from './components/StrokeStyleBar'
 import { BoardHeader } from './components/BoardHeader'
 import { BoardSearch } from './components/BoardSearch'
 import { ZoomControls, ElementCount } from './components/ZoomControls'
@@ -42,6 +43,7 @@ import * as commands from './board/commands'
 import { clickTargets, expandIds, groupOutlines, planGroup, planUngroup, toggleGrouped } from './board/group'
 import { isLocked, selectionLockAction } from './board/lock'
 import { paintChannels, paintPatch } from './board/paint'
+import { arrowHeadOf, dashOf, isLineElement, strokeDasharray, type ArrowHead, type LineDash } from './board/stroke-style'
 import { BottomToolbar } from './components/BottomToolbar'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingTour } from './components/OnboardingTour'
@@ -94,6 +96,10 @@ export default function App() {
   const [uiPrefs] = useState(() => readUiPreferences(localStorage))
   const [color, setColor] = useState(uiPrefs.color)
   const [strokeWidth, setStrokeWidth] = useState(uiPrefs.strokeWidth)
+  // Device defaults for the next arrow or line. The file stores the mark's own
+  // dash and head; these only remember what the pen should draw next.
+  const [lineDash, setLineDash] = useState<LineDash>(uiPrefs.lineDash)
+  const [arrowHead, setArrowHead] = useState<ArrowHead>(uiPrefs.arrowHead)
   const [elements, setElements] = useState<BoardElement[]>([])
   const [selectedIds, setSelectedIds] = useState<Selection>(clearSelection)
   /** The element property panels and resize handles act on: single selection only. */
@@ -158,6 +164,8 @@ export default function App() {
   const [laserPos, setLaserPos] = useState<Point | null>(null)
   const chooseTool = useCallback((nextTool: Tool) => {
     setTool(nextTool)
+    if (nextTool === 'arrow') setArrowHead('triangle')
+    if (nextTool === 'line') setArrowHead('none')
     if (nextTool !== 'bpmnSequence') {
       setBpmnFlowSourceId(null)
       setFlowPreviewPoint(null)
@@ -377,8 +385,8 @@ export default function App() {
     writeProfile(localStorage, next)
   }, [])
   useEffect(() => {
-    writeUiPreferences(localStorage, { darkMode, snapGrid, showMiniMap, color, strokeWidth })
-  }, [darkMode, snapGrid, showMiniMap, color, strokeWidth])
+    writeUiPreferences(localStorage, { darkMode, snapGrid, showMiniMap, color, strokeWidth, lineDash, arrowHead })
+  }, [darkMode, snapGrid, showMiniMap, color, strokeWidth, lineDash, arrowHead])
   useEffect(() => {
     const yarray = ydoc.getArray<BoardElement>('elements')
     const meta = ydoc.getMap<unknown>('meta')
@@ -738,6 +746,19 @@ export default function App() {
     if (previewSnapshot || !yElements.current) return
     commands.updateElements(ydoc, yElements.current, selectedIds, updates, origin)
   }, [selectedIds, previewSnapshot, ydoc])
+
+  /**
+   * Restyles the selected arrow or line and remembers the choice for the next
+   * one. Solid deletes the dash key; the head is the element type, so a
+   * connector stays on its anchors either way.
+   */
+  const applyStrokeStyle = useCallback((patch: { arrowHead?: ArrowHead; dash?: LineDash; stroke?: number }) => {
+    if (previewSnapshot || !yElements.current || !selectedElementId) return
+    commands.setStrokeStyle(ydoc, yElements.current, [selectedElementId], patch)
+    if (patch.dash) setLineDash(patch.dash)
+    if (patch.arrowHead) setArrowHead(patch.arrowHead)
+    if (patch.stroke !== undefined) setStrokeWidth(patch.stroke)
+  }, [previewSnapshot, selectedElementId, ydoc])
 
   const bringToFront = useCallback((id: string) => {
     if (previewSnapshot || !yElements.current) return
@@ -1389,9 +1410,9 @@ export default function App() {
       const targetX = targetNode.x + (targetNode.w || 0) / 2
       const targetY = targetNode.y + (targetNode.h || 0) / 2
       const flowId = genId()
-      addElement({
+      const flow: BoardElement = {
         id: flowId,
-        type: 'arrow',
+        type: arrowHead === 'triangle' ? 'arrow' : 'line',
         x: sourceX,
         y: sourceY,
         w: targetX - sourceX,
@@ -1401,7 +1422,9 @@ export default function App() {
         fill: 'transparent',
         createdBy: userProfile.id,
         bpmnFlow: { sourceId: sourceNode.id, targetId: targetNode.id, flowType: 'sequence' },
-      })
+      }
+      if (lineDash === 'dashed') flow.dash = 'dashed'
+      addElement(flow)
       setBpmnFlowSourceId(null)
       setFlowPreviewPoint(null)
       setSelectedIds(selectOnly(flowId))
@@ -1457,10 +1480,14 @@ export default function App() {
     }
     if (tool === 'rect' || tool === 'circle' || tool === 'arrow' || tool === 'line') {
       const id = genId()
-      addElement({
-        id, type: tool, x: point.x, y: point.y, w: 0, h: 0,
-        color, stroke: strokeWidth, fill: 'transparent', createdBy: userProfile.id
-      })
+      const mark: BoardElement = {
+        id,
+        type: tool === 'arrow' || tool === 'line' ? (arrowHead === 'triangle' ? 'arrow' : 'line') : tool,
+        x: point.x, y: point.y, w: 0, h: 0,
+        color, stroke: strokeWidth, fill: 'transparent', createdBy: userProfile.id,
+      }
+      if ((tool === 'arrow' || tool === 'line') && lineDash === 'dashed') mark.dash = 'dashed'
+      addElement(mark)
       setSelectedIds(selectOnly(id))
       setIsDrawing(true)
       return
@@ -1469,7 +1496,7 @@ export default function App() {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, transform, color, strokeWidth, addElement, deleteElement, userProfile.id, selectedIds, selectedElementId, selectElement, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, previewSnapshot])
+  }, [tool, screenToWorld, transform, color, strokeWidth, lineDash, arrowHead, addElement, deleteElement, userProfile.id, selectedIds, selectedElementId, selectElement, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, previewSnapshot])
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
     const isLaser = tool === 'laser'
@@ -1800,6 +1827,8 @@ export default function App() {
     ? elements.find(element => element.id === selectedElementId) ?? null
     : null
   const paint = paintElement ? paintChannels(paintElement) : []
+  // A line has no fill, so the colour picker stays hidden and this bar takes its dock.
+  const lineElement = paintElement && isLineElement(paintElement) ? paintElement : null
   const menuTargets = contextMenu
     ? (selectedIds.has(contextMenu.id) ? idsOf(selectedIds) : [contextMenu.id])
     : []
@@ -1989,49 +2018,55 @@ export default function App() {
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
           </g>
         )
-      case 'arrow': {
-        const source = el.bpmnFlow ? renderedById.get(el.bpmnFlow.sourceId) : undefined
-        const target = el.bpmnFlow ? renderedById.get(el.bpmnFlow.targetId) : undefined
-        const sourceCenter = source ? { x: source.x + (source.w || 0) / 2, y: source.y + (source.h || 0) / 2 } : undefined
-        const targetCenter = target ? { x: target.x + (target.w || 0) / 2, y: target.y + (target.h || 0) / 2 } : undefined
-        const start = source && targetCenter ? bpmnEdgeAnchor(source, targetCenter.x, targetCenter.y) : { x: el.x, y: el.y }
-        const end = target && sourceCenter ? bpmnEdgeAnchor(target, sourceCenter.x, sourceCenter.y) : { x: el.x + (el.w || 0), y: el.y + (el.h || 0) }
-        const startX = start.x
-        const startY = start.y
-        const x2 = end.x - startX
-        const y2 = end.y - startY
-        const angle = Math.atan2(y2, x2)
-        const hs = 12
-        return (
-          <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className={`touch-none ${moveCursor}`}>
-            {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, x2) - 7} y={Math.min(0, y2) - 7} width={Math.abs(x2) + 14} height={Math.abs(y2) + 14} radius={6} />}
-            <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} />
-            <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
-              fill={el.color} />
-            {el.bpmnFlow && (el.bpmnFlow.condition || el.bpmnFlow.probability !== undefined || el.bpmnFlow.isDefault) && (
-              <g transform={`translate(${x2 / 2},${y2 / 2})`}>
-                <rect x="-34" y="-12" width="68" height="20" rx="6" fill="white" stroke="#CBD5E1" />
-                <text textAnchor="middle" y="2" fontSize="10" fill="#475569">
-                  {el.bpmnFlow.isDefault ? 'default' : el.bpmnFlow.condition || (el.bpmnFlow.probability !== undefined ? `P ${(el.bpmnFlow.probability * 100).toFixed(0)}%` : '')}
-                </text>
-              </g>
-            )}
-            {isSelected && <rect x={Math.min(0, x2) - 4} y={Math.min(0, y2) - 4}
-              width={Math.abs(x2) + 8} height={Math.abs(y2) + 8}
-              fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
-          </g>
-        )
-      }
-      case 'line':
+      case 'arrow':
+      case 'line': {
+        // A connector follows its endpoints even after the head is removed.
+        // The freeform line below uses the frame, which a connector does not have.
+        if (el.bpmnFlow || el.type === 'arrow') {
+          const source = el.bpmnFlow ? renderedById.get(el.bpmnFlow.sourceId) : undefined
+          const target = el.bpmnFlow ? renderedById.get(el.bpmnFlow.targetId) : undefined
+          const sourceCenter = source ? { x: source.x + (source.w || 0) / 2, y: source.y + (source.h || 0) / 2 } : undefined
+          const targetCenter = target ? { x: target.x + (target.w || 0) / 2, y: target.y + (target.h || 0) / 2 } : undefined
+          const start = source && targetCenter ? bpmnEdgeAnchor(source, targetCenter.x, targetCenter.y) : { x: el.x, y: el.y }
+          const end = target && sourceCenter ? bpmnEdgeAnchor(target, sourceCenter.x, sourceCenter.y) : { x: el.x + (el.w || 0), y: el.y + (el.h || 0) }
+          const startX = start.x
+          const startY = start.y
+          const x2 = end.x - startX
+          const y2 = end.y - startY
+          const angle = Math.atan2(y2, x2)
+          const hs = 12
+          return (
+            <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className={`touch-none ${moveCursor}`}>
+              {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, x2) - 7} y={Math.min(0, y2) - 7} width={Math.abs(x2) + 14} height={Math.abs(y2) + 14} radius={6} />}
+              <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} strokeDasharray={strokeDasharray(el)} />
+              {arrowHeadOf(el) === 'triangle' && (
+                <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
+                  fill={el.color} />
+              )}
+              {el.bpmnFlow && (el.bpmnFlow.condition || el.bpmnFlow.probability !== undefined || el.bpmnFlow.isDefault) && (
+                <g transform={`translate(${x2 / 2},${y2 / 2})`}>
+                  <rect x="-34" y="-12" width="68" height="20" rx="6" fill="white" stroke="#CBD5E1" />
+                  <text textAnchor="middle" y="2" fontSize="10" fill="#475569">
+                    {el.bpmnFlow.isDefault ? 'default' : el.bpmnFlow.condition || (el.bpmnFlow.probability !== undefined ? `P ${(el.bpmnFlow.probability * 100).toFixed(0)}%` : '')}
+                  </text>
+                </g>
+              )}
+              {isSelected && <rect x={Math.min(0, x2) - 4} y={Math.min(0, y2) - 4}
+                width={Math.abs(x2) + 8} height={Math.abs(y2) + 8}
+                fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
+            </g>
+          )
+        }
         return (
           <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}>
             {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, el.w || 0) - 7} y={Math.min(0, el.h || 0) - 7} width={Math.abs(el.w || 0) + 14} height={Math.abs(el.h || 0) + 14} radius={6} />}
-            <line x1={0} y1={0} x2={el.w || 0} y2={el.h || 0} stroke={el.color} strokeWidth={el.stroke} strokeLinecap="round" />
+            <line x1={0} y1={0} x2={el.w || 0} y2={el.h || 0} stroke={el.color} strokeWidth={el.stroke} strokeLinecap="round" strokeDasharray={strokeDasharray(el)} />
             {isSelected && <rect x={Math.min(0, el.w || 0) - 4} y={Math.min(0, el.h || 0) - 4}
               width={Math.abs(el.w || 0) + 8} height={Math.abs(el.h || 0) + 8}
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
           </g>
         )
+      }
       case 'emoji':
         return (
           <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}>
@@ -2401,6 +2436,15 @@ export default function App() {
           fill={paintElement.fill}
           stroke={paintElement.color}
           onPick={(channel, value) => updateSelected(paintPatch(channel, value))}
+        />
+      )}
+      {lineElement && (
+        <StrokeStyleBar
+          theme={theme}
+          dash={dashOf(lineElement)}
+          arrowHead={arrowHeadOf(lineElement)}
+          stroke={lineElement.stroke}
+          onChange={applyStrokeStyle}
         />
       )}
       {/* ===== SIMULATION MODAL ===== */}

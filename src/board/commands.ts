@@ -3,6 +3,7 @@ import { LOCAL_EDIT } from '../collab/origins'
 import { commitElementUpdate } from '../persistence/updates'
 import { dissolveAfter, expandIds, retargetGroupIds, type GroupWrite } from './group'
 import { isLocked, withLock } from './lock'
+import { withStrokeStyle, type StrokeStylePatch } from './stroke-style'
 import type { BoardElement } from './types'
 
 /**
@@ -231,6 +232,40 @@ export function setLocked(
       const current = elements.get(index)
       if (!wanted.has(current.id)) continue
       const next = withLock(current, locked)
+      if (next === current) continue
+      elements.delete(index, 1)
+      elements.insert(index, [next])
+      changed += 1
+    }
+  }, origin)
+  return changed
+}
+
+/**
+ * Restyles arrows and lines in one transaction.
+ *
+ * Solid deletes `dash` rather than writing a sentinel, and a headless mark
+ * becomes `type: 'line'` — that is the on-disk arrowhead, for both a freeform
+ * node and a BPMN edge. A rectangle is skipped. A no-op opens no transaction.
+ */
+export function setStrokeStyle(
+  doc: Y.Doc,
+  elements: Elements,
+  ids: Iterable<string>,
+  patch: StrokeStylePatch,
+  origin: unknown = LOCAL_EDIT,
+): number {
+  const wanted = new Set(ids)
+  if (!wanted.size) return 0
+  const willChange = elements.toArray().some(element => wanted.has(element.id) && withStrokeStyle(element, patch) !== element)
+  if (!willChange) return 0
+
+  let changed = 0
+  doc.transact(() => {
+    for (let index = 0; index < elements.length; index += 1) {
+      const current = elements.get(index)
+      if (!wanted.has(current.id)) continue
+      const next = withStrokeStyle(current, patch)
       if (next === current) continue
       elements.delete(index, 1)
       elements.insert(index, [next])

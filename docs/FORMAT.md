@@ -92,6 +92,16 @@ unlocked: the node may move, resize and rotate. Only `true` is written. A save
 canonicalises `false` to absence, so an unlocked file stays identical to one
 from before the field existed. A non-boolean value is invalid and is not
 coerced. Edges never carry `locked`, because a connector follows its endpoints.
+
+`style.dash` is optional on nodes and edges. Only `"dashed"` is written;
+absence is a solid stroke, and a save omits the key so a solid line matches
+a file from before the field existed. Any other spelling is invalid and is
+not coerced to dashed. `style.arrowHead` stays `"none"` or `"triangle"` and
+is the element type (`line` or `arrow`): removing the head does not turn a
+connector into a freeform line, and a connector still follows its endpoints.
+Thickness is the existing `style.stroke`. None of this bumps `schemaVersion`.
+The pen's last dash and head are device preferences and are never stored in
+the document.
 - A `bpmnFlow` becomes an edge. `sourceId` and `targetId` are structural endpoints;
   `flowType`, `condition`, `probability`, and `isDefault` are nested under
   `profileData.bpmn`. Arrows and lines without `bpmnFlow` remain nodes.
