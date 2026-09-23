@@ -4,6 +4,7 @@ import { commitElementUpdate } from '../persistence/updates'
 import { planAlign, type AlignAxis } from './arrange'
 import { dissolveAfter, expandIds, retargetGroupIds, type GroupWrite } from './group'
 import { isLocked, withLock } from './lock'
+import { planStack, type StackEdge } from './stack'
 import { withStrokeStyle, type StrokeStylePatch } from './stroke-style'
 import type { BoardElement } from './types'
 
@@ -347,22 +348,45 @@ export function duplicateElements(
 }
 
 /**
- * Raises an element above the rest.
+ * Moves a selection to the front or the back of the paint order, in one transaction.
  *
- * Paint order is array order, so this moves the element to the end. The zIndex
- * stamp is a tiebreaker for consumers that sort rather than rely on position.
+ * Paint order is array order. The block keeps the order it already had — a
+ * later item in the selection does not leapfrog an earlier one — and a group
+ * mate comes along even if it was not named. `z` is stamped so a consumer that
+ * sorts by it agrees with the array; a connector has no `z` and is not stamped.
+ * Already the prefix or the suffix opens no transaction.
+ */
+export function restackElements(
+  doc: Y.Doc,
+  elements: Elements,
+  ids: Iterable<string>,
+  edge: StackEdge,
+  origin: unknown = LOCAL_EDIT,
+): number {
+  const plan = planStack(elements.toArray(), ids, edge)
+  if (!plan) return 0
+  const moving = new Set(plan.moving)
+  const stamps = new Map(plan.stamps.map(stamp => [stamp.id, stamp.zIndex]))
+  doc.transact(() => {
+    const block: BoardElement[] = []
+    for (let index = elements.length - 1; index >= 0; index -= 1) {
+      const current = elements.get(index)
+      if (!moving.has(current.id)) continue
+      elements.delete(index, 1)
+      const zIndex = stamps.get(current.id)
+      block.push(zIndex === undefined || current.zIndex === zIndex ? current : { ...current, zIndex })
+    }
+    block.reverse()
+    if (edge === 'front') elements.push(block)
+    else elements.insert(0, block)
+  }, origin)
+  return plan.moving.length
+}
+
+/**
+ * Raises one element above the rest. A grouped element takes its group.
+ * Already on top opens no transaction.
  */
 export function bringToFront(doc: Y.Doc, elements: Elements, id: string, origin: unknown = LOCAL_EDIT): boolean {
-  const index = elements.toArray().findIndex(element => element.id === id)
-  if (index < 0) return false
-  // Already last: moving it would be a no-op transaction that still dirties the
-  // document and costs an undo step.
-  if (index === elements.length - 1) return false
-
-  const element = elements.get(index)
-  doc.transact(() => {
-    elements.delete(index, 1)
-    elements.push([{ ...element, zIndex: Date.now() }])
-  }, origin)
-  return true
+  return restackElements(doc, elements, [id], 'front', origin) > 0
 }

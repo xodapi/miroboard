@@ -774,13 +774,15 @@ export default function App() {
     if (!changed) showToast('Нечего выравнивать', 'info')
   }, [flushGesture, previewSnapshot, selectedIds, showToast, ydoc])
 
-  const bringToFront = useCallback((id: string) => {
+  /**
+   * Paint order is the array, so the whole selection moves as one block.
+   * Already the front or the back is not an undo step.
+   */
+  const restackSelection = useCallback((ids: readonly string[], edge: 'front' | 'back') => {
     if (previewSnapshot || !yElements.current) return
-    commands.bringToFront(ydoc, yElements.current, id)
-  }, [previewSnapshot, ydoc])
-  const sendToBack = useCallback((id: string) => {
-    updateElement(id, { zIndex: 0 })
-  }, [updateElement])
+    const changed = commands.restackElements(ydoc, yElements.current, ids, edge)
+    if (!changed) showToast(edge === 'front' ? 'Уже на переднем плане' : 'Уже на заднем плане', 'info')
+  }, [previewSnapshot, showToast, ydoc])
   /**
    * Duplicates the whole selection. The offset grows with the copy index so
    * duplicating three overlapping objects does not stack them into one.
@@ -915,10 +917,8 @@ export default function App() {
     } else if (action === 'duplicate') {
       if (targets.length > 1) setSelectedIds(selectMany(duplicateSelection()))
       else duplicateSelection()
-    } else if (action === 'front') {
-      targets.forEach(bringToFront)
-    } else if (action === 'back') {
-      targets.forEach(sendToBack)
+    } else if (action === 'front' || action === 'back') {
+      restackSelection(targets, action)
     } else if (action === 'lock') {
       const live = yElements.current?.toArray() ?? elements
       const kind = selectionLockAction(live, new Set(targets))
@@ -929,7 +929,7 @@ export default function App() {
       deleteElement(id)
     }
     setContextMenu(null)
-  }, [elements, selectedIds, duplicateSelection, bringToFront, sendToBack, deleteElement, deleteSelected, applyLock])
+  }, [elements, selectedIds, duplicateSelection, restackSelection, deleteElement, deleteSelected, applyLock])
 
   const { canUndo, canRedo } = undoState
 

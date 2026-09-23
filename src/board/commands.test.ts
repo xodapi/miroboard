@@ -5,12 +5,12 @@
  * invariants against copies of the App.tsx logic pasted into the test file and
  * labelled "mirrors". Those copies could not fail when the real code changed.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { LOCAL_EDIT, LOCAL_GESTURE } from '../collab/origins'
 import {
   addElement, alignElements, bringToFront, deleteElement, deleteElements, duplicateElements,
-  moveElements, setLocked, setStrokeStyle, updateElement, updateElements, writeGroupMembership, type Elements,
+  moveElements, restackElements, setLocked, setStrokeStyle, updateElement, updateElements, writeGroupMembership, type Elements,
 } from './commands'
 import { planGroup, planUngroup } from './group'
 import type { BoardElement } from './types'
@@ -442,6 +442,63 @@ describe('writeGroupMembership', () => {
   })
 })
 
+describe('restackElements', () => {
+  it('sends a selection to the back in one undo step, keeping document order', () => {
+    const { doc, elements } = board([element('a'), element('b'), element('c'), element('d')])
+    const undo = new Y.UndoManager(elements, { captureTimeout: 0, trackedOrigins: new Set<unknown>([LOCAL_EDIT]) })
+    const updates = countUpdates(doc)
+
+    expect(restackElements(doc, elements, ['d', 'b'], 'back')).toBe(2)
+    expect(updates.value).toBe(1)
+    expect(ids(elements)).toEqual(['b', 'd', 'a', 'c'])
+    expect(elements.get(0).zIndex).toBe(-2)
+    expect(elements.get(1).zIndex).toBe(-1)
+
+    undo.undo()
+    expect(ids(elements)).toEqual(['a', 'b', 'c', 'd'])
+    expect(elements.get(1)).not.toHaveProperty('zIndex')
+  })
+
+  it('raises a block above the highest staying z and ignores a lock', () => {
+    const { doc, elements } = board([
+      element('a', { zIndex: 4, locked: true }),
+      element('b'),
+      element('c', { zIndex: 9 }),
+    ])
+    expect(restackElements(doc, elements, ['a'], 'front')).toBe(1)
+    expect(ids(elements)).toEqual(['b', 'c', 'a'])
+    expect(elements.get(2)).toMatchObject({ zIndex: 10, locked: true, x: 0 })
+  })
+
+  it('opens no transaction when the block is already the edge, or the id is missing', () => {
+    const { doc, elements } = board([element('a'), element('b')])
+    const updates = countUpdates(doc)
+    expect(restackElements(doc, elements, ['b'], 'front')).toBe(0)
+    expect(restackElements(doc, elements, ['a'], 'back')).toBe(0)
+    expect(restackElements(doc, elements, ['a', 'b'], 'front')).toBe(0)
+    expect(restackElements(doc, elements, [], 'back')).toBe(0)
+    expect(restackElements(doc, elements, ['missing'], 'back')).toBe(0)
+    expect(updates.value).toBe(0)
+  })
+
+  it('takes a group mate and the connector between them, not a flow that leaves the set', () => {
+    const flow = (id: string, sourceId: string, targetId: string): BoardElement => ({
+      id, type: 'arrow', x: 1, y: 2, color: '#000', bpmnFlow: { sourceId, targetId },
+    })
+    const { doc, elements } = board([
+      element('a', { groupId: 'g' }),
+      flow('ab', 'a', 'b'),
+      element('b', { groupId: 'g' }),
+      flow('ac', 'a', 'c'),
+      element('c'),
+    ])
+    expect(restackElements(doc, elements, ['b'], 'front')).toBe(3)
+    expect(ids(elements)).toEqual(['ac', 'c', 'a', 'ab', 'b'])
+    expect(elements.toArray().find(item => item.id === 'ab')).not.toHaveProperty('zIndex')
+    expect(elements.toArray().find(item => item.id === 'a')!.zIndex).toBe(1)
+  })
+})
+
 describe('bringToFront', () => {
   it('moves the element to the end of the paint order', () => {
     const { doc, elements } = board([element('a'), element('b'), element('c')])
@@ -458,12 +515,9 @@ describe('bringToFront', () => {
     expect(updates.value).toBe(0)
   })
 
-  it('stamps a zIndex for consumers that sort rather than use array order', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-09-21T00:00:00Z'))
-    const { doc, elements } = board([element('a'), element('b')])
+  it('stamps a zIndex above the rest, not a clock value', () => {
+    const { doc, elements } = board([element('a'), element('b', { zIndex: 3 })])
     bringToFront(doc, elements, 'a')
-    expect(elements.toArray().at(-1)!.zIndex).toBe(Date.parse('2026-09-21T00:00:00Z'))
-    vi.useRealTimers()
+    expect(elements.toArray().at(-1)!.zIndex).toBe(4)
   })
 })
