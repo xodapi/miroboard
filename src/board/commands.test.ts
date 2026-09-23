@@ -337,27 +337,32 @@ describe('setStrokeStyle', () => {
 })
 
 describe('duplicateElements', () => {
-  it('copies a selection in one transaction with growing offsets', () => {
+  it('copies a selection in one transaction without changing the gap', () => {
     const { doc, elements } = board([element('a', { x: 0, y: 0 }), element('b', { x: 100, y: 100 })])
+    const undo = new Y.UndoManager(elements, { captureTimeout: 0, trackedOrigins: new Set<unknown>([LOCAL_EDIT]) })
     const updates = countUpdates(doc)
     let counter = 0
-    const created = duplicateElements(doc, elements, ['a', 'b'], () => `copy-${counter++}`)
+    const created = duplicateElements(doc, elements, ['b', 'a'], () => `copy-${counter++}`)
 
     expect(updates.value).toBe(1)
     expect(created).toEqual(['copy-0', 'copy-1'])
     expect(elements.toArray().map(e => [e.id, e.x, e.y])).toEqual([
-      ['a', 0, 0], ['b', 100, 100], ['copy-0', 20, 20], ['copy-1', 140, 140],
+      ['a', 0, 0], ['b', 100, 100], ['copy-0', 20, 20], ['copy-1', 120, 120],
     ])
+
+    undo.undo()
+    expect(ids(elements)).toEqual(['a', 'b'])
   })
 
-  it('does not stack copies of overlapping elements', () => {
-    // Two elements at the same spot with a fixed offset would land their copies
-    // on top of each other, looking like one duplicate went missing.
+  it('keeps coincident copies coincident', () => {
+    // A shared offset lands stacked sources on top of each other. Shearing
+    // them apart used to look like a layout; the selection count is the signal.
     const { doc, elements } = board([element('a', { x: 0, y: 0 }), element('b', { x: 0, y: 0 })])
     let counter = 0
-    duplicateElements(doc, elements, ['a', 'b'], () => `copy-${counter++}`)
+    const created = duplicateElements(doc, elements, ['a', 'b'], () => `copy-${counter++}`)
+    expect(created).toEqual(['copy-0', 'copy-1'])
     const copies = elements.toArray().filter(e => e.id.startsWith('copy'))
-    expect(copies[0].x).not.toBe(copies[1].x)
+    expect(copies.map(copy => [copy.x, copy.y])).toEqual([[20, 20], [20, 20]])
   })
 
   it('carries every field of the source across', () => {
@@ -394,10 +399,51 @@ describe('duplicateElements', () => {
     const { doc, elements } = board([element('a', { groupId: 'g' }), element('b', { groupId: 'g' })])
     let counter = 0
     duplicateElements(doc, elements, ['a', 'b'], () => `copy-${counter++}`)
-    const copies = elements.toArray().filter(element => element.id.startsWith('copy'))
-    expect(copies.map(element => element.groupId)).toEqual(['copy-2', 'copy-2'])
+    const copies = elements.toArray().filter(item => item.id.startsWith('copy'))
+    expect(copies.map(item => item.groupId)).toEqual(['copy-2', 'copy-2'])
     expect(elements.get(0).groupId).toBe('g')
     expect(elements.get(1).groupId).toBe('g')
+  })
+
+  it('copies an unnamed group mate and keeps the gap', () => {
+    const { doc, elements } = board([
+      element('a', { groupId: 'g', x: 0, y: 0 }),
+      element('outsider', { x: 400, y: 400 }),
+      element('b', { groupId: 'g', x: 80, y: 10 }),
+    ])
+    let counter = 0
+    expect(duplicateElements(doc, elements, ['a'], () => `copy-${counter++}`)).toEqual(['copy-0', 'copy-1'])
+    expect(elements.toArray().slice(3).map(item => [item.id, item.x, item.y, item.groupId])).toEqual([
+      ['copy-0', 20, 20, 'copy-2'],
+      ['copy-1', 100, 30, 'copy-2'],
+    ])
+    expect(elements.get(2).groupId).toBe('g')
+  })
+
+  it('remaps a connector onto the copies and drops one that would leave the set', () => {
+    const flow = (id: string, sourceId: string, targetId: string): BoardElement => ({
+      id, type: 'arrow', x: 4, y: 6, color: '#000', bpmnFlow: { sourceId, targetId, condition: 'ok' },
+    })
+    const { doc, elements } = board([
+      element('a', { x: 0, y: 0 }),
+      element('b', { x: 100, y: 40 }),
+      flow('ab', 'a', 'b'),
+      flow('ac', 'a', 'c'),
+      element('c', { x: 200, y: 0 }),
+    ])
+    const updates = countUpdates(doc)
+    let counter = 0
+
+    expect(duplicateElements(doc, elements, ['a', 'b'], () => `copy-${counter++}`)).toEqual(['copy-0', 'copy-1', 'copy-2'])
+    expect(updates.value).toBe(1)
+    const copied = elements.toArray().find(item => item.id === 'copy-2')
+    expect(copied).toMatchObject({ x: 24, y: 26, bpmnFlow: { sourceId: 'copy-0', targetId: 'copy-1', condition: 'ok' } })
+    expect(elements.toArray().find(item => item.id === 'ab')!.bpmnFlow).toEqual({ sourceId: 'a', targetId: 'b', condition: 'ok' })
+    expect(elements.toArray().some(item => item.bpmnFlow?.targetId === 'c' && item.id.startsWith('copy'))).toBe(false)
+
+    expect(duplicateElements(doc, elements, ['ac'], () => 'stray')).toEqual([])
+    expect(updates.value).toBe(1)
+    expect(elements.toArray().some(item => item.id === 'stray')).toBe(false)
   })
 })
 

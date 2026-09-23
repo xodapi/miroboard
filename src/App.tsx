@@ -784,9 +784,9 @@ export default function App() {
     if (!changed) showToast(edge === 'front' ? 'Уже на переднем плане' : 'Уже на заднем плане', 'info')
   }, [previewSnapshot, showToast, ydoc])
   /**
-   * Duplicates the whole selection. The offset grows with the copy index so
-   * duplicating three overlapping objects does not stack them into one.
-   * Returns the new ids so callers can select the copies.
+   * Duplicates the whole selection by one shared offset, the same one paste
+   * uses, so a group keeps its gaps. Returns the new ids so callers can
+   * select the copies.
    */
   const duplicateSelection = useCallback((origin?: unknown): string[] => {
     if (previewSnapshot || !yElements.current) return []

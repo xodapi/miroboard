@@ -1,8 +1,9 @@
 import * as Y from 'yjs'
+import { PASTE_OFFSET, preparePaste } from '../collab/clipboard'
 import { LOCAL_EDIT } from '../collab/origins'
 import { commitElementUpdate } from '../persistence/updates'
 import { planAlign, type AlignAxis } from './arrange'
-import { dissolveAfter, expandIds, retargetGroupIds, type GroupWrite } from './group'
+import { dissolveAfter, expandIds, type GroupWrite } from './group'
 import { isLocked, withLock } from './lock'
 import { planStack, type StackEdge } from './stack'
 import { withStrokeStyle, type StrokeStylePatch } from './stroke-style'
@@ -28,9 +29,6 @@ import type { BoardElement } from './types'
  */
 
 export type Elements = Y.Array<BoardElement>
-
-/** Offset between a copy and its source, multiplied by the copy index. */
-const DUPLICATE_OFFSET = 20
 
 export function addElement(doc: Y.Doc, elements: Elements, element: BoardElement, origin: unknown = LOCAL_EDIT): void {
   doc.transact(() => { elements.push([element]) }, origin)
@@ -305,18 +303,20 @@ export function setStrokeStyle(
 }
 
 /**
- * Copies a selection, offsetting each copy a little further than the last.
+ * Copies a selection by one shared offset, in one transaction.
  *
- * The growing offset is deliberate: duplicating three stacked elements with a
- * fixed offset lands all three copies on the same spot. Returns the new ids in
- * source order so the caller can select the copies.
+ * The offset is the same one paste uses. A per-copy offset sheared a group:
+ * the second copy landed twice as far as the first, so the gap between them
+ * changed. Coincident copies stay coincident; the selection count is how you
+ * tell them apart.
  *
- * `createdBy` names whoever made the copy, not the author of the original.
- * Duplicating is creating — the profile panel tells the user their id signs the
- * objects they create — and pasting (`preparePaste`) already re-stamps the same
- * way. Without this, duplicating something out of a colleague's file credited
- * the new object to them. Callers that genuinely want to keep the original
- * author simply omit the option.
+ * A group mate comes along even if it was not named. A connector comes only
+ * when both ends are in the set, and its endpoints are remapped onto the
+ * copies, so the fragment stays connected to itself. A connector whose end is
+ * outside the set is omitted: keeping it would dangle, and dropping only the
+ * flow would leave a freeform arrow. `createdBy` names whoever made the copy.
+ * Callers that want the original author omit the option. Returns the new ids
+ * in document order so the caller can select the copies.
  */
 export function duplicateElements(
   doc: Y.Doc,
@@ -326,25 +326,28 @@ export function duplicateElements(
   origin: unknown = LOCAL_EDIT,
   createdBy?: string,
 ): string[] {
-  const wanted = new Set(ids)
-  const picked = elements.toArray().filter(element => wanted.has(element.id))
+  const list = elements.toArray()
+  const present = new Set(list.map(element => element.id))
+  const wanted = new Set(expandIds(list, ids).filter(id => present.has(id)))
+  if (!wanted.size) return []
+  // Document order, not the order the ids arrived in, so the copies paint in
+  // the same relation as their sources.
+  const picked = list.filter(element => {
+    if (!wanted.has(element.id)) return false
+    const flow = element.bpmnFlow
+    if (!flow) return true
+    return wanted.has(flow.sourceId) && wanted.has(flow.targetId)
+  })
   if (!picked.length) return []
 
-  const created: string[] = []
-  const copies: BoardElement[] = []
-  picked.forEach((element, index) => {
-    const offset = DUPLICATE_OFFSET * (index + 1)
-    const id = nextId()
-    created.push(id)
-    const copy: BoardElement = { ...element, id, x: element.x + offset, y: element.y + offset }
-    if (createdBy !== undefined) copy.createdBy = createdBy
-    copies.push(copy)
+  const copies = preparePaste(picked, {
+    makeId: () => nextId(),
+    offset: { x: PASTE_OFFSET, y: PASTE_OFFSET },
+    createdBy,
   })
-  // A copied group must not stay in the source group, or the next click on a
-  // copy would select the originals too. Lone copies drop the token.
-  const stamped = retargetGroupIds(copies, () => nextId())
-  doc.transact(() => { elements.push(stamped) }, origin)
-  return created
+  if (!copies.length) return []
+  doc.transact(() => { elements.push(copies) }, origin)
+  return copies.map(element => element.id)
 }
 
 /**
