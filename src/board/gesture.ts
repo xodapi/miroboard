@@ -1,4 +1,5 @@
 import type { BoardElement, Point } from './types'
+import { shiftPoints } from './waypoints'
 
 /**
  * Gesture geometry, extracted from App.tsx verbatim so it can be tested and so
@@ -24,7 +25,11 @@ export type DragInfo = {
    * `link` of `undefined` when that end must detach. Applied only once the
    * pointer has actually moved, so a click does not drop an attachment.
    */
-  items: { id: string; x: number; y: number; extras?: Partial<BoardElement> }[]
+  /**
+   * `waypoints` are the world bends at press. They take the same delta as
+   * `x`/`y`, and only once the pointer has moved — a click must not rewrite them.
+   */
+  items: { id: string; x: number; y: number; extras?: Partial<BoardElement>; waypoints?: Point[] }[]
 }
 
 export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se'
@@ -58,14 +63,19 @@ export function dragFrame(info: DragInfo, point: Point, snap?: SnapFn): GestureF
   const deltaX = snap ? snap(info.items[0].x + rawX) - info.items[0].x : rawX
   const deltaY = snap ? snap(info.items[0].y + rawY) - info.items[0].y : rawY
   const moved = deltaX !== 0 || deltaY !== 0
-  return info.items.map(item => ({
-    id: item.id,
-    // Extras first, then the delta owns x/y. A click keeps the stored origin
-    // and does not publish the park — releasing where you pressed is not a move.
-    updates: moved
-      ? { ...item.extras, x: item.x + deltaX, y: item.y + deltaY }
-      : { x: item.x + deltaX, y: item.y + deltaY },
-  }))
+  return info.items.map(item => {
+    const bends = moved && item.waypoints?.length ? shiftPoints(item.waypoints, deltaX, deltaY) : undefined
+    return {
+      id: item.id,
+      // Extras first, then the delta owns x/y. A click keeps the stored origin
+      // and does not publish the park — releasing where you pressed is not a move.
+      // Bends ride the same delta. They are not part of the park: the park
+      // rebases x/y onto the visual end, and the bends were already world points.
+      updates: moved
+        ? { ...item.extras, x: item.x + deltaX, y: item.y + deltaY, ...(bends ? { waypoints: bends } : {}) }
+        : { x: item.x + deltaX, y: item.y + deltaY },
+    }
+  })
 }
 
 /** Corner resize: the dragged corner follows the pointer, the opposite one stays put. */

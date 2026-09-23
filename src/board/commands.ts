@@ -4,6 +4,7 @@ import { LOCAL_EDIT } from '../collab/origins'
 import { commitElementPatch, commitElementUpdate } from '../persistence/updates'
 import { planAlign, type AlignAxis } from './arrange'
 import { parkForMove, patchesForRemoval, withDrawnLine } from './follow'
+import { shiftPoints } from './waypoints'
 import { dissolveAfter, expandIds, type GroupWrite } from './group'
 import { isLocked, withLock } from './lock'
 import { planStack, type StackEdge } from './stack'
@@ -216,10 +217,14 @@ export function moveElements(
       // same transaction as the nudge. A shape moving without its arrow is
       // not parked: the arrow is not in `picked`, and render follows it.
       const parked = parkForMove(element, all, moving)
+      // Bends are world points. The park may rebase x/y onto the visual end
+      // without moving them; the nudge delta is what has to carry them along.
+      const bends = element.waypoints?.length ? shiftPoints(element.waypoints, delta.x, delta.y) : undefined
       commitElementPatch(doc, elements, element.id, {
         ...parked.extras,
         x: parked.x + delta.x,
         y: parked.y + delta.y,
+        ...(bends ? { waypoints: bends } : {}),
       }, origin)
     }
   }, origin)
@@ -246,8 +251,16 @@ export function alignElements(
   if (!moves.length) return 0
   let changed = 0
   doc.transact(() => {
-    for (const move of moves) {
-      if (commitElementUpdate(doc, elements, move.id, { x: move.x, y: move.y }, origin)) changed += 1
+    const byId = new Map(moves.map(move => [move.id, move]))
+    for (let index = 0; index < elements.length; index += 1) {
+      const current = elements.get(index)
+      const move = byId.get(current.id)
+      if (!move) continue
+      const dx = move.x - current.x
+      const dy = move.y - current.y
+      const bends = current.waypoints?.length ? shiftPoints(current.waypoints, dx, dy) : undefined
+      const updates: Partial<BoardElement> = bends ? { x: move.x, y: move.y, waypoints: bends } : { x: move.x, y: move.y }
+      if (commitElementUpdate(doc, elements, move.id, updates, origin)) changed += 1
     }
   }, origin)
   return changed

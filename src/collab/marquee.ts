@@ -29,6 +29,8 @@ export interface MarqueeElement {
   readonly bpmnFlow?: { sourceId: string; targetId: string }
   /** Freeform attachment. Resolved center-to-center, same as a BPMN flow. */
   readonly link?: { sourceId?: string; targetId?: string }
+  /** World bends. The box has to cover them or a marquee misses a routed arrow. */
+  readonly waypoints?: readonly { x: number; y: number }[]
 }
 
 export const DEFAULT_ELEMENT_SIZE = 48
@@ -99,11 +101,11 @@ export function boundsOf(
     case 'line':
     case 'arrow': {
       const live = segmentBounds(element, nodesById)
-      if (live) return live
-      return normaliseRect(
+      const base = live ?? normaliseRect(
         { x: element.x, y: element.y },
         { x: element.x + (element.w ?? 0), y: element.y + (element.h ?? 0) },
       )
+      return includeWaypoints(base, element.waypoints)
     }
     default: {
       const w = element.w ?? DEFAULT_ELEMENT_SIZE
@@ -111,6 +113,19 @@ export function boundsOf(
       return { minX: element.x, minY: element.y, maxX: element.x + w, maxY: element.y + h }
     }
   }
+}
+
+function includeWaypoints(bounds: Bounds, points: readonly { x: number; y: number }[] | undefined): Bounds {
+  if (!points?.length) return bounds
+  let { minX, minY, maxX, maxY } = bounds
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue
+    if (point.x < minX) minX = point.x
+    if (point.y < minY) minY = point.y
+    if (point.x > maxX) maxX = point.x
+    if (point.y > maxY) maxY = point.y
+  }
+  return { minX, minY, maxX, maxY }
 }
 
 export function intersects(a: Bounds, b: Bounds): boolean {

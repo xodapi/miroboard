@@ -109,6 +109,13 @@ end keeps the stored frame. This is not an edge and not a `bpmnFlow`: deleting
 the shape leaves the arrow, and the schema stays 1. An empty link is omitted,
 so a file without attachments matches one from before the field existed.
 
+`content.waypoints` is an optional list of world bend points on that same
+freeform arrow or line. An empty list is omitted, so a straight mark matches a
+file from before the field existed. An edge keeps its own `waypoints` array;
+it is the same idea, not a second coordinate system. Moving a shape does not
+move the points — the ends aim at the first and last bend, and the route stays
+where it was drawn. Schema stays 1.
+
 - A `bpmnFlow` becomes an edge. `sourceId` and `targetId` are structural endpoints;
   `flowType`, `condition`, `probability`, and `isDefault` are nested under
   `profileData.bpmn`. Arrows and lines without `bpmnFlow` remain nodes.

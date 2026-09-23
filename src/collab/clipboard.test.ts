@@ -196,6 +196,19 @@ describe('preparePaste', () => {
     expect(preparePaste([rect()], { offset: { x: -5, y: 7 } })[0]).toMatchObject({ x: 95, y: 127 })
   })
 
+  it('offsets bends by the same delta as the mark, including a zero offset', () => {
+    const source = rect({
+      id: 'a', type: 'arrow', x: 10, y: 20, w: 30, h: 0,
+      waypoints: [{ x: 40, y: 80 }],
+    })
+    const pasted = preparePaste([source], { offset: { x: 5, y: -2 }, makeId: () => 'copy' })[0]
+    expect(pasted.waypoints).toEqual([{ x: 45, y: 78 }])
+    expect(source.waypoints).toEqual([{ x: 40, y: 80 }])
+    const unmoved = preparePaste([source], { offset: { x: 0, y: 0 }, makeId: () => 'same' })[0]
+    expect(unmoved.waypoints).toEqual([{ x: 40, y: 80 }])
+    expect(unmoved.waypoints).not.toBe(source.waypoints)
+  })
+
   it('remaps bpmnFlow endpoints through the same id table, so a copied fragment stays connected to itself', () => {
     const elements: BoardElement[] = [
       rect({ id: 'start', bpmnNodeType: 'startEvent' }),

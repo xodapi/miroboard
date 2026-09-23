@@ -201,7 +201,8 @@
                 "sourceId": { "type": "string" },
                 "targetId": { "type": "string" }
               }
-            }
+            },
+            "waypoints": { "type": "array", "items": { "$ref": "#/$defs/point" } }
           }
         },
         "profileData": {

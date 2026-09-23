@@ -69,9 +69,11 @@ import { serialise } from './format/mboard'
 import type { DocHistory, DocMeta, HistorySnapshot, ProfileConfig } from './format/types'
 import { HelpPanel } from './HelpPanel'
 import './help-panel.css'
-import { bpmnEdgeAnchor, simplifyPath, smoothPathD, snapVal } from './board/geometry'
-import { ATTACH_SCREEN_PX, hasLink, lineEnds, parkForMove, planLink, visualExtent, withDrawnLine } from './board/follow'
+import { simplifyPath, smoothPathD, snapVal } from './board/geometry'
+import { ATTACH_SCREEN_PX, hasLink, parkForMove, planLink, visualExtent, withDrawnLine } from './board/follow'
 import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeInfo } from './board/gesture'
+import { BEND_ARM_PX, BEND_SCREEN_PX, boxOf, commitBend, draftBend, strokeOf, type BendDrag } from './board/route'
+import { sameWaypoints } from './board/waypoints'
 import { canRotate, frameTransform, rotationFromPointer, type RotateInfo } from './board/rotate'
 import { genId } from './board/id'
 import { STICKY_COLORS } from './board/palette'
@@ -186,6 +188,8 @@ export default function App() {
   // Resize state
   const resizeInfoRef = useRef<ResizeInfo | null>(null)
   const rotateInfoRef = useRef<RotateInfo | null>(null)
+  // A bend drag is not a move of the mark. The line-body drag stays on data-id.
+  const bendRef = useRef<(BendDrag & { id: string; press: Point; moved: boolean }) | null>(null)
   // Gesture frames stay local until pointer-up, preventing one Yjs item rewrite
   // (and one gc:false tombstone) per pointer event.
   const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> }[] | null>(null)
@@ -222,6 +226,7 @@ export default function App() {
     setEditingText(null)
     transientFrameRef.current = null
     setTransientFrame(null)
+    bendRef.current = null
   }, [])
   const closeTimeline = useCallback(() => {
     setShowTimeline(false)
@@ -1348,6 +1353,62 @@ export default function App() {
         }
       }
 
+      // A bend grip is inside the mark, so it has to be claimed before the
+      // line-body drag. A click on the midpoint does not insert a point; the
+      // pointer has to move. Double-click deletes the bend it landed on.
+      const bendGrip = target.closest('[data-bend], [data-waypoint]') as HTMLElement | null
+      if (bendGrip && selectionCount === 1 && yElements.current) {
+        const host = bendGrip.closest('[data-id]') as HTMLElement | null
+        const routed = host?.dataset.id ? elements.find(item => item.id === host.dataset.id) : undefined
+        if (routed && !isLocked(routed) && (routed.type === 'arrow' || routed.type === 'line')) {
+          const byId = new Map(elements.map(item => [item.id, item]))
+          const stroke = strokeOf(routed, byId)
+          const origin = routed.waypoints?.map(item => ({ x: item.x, y: item.y })) ?? []
+          if (bendGrip.dataset.waypoint !== undefined && e.detail >= 2) {
+            const index = Number(bendGrip.dataset.waypoint)
+            const next = origin.filter((_, at) => at !== index)
+            commitElementPatch(ydoc, yElements.current, routed.id, {
+              waypoints: next.length ? next : undefined,
+            }, LOCAL_EDIT)
+            return
+          }
+          if (stroke && bendGrip.dataset.bend !== undefined) {
+            const index = Number(bendGrip.dataset.bend)
+            const chordA = stroke.points[index]
+            const chordB = stroke.points[index + 1]
+            if (chordA && chordB && Number.isInteger(index)) {
+              bendRef.current = {
+                id: routed.id,
+                index,
+                origin,
+                chord: [{ x: chordA.x, y: chordA.y }, { x: chordB.x, y: chordB.y }],
+                press: point,
+                created: true,
+                moved: false,
+              }
+              return
+            }
+          }
+          if (stroke && bendGrip.dataset.waypoint !== undefined) {
+            const index = Number(bendGrip.dataset.waypoint)
+            const chordA = stroke.points[index]
+            const chordB = stroke.points[index + 2]
+            if (chordA && chordB && origin[index]) {
+              bendRef.current = {
+                id: routed.id,
+                index,
+                origin,
+                chord: [{ x: chordA.x, y: chordA.y }, { x: chordB.x, y: chordB.y }],
+                press: point,
+                created: false,
+                moved: false,
+              }
+              return
+            }
+          }
+        }
+      }
+
       const el = target.closest('[data-id]') as HTMLElement
       if (el) {
         const elId = el.dataset.id!
@@ -1380,9 +1441,14 @@ export default function App() {
             startX: point.x, startY: point.y,
             items: dragged.map(item => {
               const parked = parkForMove(item, elements, moving)
-              return parked.extras
+              const frame = parked.extras
                 ? { id: item.id, x: parked.x, y: parked.y, extras: parked.extras }
                 : { id: item.id, x: item.x, y: item.y }
+              // World bends. The park rebases x/y onto the visual end and must
+              // not be applied to them; the drag delta is added later.
+              return item.waypoints?.length
+                ? { ...frame, waypoints: item.waypoints.map(bend => ({ x: bend.x, y: bend.y })) }
+                : frame
             }),
           }
         }
@@ -1531,6 +1597,18 @@ export default function App() {
         longPressRef.current = null
       }
     }
+    const bend = bendRef.current
+    if (bend) {
+      const pulled = Math.hypot(point.x - bend.press.x, point.y - bend.press.y)
+      const armed = bend.created ? pulled >= BEND_ARM_PX / transform.scale : pulled > 0
+      if (!armed) return
+      bend.moved = true
+      const snapped = snapGrid ? { x: snapVal(point.x), y: snapVal(point.y) } : point
+      const frame = [{ id: bend.id, updates: { waypoints: draftBend(bend, snapped) } }]
+      transientFrameRef.current = frame
+      setTransientFrame(frame)
+      return
+    }
     const rotate = rotateInfoRef.current
     if (rotate) {
       const frame = [{ id: rotate.id, updates: { rotation: rotationFromPointer(rotate, point, e.shiftKey) } }]
@@ -1621,6 +1699,8 @@ export default function App() {
     const drag = dragInfoRef.current
     const resize = resizeInfoRef.current
     const rotate = rotateInfoRef.current
+    const bend = bendRef.current
+    bendRef.current = null
     let frame = transientFrameRef.current
     if (releasedAt && rotate) {
       frame = [{ id: rotate.id, updates: { rotation: rotationFromPointer(rotate, releasedAt, Boolean(e?.shiftKey)) } }]
@@ -1633,6 +1713,23 @@ export default function App() {
       const movingIds = new Set(drag.items.map(item => item.id))
       const aligned = snapDragFrames(raw, elements, movingIds, ALIGN_SCREEN_PX / transform.scale)
       frame = aligned.guides.length || !snapGrid ? aligned.frames : dragFrame(drag, releasedAt, snapVal)
+    }
+    // A bend is its own commit. The transient list is the preview; the release
+    // point is what gets stored, and a bend that falls back onto its chord is
+    // deleted rather than left as a point nobody can see.
+    if (bend) {
+      frame = null
+      if (bend.moved && yElements.current) {
+        const point = releasedAt
+          ? (snapGrid ? { x: snapVal(releasedAt.x), y: snapVal(releasedAt.y) } : releasedAt)
+          : null
+        const waypoints = point
+          ? commitBend(bend, point, BEND_SCREEN_PX / transform.scale)
+          : transientFrameRef.current?.find(item => item.id === bend.id)?.updates.waypoints
+        if (!sameWaypoints(bend.origin, waypoints)) {
+          commitElementPatch(ydoc, yElements.current, bend.id, { waypoints }, LOCAL_GESTURE)
+        }
+      }
     }
     // One commit per gesture, labelled as such: the drag itself stays local
     // (transientFrame) so a 3-second drag is a single undo step, not 180.
@@ -2072,46 +2169,53 @@ export default function App() {
         )
       case 'arrow':
       case 'line': {
-        // A connector follows its endpoints even after the head is removed.
-        // A freeform arrow, and a line that is attached, follow the same way
-        // without becoming a flow. An unattached line uses the frame below.
-        if (el.bpmnFlow || el.type === 'arrow' || hasLink(el)) {
-          const source = el.bpmnFlow ? renderedById.get(el.bpmnFlow.sourceId) : undefined
-          const target = el.bpmnFlow ? renderedById.get(el.bpmnFlow.targetId) : undefined
-          const sourceCenter = source ? { x: source.x + (source.w || 0) / 2, y: source.y + (source.h || 0) / 2 } : undefined
-          const targetCenter = target ? { x: target.x + (target.w || 0) / 2, y: target.y + (target.h || 0) / 2 } : undefined
-          const followed = el.bpmnFlow ? null : lineEnds(el, renderedById)
-          const start = el.bpmnFlow
-            ? (source && targetCenter ? bpmnEdgeAnchor(source, targetCenter.x, targetCenter.y) : { x: el.x, y: el.y })
-            : (followed?.start ?? { x: el.x, y: el.y })
-          const end = el.bpmnFlow
-            ? (target && sourceCenter ? bpmnEdgeAnchor(target, sourceCenter.x, sourceCenter.y) : { x: el.x + (el.w || 0), y: el.y + (el.h || 0) })
-            : (followed?.end ?? { x: el.x + (el.w || 0), y: el.y + (el.h || 0) })
-          const startX = start.x
-          const startY = start.y
-          const x2 = end.x - startX
-          const y2 = end.y - startY
-          const angle = Math.atan2(y2, x2)
+        // A straight unattached line keeps the frame transform, so a stored
+        // rotation still draws. A bend, an arrow, a link or a connector is a
+        // world route: the group sits on the source end and the rest is local.
+        const routed = Boolean(el.bpmnFlow) || el.type === 'arrow' || hasLink(el) || Boolean(el.waypoints?.length)
+        const stroke = routed ? strokeOf(el, renderedById) : null
+        const showBends = isSelected && selectionCount === 1 && !isLocked(el) && !isPreview && tool === 'select'
+        if (stroke && stroke.points.length >= 2) {
+          const start = stroke.start
+          const local = stroke.points.map(point => ({ x: point.x - start.x, y: point.y - start.y }))
+          const box = boxOf(local) ?? { x: 0, y: 0, w: 0, h: 0 }
+          const last = local[local.length - 1]
+          const prev = local[local.length - 2]
+          const angle = Math.atan2(last.y - prev.y, last.x - prev.x)
           const hs = 12
+          const straight = local.length === 2
+          const mid = Math.floor((local.length - 1) / 2)
+          const labelAt = {
+            x: (local[mid].x + local[mid + 1].x) / 2,
+            y: (local[mid].y + local[mid + 1].y) / 2,
+          }
           return (
-            <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${startX},${startY})`} className={`touch-none ${moveCursor}`}>
-              {isChangedInPreview && <ChangedInPreview invScale={invS} x={Math.min(0, x2) - 7} y={Math.min(0, y2) - 7} width={Math.abs(x2) + 14} height={Math.abs(y2) + 14} radius={6} />}
-              <line x1={0} y1={0} x2={x2} y2={y2} stroke={el.color} strokeWidth={el.stroke} strokeDasharray={strokeDasharray(el)} />
+            <g key={el.id} data-id={el.id} data-testid={el.bpmnFlow ? `bpmn-flow-${el.id}` : undefined} transform={`translate(${start.x},${start.y})`} className={`touch-none ${moveCursor}`}>
+              {isChangedInPreview && <ChangedInPreview invScale={invS} x={box.x - 7} y={box.y - 7} width={box.w + 14} height={box.h + 14} radius={6} />}
+              {straight
+                ? <line x1={local[0].x} y1={local[0].y} x2={last.x} y2={last.y} stroke={el.color} strokeWidth={el.stroke} strokeDasharray={strokeDasharray(el)} />
+                : <polyline points={local.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke={el.color} strokeWidth={el.stroke} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={strokeDasharray(el)} />}
               {arrowHeadOf(el) === 'triangle' && (
-                <polygon points={`${x2},${y2} ${x2 - hs * Math.cos(angle - 0.4)},${y2 - hs * Math.sin(angle - 0.4)} ${x2 - hs * Math.cos(angle + 0.4)},${y2 - hs * Math.sin(angle + 0.4)}`}
+                <polygon points={`${last.x},${last.y} ${last.x - hs * Math.cos(angle - 0.4)},${last.y - hs * Math.sin(angle - 0.4)} ${last.x - hs * Math.cos(angle + 0.4)},${last.y - hs * Math.sin(angle + 0.4)}`}
                   fill={el.color} />
               )}
               {el.bpmnFlow && (el.bpmnFlow.condition || el.bpmnFlow.probability !== undefined || el.bpmnFlow.isDefault) && (
-                <g transform={`translate(${x2 / 2},${y2 / 2})`}>
+                <g transform={`translate(${labelAt.x},${labelAt.y})`}>
                   <rect x="-34" y="-12" width="68" height="20" rx="6" fill="white" stroke="#CBD5E1" />
                   <text textAnchor="middle" y="2" fontSize="10" fill="#475569">
                     {el.bpmnFlow.isDefault ? 'default' : el.bpmnFlow.condition || (el.bpmnFlow.probability !== undefined ? `P ${(el.bpmnFlow.probability * 100).toFixed(0)}%` : '')}
                   </text>
                 </g>
               )}
-              {isSelected && <rect x={Math.min(0, x2) - 4} y={Math.min(0, y2) - 4}
-                width={Math.abs(x2) + 8} height={Math.abs(y2) + 8}
+              {isSelected && <rect x={box.x - 4} y={box.y - 4}
+                width={box.w + 8} height={box.h + 8}
                 fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
+              {showBends && local.slice(0, -1).map((point, index) => (
+                <circle key={`bend-${index}`} data-bend={index} cx={(point.x + local[index + 1].x) / 2} cy={(point.y + local[index + 1].y) / 2} r={5 * invS} fill="white" stroke="#4D96FF" strokeWidth={1.5 * invS} />
+              ))}
+              {showBends && local.slice(1, -1).map((point, index) => (
+                <circle key={`waypoint-${index}`} data-waypoint={index} cx={point.x} cy={point.y} r={6 * invS} fill="#4D96FF" stroke="white" strokeWidth={1.5 * invS} />
+              ))}
             </g>
           )
         }
@@ -2122,6 +2226,9 @@ export default function App() {
             {isSelected && <rect x={Math.min(0, el.w || 0) - 4} y={Math.min(0, el.h || 0) - 4}
               width={Math.abs(el.w || 0) + 8} height={Math.abs(el.h || 0) + 8}
               fill="none" stroke="#4D96FF" strokeWidth={2 * invS} strokeDasharray={`${4 * invS}`} rx={4} />}
+            {showBends && (
+              <circle data-bend={0} cx={(el.w || 0) / 2} cy={(el.h || 0) / 2} r={5 * invS} fill="white" stroke="#4D96FF" strokeWidth={1.5 * invS} />
+            )}
           </g>
         )
       }
@@ -2408,7 +2515,16 @@ export default function App() {
         onSelect={selectSnapshot}
       />
       {/* ===== MINIMAP ===== */}
-      {showMiniMap && <MiniMap elements={renderedElements.map(el => ({ ...el, ...visualExtent(el, renderedById) }))} transform={transform} darkMode={darkMode} setTransform={setTransform} />}
+      {showMiniMap && <MiniMap elements={renderedElements.map(el => {
+        // A connector's stored frame is the origin. Only a route that actually
+        // has bends is framed from the stroke; everything else stays as before.
+        if ((el.type === 'arrow' || el.type === 'line') && el.waypoints?.length) {
+          const stroke = strokeOf(el, renderedById)
+          const box = stroke ? boxOf(stroke.points) : null
+          if (box) return { ...el, ...box }
+        }
+        return { ...el, ...visualExtent(el, renderedById) }
+      })} transform={transform} darkMode={darkMode} setTransform={setTransform} />}
       {/* ===== BOTTOM TOOLBAR ===== */}
       <BottomToolbar
         theme={theme}

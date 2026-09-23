@@ -6,6 +6,7 @@ import { CURRENT_SCHEMA_VERSION, type DocEdge, type DocHistory, type DocMeta, ty
 // board/types.ts is a dependency-free type module, not App.tsx: importing the
 // node-type list from there keeps one list instead of a third copy to drift.
 import { elementLink, isBpmnNodeType, type BpmnNodeType, type ElementLink } from '../board/types'
+import { readWaypoints } from '../board/waypoints'
 
 type Point = { x: number; y: number }
 
@@ -122,7 +123,7 @@ export function toDocElement(element: BoardElement): DocElement {
         source: { nodeId: sourceId, anchor: 'auto' },
         target: { nodeId: targetId, anchor: 'auto' },
         style: withDash({ color: element.color, stroke: element.stroke ?? null, arrowHead: element.type === 'arrow' ? 'triangle' as const : 'none' as const }, element),
-        waypoints: element.waypoints,
+        waypoints: readWaypoints(element.waypoints),
         content: element.text === undefined && element.labelOffset === undefined
           ? undefined
           : defined({ label: element.text, offset: element.labelOffset }),
@@ -149,6 +150,10 @@ export function toDocElement(element: BoardElement): DocElement {
         // A connector is an edge. A freeform link stays on the node and is
         // omitted when empty, so a file without attachments matches an old one.
         link: element.type === 'arrow' || element.type === 'line' ? elementLink(element.link) : undefined,
+        // Same idea as an edge `waypoints` array, on the node because a freeform
+        // mark is not an edge. Omitted when empty, so a straight arrow matches
+        // a file from before the field existed. Schema stays 1.
+        waypoints: element.type === 'arrow' || element.type === 'line' ? readWaypoints(element.waypoints) : undefined,
       }),
       profileData,
       createdBy: element.createdBy,
@@ -195,6 +200,8 @@ export function fromDocNode(node: DocNode): BoardElement {
   }) as BoardElement
   const link = elementLink(node.content.link)
   if (link) element.link = link
+  const bends = node.kind === 'arrow' || node.kind === 'line' ? readWaypoints(node.content.waypoints) : undefined
+  if (bends) element.waypoints = bends
   const extras: Record<string, unknown> = {
     ...unknownKeys(node as unknown as Record<string, unknown>, NODE_KEYS),
     profileData: profileExtras(node.profileData),
@@ -223,7 +230,7 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
     stroke: edge.style.stroke ?? undefined,
     dash: edge.style.dash === 'dashed' ? 'dashed' as const : undefined,
     text: edge.content?.label,
-    waypoints: edge.waypoints,
+    waypoints: readWaypoints(edge.waypoints),
     labelOffset: edge.content?.offset,
     bpmnFlow: defined({
       sourceId: edge.source.nodeId,
@@ -271,6 +278,7 @@ export function canonicalElement(element: BoardElement): BoardElement {
     delete result.link
   }
   if (!elementLink(result.link)) delete result.link
+  if (!result.waypoints?.length) delete result.waypoints
   return result
 }
 

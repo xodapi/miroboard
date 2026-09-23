@@ -51,16 +51,24 @@ function endShape(
   return node
 }
 
+/** First and last bend, when the route is not straight. Absent means aim as before. */
+function bendAim(element: BoardElement): { source?: Point; target?: Point } | undefined {
+  const points = element.waypoints
+  if (!points?.length) return undefined
+  return { source: points[0], target: points[points.length - 1] }
+}
+
 function anchoredEnd(
   element: BoardElement,
   which: 'source' | 'target',
   byId: ReadonlyMap<string, BoardElement>,
+  toward?: Point,
 ): Point | null {
   const node = endShape(element, which, byId)
   if (!node) return null
   const other = endShape(element, which === 'source' ? 'target' : 'source', byId)
-  const toward = other ? centerOf(other) : freePoint(element, which === 'source' ? 'target' : 'source')
-  return outlineAnchor(node, toward.x, toward.y)
+  const aim = toward ?? (other ? centerOf(other) : freePoint(element, which === 'source' ? 'target' : 'source'))
+  return outlineAnchor(node, aim.x, aim.y)
 }
 
 /**
@@ -70,11 +78,12 @@ function anchoredEnd(
 export function lineEnds(
   element: BoardElement,
   byId: ReadonlyMap<string, BoardElement>,
+  via?: { source?: Point; target?: Point },
 ): { start: Point; end: Point } | null {
   if (element.type !== 'arrow' && element.type !== 'line') return null
   return {
-    start: anchoredEnd(element, 'source', byId) ?? freePoint(element, 'source'),
-    end: anchoredEnd(element, 'target', byId) ?? freePoint(element, 'target'),
+    start: anchoredEnd(element, 'source', byId, via?.source) ?? freePoint(element, 'source'),
+    end: anchoredEnd(element, 'target', byId, via?.target) ?? freePoint(element, 'target'),
   }
 }
 
@@ -183,7 +192,9 @@ export function parkForMove(
     return { x: element.x, y: element.y }
   }
   const byId = new Map(elements.map(item => [item.id, item]))
-  const ends = lineEnds(element, byId)
+  // Aim at the bends, so the frozen frame is the segment on screen. The bends
+  // themselves stay world points; the caller translates them with the delta.
+  const ends = lineEnds(element, byId, bendAim(element))
   if (!ends) return { x: element.x, y: element.y }
   const link = elementLink({
     sourceId: sourceKept ? sourceId : undefined,
@@ -209,7 +220,7 @@ export function withDrawnLine(
   byId: ReadonlyMap<string, BoardElement>,
 ): BoardElement {
   if (!hasLink(element)) return element
-  const ends = lineEnds(element, byId)
+  const ends = lineEnds(element, byId, bendAim(element))
   if (!ends) return element
   return {
     ...element,
@@ -235,7 +246,7 @@ export function patchesForRemoval(
     const sourceGone = Boolean(element.link?.sourceId && removing.has(element.link.sourceId))
     const targetGone = Boolean(element.link?.targetId && removing.has(element.link.targetId))
     if (!sourceGone && !targetGone) continue
-    const ends = lineEnds(element, byId)
+    const ends = lineEnds(element, byId, bendAim(element))
     if (!ends) continue
     patches.push({
       id: element.id,
@@ -259,15 +270,24 @@ export function visualExtent(
   element: BoardElement,
   byId: ReadonlyMap<string, BoardElement>,
 ): { x: number; y: number; w?: number; h?: number } {
-  if (!hasLink(element)) return { x: element.x, y: element.y, w: element.w, h: element.h }
-  const ends = lineEnds(element, byId)
-  if (!ends) return { x: element.x, y: element.y, w: element.w, h: element.h }
-  const minX = Math.min(ends.start.x, ends.end.x)
-  const minY = Math.min(ends.start.y, ends.end.y)
-  return {
-    x: minX,
-    y: minY,
-    w: Math.abs(ends.end.x - ends.start.x),
-    h: Math.abs(ends.end.y - ends.start.y),
+  const stored = { x: element.x, y: element.y, w: element.w, h: element.h }
+  // A connector's box is its endpoints, not this frame. Bends on a flow are
+  // framed by the stroke helper; folding them in here would drag the origin in.
+  if (element.bpmnFlow) return stored
+  const bends = element.waypoints
+  if (!hasLink(element) && !bends?.length) return stored
+  const ends = lineEnds(element, byId, bendAim(element))
+  if (!ends) return stored
+  let minX = Math.min(ends.start.x, ends.end.x)
+  let minY = Math.min(ends.start.y, ends.end.y)
+  let maxX = Math.max(ends.start.x, ends.end.x)
+  let maxY = Math.max(ends.start.y, ends.end.y)
+  for (const point of bends ?? []) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue
+    if (point.x < minX) minX = point.x
+    if (point.y < minY) minY = point.y
+    if (point.x > maxX) maxX = point.x
+    if (point.y > maxY) maxY = point.y
   }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
 }

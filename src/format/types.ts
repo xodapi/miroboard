@@ -51,6 +51,11 @@ export interface NodeContent {
    * shape is ignored. Omitted when empty. Schema stays 1.
    */
   link?: { sourceId?: string; targetId?: string }
+  /**
+   * World bend points of a freeform arrow or line that stayed a node.
+   * Omitted when empty. An edge uses its own `waypoints` array. Schema stays 1.
+   */
+  waypoints?: { x: number; y: number }[]
 }
 
 export interface DocNode {

@@ -80,6 +80,16 @@ describe('fitTransform', () => {
     expect(centre.y * transform.scale + transform.y).toBeCloseTo(viewport.height / 2)
   })
 
+  it('frames an unattached bend instead of the stored chord', () => {
+    const arrow = element({
+      id: 'a', type: 'arrow', x: 0, y: 0, w: 100, h: 0,
+      waypoints: [{ x: 50, y: 400 }],
+    })
+    const straight = fitTransform([element({ id: 'a', type: 'arrow', x: 0, y: 0, w: 100, h: 0 })], viewport)
+    const bent = fitTransform([arrow], viewport)
+    expect(bent.scale).toBeLessThan(straight.scale)
+  })
+
   it('frames a linked arrow by the live segment, not a stale origin', () => {
     const source = element({ id: 's', x: 9000, y: -4000, w: 100, h: 100 })
     const target = element({ id: 't', x: 9200, y: -4000, w: 100, h: 100 })

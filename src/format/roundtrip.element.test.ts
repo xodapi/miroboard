@@ -267,4 +267,27 @@ describe('freeform link', () => {
     expect(loaded.ok).toBe(true)
     if (loaded.ok) expect(deserialise(loaded.file).elements[0].link).toEqual(linked.link)
   })
+
+  it('round-trips freeform bends, omits an empty list, and stays schema 1', () => {
+    const bent: BoardElement = {
+      id: 'bent', type: 'arrow', x: 12.5, y: -4, w: 80, h: 16, color: '#112233',
+      waypoints: [{ x: 40.25, y: 70 }, { x: 90, y: -2.5 }],
+    }
+    const doc = toDocElement(bent)
+    if (!('node' in doc)) throw new Error('expected node')
+    expect(doc.node.content.waypoints).toEqual(bent.waypoints)
+    expect(canonicalElement(fromDocNode(doc.node))).toEqual(canonicalElement(bent))
+
+    const straight = toDocElement({ id: 'straight', type: 'line', x: 1, y: 2, color: '#000', waypoints: [] })
+    if (!('node' in straight)) throw new Error('expected node')
+    expect(straight.node.content).not.toHaveProperty('waypoints')
+
+    const file = serialise({ elements: [bent], meta, profileConfig: {}, history })
+    expect(file.schemaVersion).toBe(1)
+    expect(file.edges).toEqual([])
+    expect(file.nodes[0].content.waypoints).toEqual(bent.waypoints)
+    const loaded = loadMboard(JSON.stringify(file))
+    expect(loaded.ok).toBe(true)
+    if (loaded.ok) expect(deserialise(loaded.file).elements[0].waypoints).toEqual(bent.waypoints)
+  })
 })

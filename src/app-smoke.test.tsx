@@ -1115,6 +1115,71 @@ describe('App smoke', () => {
       expect(container.querySelector('line')).toBeNull()
     })
 
+    it('bends a straight arrow from the midpoint, and a click does not', () => {
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 100, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 300, clientY: 100 })
+      pointer(canvas, 'pointerup', { clientX: 300, clientY: 100 })
+      key('v')
+      const group = container.querySelector('g[data-id]')!
+      expect(group.querySelector('line')).not.toBeNull()
+      expect(group.querySelector('polyline')).toBeNull()
+      const grip = group.querySelector('[data-bend="0"]')!
+      expect(grip).not.toBeNull()
+
+      pointer(grip, 'pointerdown', { clientX: 200, clientY: 100 })
+      pointer(canvas, 'pointerup', { clientX: 200, clientY: 100 })
+      expect(group.querySelector('[data-waypoint]')).toBeNull()
+      expect(group.querySelector('polyline')).toBeNull()
+
+      pointer(grip, 'pointerdown', { clientX: 200, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 200, clientY: 160 })
+      pointer(canvas, 'pointerup', { clientX: 200, clientY: 160 })
+      const routed = container.querySelector('g[data-id]')!
+      expect(routed.querySelector('line')).toBeNull()
+      expect(routed.querySelector('polyline')!.getAttribute('points')).toBe('0,0 100,60 200,0')
+      expect(routed.getAttribute('transform')).toBe('translate(100,100)')
+
+      const local = routed.querySelector('polyline')!.getAttribute('points')
+      pointer(routed, 'pointerdown', { clientX: 120, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 150, clientY: 110 })
+      pointer(canvas, 'pointerup', { clientX: 150, clientY: 110 })
+      expect(routed.getAttribute('transform')).toBe('translate(130,110)')
+      expect(routed.querySelector('polyline')!.getAttribute('points')).toBe(local)
+
+      const waypoint = routed.querySelector('[data-waypoint="0"]')!
+      pointer(waypoint, 'pointerdown', { clientX: 230, clientY: 170, detail: 2 })
+      pointer(canvas, 'pointerup', { clientX: 230, clientY: 170, detail: 2 })
+      const straight = container.querySelector('g[data-id]')!
+      expect(straight.querySelector('[data-waypoint]')).toBeNull()
+      expect(straight.querySelector('polyline')).toBeNull()
+      expect(straight.querySelector('line')).not.toBeNull()
+    })
+
+    it('does not offer a bend grip on a locked arrow', () => {
+      key('a')
+      pointer(byTestId('canvas')!, 'pointerdown', { clientX: 40, clientY: 40 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 80, clientY: 40 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 80, clientY: 40 })
+      key('v')
+      expect(container.querySelector('[data-bend]')).not.toBeNull()
+      act(() => { byTestId('lock-toggle')!.click() })
+      expect(container.querySelector('[data-bend]')).toBeNull()
+    })
+
+    it('offers a bend grip on a selected connector and no corner grips', () => {
+      const openTemplates = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Начать с шаблона'))!
+      act(() => { openTemplates.click() })
+      const bpmn = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('BPMN 2.0'))!
+      act(() => { bpmn.click() })
+      const flow = container.querySelector('[data-testid^="bpmn-flow-"]')!
+      pointer(flow, 'pointerdown', { clientX: 200, clientY: 208 })
+      pointer(flow, 'pointerup', { clientX: 200, clientY: 208 })
+      expect(container.querySelector('[data-testid^="bpmn-flow-"] [data-bend]')).not.toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+    })
+
     it('leaves the arrow when its box is deleted', () => {
       drawAttachedArrow()
       const frozen = arrowLine()

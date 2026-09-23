@@ -202,6 +202,11 @@ export interface BoardElement {
    * Never set on a connector — that relationship is `bpmnFlow`.
    */
   link?: ElementLink
+  /**
+   * World bend points of an arrow or a line. Absent when the mark is straight.
+   * A shape moving does not move these; moving the mark itself does.
+   */
+  waypoints?: Point[]
 }
 
 export type ContextMenuAction = 'edit' | 'duplicate' | 'lock' | 'front' | 'back' | 'delete'

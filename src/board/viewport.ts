@@ -76,7 +76,8 @@ export function fitTransform(elements: BoardElement[], viewport: Viewport): Tran
 
   const byId = new Map(elements.map(element => [element.id, element]))
   const boxes = elements.map(element => {
-    if (!hasLink(element)) {
+    const bent = (element.type === 'arrow' || element.type === 'line') && Boolean(element.waypoints?.length) && !element.bpmnFlow
+    if (!hasLink(element) && !bent) {
       return {
         x: element.x,
         y: element.y,

@@ -92,6 +92,15 @@ describe('lineEnds', () => {
   it('does not invent ends for a box', () => {
     expect(lineEnds(box('s', 0, 0), new Map())).toBeNull()
   })
+
+  it('aims an attached end at the bend when one is given', () => {
+    const shape = box('s', 0, 0, 100, 100)
+    const linked = arrow({ x: 200, y: 50, w: 0, h: 0, link: { sourceId: 's' } })
+    const straight = lineEnds(linked, byId([shape, linked]))
+    const aimed = lineEnds(linked, byId([shape, linked]), { source: { x: 200, y: 200 } })
+    expect(aimed!.start.y).toBeGreaterThan(straight!.start.y)
+    expect(aimed!.end).toEqual({ x: 200, y: 50 })
+  })
 })
 
 describe('parkForMove', () => {
@@ -147,6 +156,14 @@ describe('withDrawnLine', () => {
     const flow = arrow({ x: 4, y: 6, bpmnFlow: { sourceId: 's', targetId: 't' }, link: { sourceId: 's' } })
     expect(withDrawnLine(flow, byId([shape, flow]))).toMatchObject({ x: 4, y: 6 })
   })
+
+  it('bakes the bend-aimed end and keeps the world bends', () => {
+    const shape = box('s', 0, 0, 100, 100)
+    const linked = arrow({ x: 200, y: 50, w: 0, h: 0, link: { sourceId: 's' }, waypoints: [{ x: 200, y: 200 }] })
+    const drawn = withDrawnLine(linked, byId([shape, linked]))
+    expect(drawn.waypoints).toEqual([{ x: 200, y: 200 }])
+    expect(drawn.y).toBeGreaterThan(50)
+  })
 })
 
 describe('containsPoint', () => {
@@ -189,5 +206,15 @@ describe('attachment predicates', () => {
     expect(extent.x).toBeCloseTo(Math.min(ends.start.x, ends.end.x), 4)
     expect(extent.y).toBeCloseTo(Math.min(ends.start.y, ends.end.y), 4)
     expect(visualExtent(arrow(), new Map())).toEqual({ x: 200, y: 20, w: 100, h: 0 })
+  })
+
+  it('includes a freeform bend and leaves a connector frame alone', () => {
+    const bent = arrow({ waypoints: [{ x: 240, y: 90 }] })
+    const extent = visualExtent(bent, new Map())
+    expect(extent.y).toBe(20)
+    expect((extent.y ?? 0) + (extent.h ?? 0)).toBe(90)
+
+    const flow = arrow({ x: 4, y: 6, w: 0, h: 0, bpmnFlow: { sourceId: 's', targetId: 't' }, waypoints: [{ x: 500, y: 500 }] })
+    expect(visualExtent(flow, new Map())).toEqual({ x: 4, y: 6, w: 0, h: 0 })
   })
 })

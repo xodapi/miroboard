@@ -24,6 +24,7 @@
 import type { BoardElement } from '../format/mboard'
 import { elementLink, isBpmnNodeType, isElementType } from '../board/types'
 import { retargetGroupIds } from '../board/group'
+import { readWaypoints, shiftPoints } from '../board/waypoints'
 
 /** Declared media type of a miroboard clipboard payload. */
 export const CLIPBOARD_MIME = 'application/x-miroboard+json'
@@ -102,7 +103,7 @@ export function sanitiseElement(value: unknown): BoardElement | null {
   if (typeof raw.createdBy === 'string') element.createdBy = raw.createdBy
   const points = toPoints(raw.points)
   if (points) element.points = points
-  const waypoints = toPoints(raw.waypoints)
+  const waypoints = readWaypoints(raw.waypoints)
   if (waypoints) element.waypoints = waypoints
   const labelOffset = toPoint(raw.labelOffset)
   if (labelOffset) element.labelOffset = labelOffset
@@ -234,6 +235,10 @@ export function preparePaste(elements: readonly BoardElement[], options: PasteOp
       y: element.y + offset.y,
     }
     if (options.createdBy !== undefined) next.createdBy = options.createdBy
+    // Same offset as x/y. A bend is a world point; leaving it behind would
+    // shear the copy off the route the user copied. A zero offset still copies
+    // the list, so the paste does not share the source array.
+    if (element.waypoints?.length) next.waypoints = shiftPoints(element.waypoints, offset.x, offset.y)
     if (element.bpmnFlow) {
       const sourceId = idMap.get(element.bpmnFlow.sourceId)
       const targetId = idMap.get(element.bpmnFlow.targetId)

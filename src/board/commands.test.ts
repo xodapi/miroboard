@@ -206,6 +206,25 @@ describe('moveElements', () => {
     expect(updates.value).toBe(0)
   })
 
+  it('translates bends with the arrow and leaves them when only the shape moves', () => {
+    const { doc, elements } = board([
+      element('s', { x: 0, y: 0, w: 100, h: 40 }),
+      element('a', {
+        type: 'arrow', x: 200, y: 20, w: 80, h: 0,
+        waypoints: [{ x: 240, y: 80 }],
+        link: { sourceId: 's' },
+      }),
+    ])
+    moveElements(doc, elements, ['s'], { x: 30, y: 10 })
+    expect(elements.get(1)).toMatchObject({ x: 200, y: 20, waypoints: [{ x: 240, y: 80 }], link: { sourceId: 's' } })
+
+    moveElements(doc, elements, ['a'], { x: 15, y: 0 })
+    const moved = elements.get(1)
+    expect(moved.waypoints).toEqual([{ x: 255, y: 80 }])
+    expect(moved).not.toHaveProperty('link')
+    expect(moved.x).not.toBe(200)
+  })
+
   it('leaves a locked element where it is, and opens no transaction when nothing else moves', () => {
     const { doc, elements } = board([
       element('a', { locked: true, x: 0, y: 0 }),
@@ -252,6 +271,15 @@ describe('alignElements', () => {
     expect(alignElements(doc, elements, ['a'], 'right')).toBe(0)
     expect(alignElements(doc, elements, [], 'top')).toBe(0)
     expect(updates.value).toBe(0)
+  })
+
+  it('shifts bends by the same delta as the mark', () => {
+    const { doc, elements } = board([
+      element('a', { x: 0, y: 0, w: 20, h: 10 }),
+      element('b', { type: 'arrow', x: 80, y: 40, w: 10, h: 0, waypoints: [{ x: 90, y: 70 }] }),
+    ])
+    expect(alignElements(doc, elements, ['a', 'b'], 'left')).toBe(1)
+    expect(elements.get(1)).toMatchObject({ x: 0, y: 40, waypoints: [{ x: 10, y: 70 }] })
   })
 
   it('does not move a locked unit or a connector', () => {

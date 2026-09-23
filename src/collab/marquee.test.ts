@@ -55,6 +55,13 @@ describe('marquee geometry', () => {
       .toEqual({ minX: 10, minY: 10, maxX: 100, maxY: 50 })
   })
 
+  it('includes a bend that sits outside the endpoint box', () => {
+    expect(boundsOf({
+      id: 'a', type: 'arrow', x: 10, y: 10, w: 90, h: 40,
+      waypoints: [{ x: 40, y: -15 }],
+    })).toEqual({ minX: 10, minY: -15, maxX: 100, maxY: 50 })
+  })
+
   it('re-derives a BPMN flow arrow from its connected nodes, not its stored frame', () => {
     const nodes: MarqueeElement[] = [sticky('s', 0, 0, 80, 80), sticky('t', 400, 300, 80, 80)]
     const flow: MarqueeElement = {

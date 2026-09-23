@@ -83,4 +83,16 @@ describe('hitBounds', () => {
       x: 10, y: 20, w: 30, h: 40,
     })
   })
+
+  it('grows the box to cover a bend without moving a straight arrow', () => {
+    expect(hitBounds(el({ id: 'a', type: 'arrow', x: 10, y: 20, w: 30, h: 0 }), new Map())).toMatchObject({
+      x: 10, y: 20,
+    })
+    const bent = hitBounds(el({
+      id: 'a', type: 'arrow', x: 10, y: 20, w: 30, h: 0,
+      waypoints: [{ x: 40, y: -10 }],
+    }), new Map())
+    expect(bent.y).toBe(-10)
+    expect(bent.x + bent.w).toBeGreaterThanOrEqual(40)
+  })
 })

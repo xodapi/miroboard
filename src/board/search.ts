@@ -69,12 +69,12 @@ export function hitBounds(element: BoardElement, byId: ReadonlyMap<string, Board
       const y1 = source ? source.y + (source.h ?? 0) / 2 : element.y
       const x2 = target ? target.x + (target.w ?? 0) / 2 : element.x + (element.w ?? 0)
       const y2 = target ? target.y + (target.h ?? 0) / 2 : element.y + (element.h ?? 0)
-      return {
+      return withWaypoints({
         x: Math.min(x1, x2),
         y: Math.min(y1, y2),
         w: Math.max(Math.abs(x2 - x1), FALLBACK_EXTENT),
         h: Math.max(Math.abs(y2 - y1), FALLBACK_EXTENT),
-      }
+      }, element.waypoints)
     }
   }
   const flow = element.bpmnFlow
@@ -86,23 +86,23 @@ export function hitBounds(element: BoardElement, byId: ReadonlyMap<string, Board
       const y1 = source.y + (source.h ?? 0) / 2
       const x2 = target.x + (target.w ?? 0) / 2
       const y2 = target.y + (target.h ?? 0) / 2
-      return {
+      return withWaypoints({
         x: Math.min(x1, x2),
         y: Math.min(y1, y2),
         w: Math.max(Math.abs(x2 - x1), FALLBACK_EXTENT),
         h: Math.max(Math.abs(y2 - y1), FALLBACK_EXTENT),
-      }
+      }, element.waypoints)
     }
   }
   if (element.type === 'arrow' || element.type === 'line') {
     const x2 = element.x + (element.w ?? 0)
     const y2 = element.y + (element.h ?? 0)
-    return {
+    return withWaypoints({
       x: Math.min(element.x, x2),
       y: Math.min(element.y, y2),
       w: Math.max(Math.abs(element.w ?? 0), FALLBACK_EXTENT),
       h: Math.max(Math.abs(element.h ?? 0), FALLBACK_EXTENT),
-    }
+    }, element.waypoints)
   }
   return {
     x: element.x,
@@ -110,4 +110,21 @@ export function hitBounds(element: BoardElement, byId: ReadonlyMap<string, Board
     w: element.w || FALLBACK_EXTENT,
     h: element.h || FALLBACK_EXTENT,
   }
+}
+
+/** A bend outside the endpoint box still has to be framed, or search jumps short of it. */
+function withWaypoints(bounds: Bounds, points: readonly { x: number; y: number }[] | undefined): Bounds {
+  if (!points?.length) return bounds
+  let minX = bounds.x
+  let minY = bounds.y
+  let maxX = bounds.x + bounds.w
+  let maxY = bounds.y + bounds.h
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue
+    if (point.x < minX) minX = point.x
+    if (point.y < minY) minY = point.y
+    if (point.x > maxX) maxX = point.x
+    if (point.y > maxY) maxY = point.y
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
 }
