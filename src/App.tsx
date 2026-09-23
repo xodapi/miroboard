@@ -23,6 +23,7 @@ import { ProjectHistoryModal } from './components/ProjectHistoryModal'
 import { BpmnTaskProperties } from './components/BpmnTaskProperties'
 import { BpmnFlowProperties } from './components/BpmnFlowProperties'
 import { ColorPicker } from './components/ColorPicker'
+import { AlignBar } from './components/AlignBar'
 import { StrokeStyleBar } from './components/StrokeStyleBar'
 import { BoardHeader } from './components/BoardHeader'
 import { BoardSearch } from './components/BoardSearch'
@@ -39,6 +40,7 @@ import {
   frontierAdvice, frontierRole, frontierRuns, markFrontier, roleCapacity, sweepCapacities, withRoleCapacity,
   type FrontierPoint,
 } from './board/frontier'
+import { alignUnitCount, type AlignAxis } from './board/arrange'
 import * as commands from './board/commands'
 import { clickTargets, expandIds, groupOutlines, planGroup, planUngroup, toggleGrouped } from './board/group'
 import { isLocked, selectionLockAction } from './board/lock'
@@ -759,6 +761,18 @@ export default function App() {
     if (patch.arrowHead) setArrowHead(patch.arrowHead)
     if (patch.stroke !== undefined) setStrokeWidth(patch.stroke)
   }, [previewSnapshot, selectedElementId, ydoc])
+
+  /**
+   * One shared edge or center for the selection. A group is one body, a lock
+   * stays and defines the edge, and a connector is not a unit. Already flush
+   * is not an undo step.
+   */
+  const alignSelection = useCallback((axis: AlignAxis) => {
+    if (previewSnapshot || !yElements.current) return
+    flushGesture()
+    const changed = commands.alignElements(ydoc, yElements.current, selectedIds, axis)
+    if (!changed) showToast('Нечего выравнивать', 'info')
+  }, [flushGesture, previewSnapshot, selectedIds, showToast, ydoc])
 
   const bringToFront = useCallback((id: string) => {
     if (previewSnapshot || !yElements.current) return
@@ -1822,6 +1836,7 @@ export default function App() {
     ? searchHits[activeSearchIndex]?.id ?? null
     : null
   const selectionCount = selectedIds.size
+  const alignUnits = isPreview || contextMenu || showMore ? 0 : alignUnitCount(elements, selectedIds)
   const lockAction = isPreview ? null : selectionLockAction(elements, selectedIds)
   const paintElement = !isPreview && !contextMenu && selectedElementId
     ? elements.find(element => element.id === selectedElementId) ?? null
@@ -2447,6 +2462,7 @@ export default function App() {
           onChange={applyStrokeStyle}
         />
       )}
+      {alignUnits >= 2 && <AlignBar theme={theme} onAlign={alignSelection} />}
       {/* ===== SIMULATION MODAL ===== */}
       {showSimulationPanel && !isPreview && (
         <SimulationModal

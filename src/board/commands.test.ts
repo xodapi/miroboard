@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import { LOCAL_EDIT, LOCAL_GESTURE } from '../collab/origins'
 import {
-  addElement, bringToFront, deleteElement, deleteElements, duplicateElements,
+  addElement, alignElements, bringToFront, deleteElement, deleteElements, duplicateElements,
   moveElements, setLocked, setStrokeStyle, updateElement, updateElements, writeGroupMembership, type Elements,
 } from './commands'
 import { planGroup, planUngroup } from './group'
@@ -219,6 +219,52 @@ describe('moveElements', () => {
     expect(moveElements(doc, elements, ['a', 'b'], { x: 5, y: 1 })).toBe(1)
     expect(updates.value).toBe(1)
     expect(elements.toArray().map(item => [item.x, item.y])).toEqual([[0, 0], [15, 1]])
+  })
+})
+
+describe('alignElements', () => {
+  it('writes a different delta per element, as one undo step', () => {
+    const { doc, elements } = board([
+      element('a', { x: 0, y: 0, w: 20, h: 10 }),
+      element('b', { x: 80, y: 40, w: 20, h: 10 }),
+    ])
+    const undo = new Y.UndoManager(elements, { captureTimeout: 0, trackedOrigins: new Set<unknown>([LOCAL_EDIT]) })
+    const updates = countUpdates(doc)
+    const seen: unknown[] = []
+    doc.on('afterTransaction', tr => seen.push(tr.origin))
+
+    expect(alignElements(doc, elements, ['a', 'b'], 'left')).toBe(1)
+    expect(updates.value).toBe(1)
+    expect(seen).toEqual([LOCAL_EDIT])
+    expect(elements.toArray().map(item => [item.x, item.y])).toEqual([[0, 0], [0, 40]])
+
+    undo.undo()
+    expect(elements.toArray().map(item => item.x)).toEqual([0, 80])
+  })
+
+  it('opens no transaction when the selection is already aligned or too small', () => {
+    const { doc, elements } = board([
+      element('a', { x: 0, y: 0 }),
+      element('b', { x: 0, y: 40 }),
+    ])
+    const updates = countUpdates(doc)
+    expect(alignElements(doc, elements, ['a', 'b'], 'left')).toBe(0)
+    expect(alignElements(doc, elements, ['a'], 'right')).toBe(0)
+    expect(alignElements(doc, elements, [], 'top')).toBe(0)
+    expect(updates.value).toBe(0)
+  })
+
+  it('does not move a locked unit or a connector', () => {
+    const flow = element('f', { type: 'arrow', x: 9, y: 9, bpmnFlow: { sourceId: 'a', targetId: 'b' } })
+    const { doc, elements } = board([
+      element('a', { x: 0, y: 0, locked: true }),
+      element('b', { x: 60, y: 0 }),
+      flow,
+    ])
+    expect(alignElements(doc, elements, ['a', 'b', 'f'], 'left')).toBe(1)
+    expect(elements.get(0)).toMatchObject({ x: 0, locked: true })
+    expect(elements.get(1).x).toBe(0)
+    expect(elements.get(2)).toMatchObject({ x: 9, y: 9 })
   })
 })
 

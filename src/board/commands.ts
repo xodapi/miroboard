@@ -1,6 +1,7 @@
 import * as Y from 'yjs'
 import { LOCAL_EDIT } from '../collab/origins'
 import { commitElementUpdate } from '../persistence/updates'
+import { planAlign, type AlignAxis } from './arrange'
 import { dissolveAfter, expandIds, retargetGroupIds, type GroupWrite } from './group'
 import { isLocked, withLock } from './lock'
 import { withStrokeStyle, type StrokeStylePatch } from './stroke-style'
@@ -205,6 +206,33 @@ export function moveElements(
     }
   }, origin)
   return picked.length
+}
+
+/**
+ * Aligns a selection to one shared edge or center, in one transaction.
+ *
+ * Each element gets its own x/y: a shared delta cannot express "this one to
+ * the left, that one stays". A group moves as a rigid body, a locked unit
+ * stays and still defines the edge, and a connector is not written — its
+ * arrow follows the endpoints. Already aligned, or fewer than two units,
+ * opens no transaction.
+ */
+export function alignElements(
+  doc: Y.Doc,
+  elements: Elements,
+  ids: Iterable<string>,
+  axis: AlignAxis,
+  origin: unknown = LOCAL_EDIT,
+): number {
+  const moves = planAlign(elements.toArray(), ids, axis)
+  if (!moves.length) return 0
+  let changed = 0
+  doc.transact(() => {
+    for (const move of moves) {
+      if (commitElementUpdate(doc, elements, move.id, { x: move.x, y: move.y }, origin)) changed += 1
+    }
+  }, origin)
+  return changed
 }
 
 /**
