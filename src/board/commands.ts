@@ -1,8 +1,9 @@
 import * as Y from 'yjs'
 import { PASTE_OFFSET, preparePaste } from '../collab/clipboard'
 import { LOCAL_EDIT } from '../collab/origins'
-import { commitElementUpdate } from '../persistence/updates'
+import { commitElementPatch, commitElementUpdate } from '../persistence/updates'
 import { planAlign, type AlignAxis } from './arrange'
+import { parkForMove, patchesForRemoval, withDrawnLine } from './follow'
 import { dissolveAfter, expandIds, type GroupWrite } from './group'
 import { isLocked, withLock } from './lock'
 import { planStack, type StackEdge } from './stack'
@@ -89,8 +90,16 @@ function commitRemoval(doc: Y.Doc, elements: Elements, ids: Iterable<string>, or
     }
   }
   const clears = dissolveAfter(list, removing)
+  // A freeform link is not an edge. Freeze the visual end and drop only the
+  // ids that are leaving; the arrow stays. A bpmnFlow was already added to
+  // `removing` above and is deleted with its endpoint, which the format requires.
+  const linkPatches = patchesForRemoval(list, removing)
   doc.transact(() => {
     applyMembership(elements, clears)
+    for (const patch of linkPatches) {
+      if (removing.has(patch.id)) continue
+      commitElementPatch(doc, elements, patch.id, patch.updates, origin)
+    }
     for (let index = elements.length - 1; index >= 0; index -= 1) {
       if (removing.has(elements.get(index).id)) elements.delete(index, 1)
     }
@@ -196,12 +205,22 @@ export function moveElements(
   // A locked element stays put even when the rest of the selection moves.
   // Skipping it here covers the arrow keys; the pointer path never puts a
   // locked id into the gesture in the first place.
-  const picked = elements.toArray().filter(element => wanted.has(element.id) && !isLocked(element))
+  const all = elements.toArray()
+  const picked = all.filter(element => wanted.has(element.id) && !isLocked(element))
   if (!picked.length) return 0
+  const moving = new Set(picked.map(element => element.id))
 
   doc.transact(() => {
     for (const element of picked) {
-      commitElementUpdate(doc, elements, element.id, { x: element.x + delta.x, y: element.y + delta.y }, origin)
+      // An attached end whose shape is not coming along freezes here, in the
+      // same transaction as the nudge. A shape moving without its arrow is
+      // not parked: the arrow is not in `picked`, and render follows it.
+      const parked = parkForMove(element, all, moving)
+      commitElementPatch(doc, elements, element.id, {
+        ...parked.extras,
+        x: parked.x + delta.x,
+        y: parked.y + delta.y,
+      }, origin)
     }
   }, origin)
   return picked.length
@@ -332,12 +351,13 @@ export function duplicateElements(
   if (!wanted.size) return []
   // Document order, not the order the ids arrived in, so the copies paint in
   // the same relation as their sources.
+  const byId = new Map(list.map(element => [element.id, element]))
   const picked = list.filter(element => {
     if (!wanted.has(element.id)) return false
     const flow = element.bpmnFlow
     if (!flow) return true
     return wanted.has(flow.sourceId) && wanted.has(flow.targetId)
-  })
+  }).map(element => withDrawnLine(element, byId))
   if (!picked.length) return []
 
   const copies = preparePaste(picked, {

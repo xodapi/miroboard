@@ -80,6 +80,19 @@ describe('fitTransform', () => {
     expect(centre.y * transform.scale + transform.y).toBeCloseTo(viewport.height / 2)
   })
 
+  it('frames a linked arrow by the live segment, not a stale origin', () => {
+    const source = element({ id: 's', x: 9000, y: -4000, w: 100, h: 100 })
+    const target = element({ id: 't', x: 9200, y: -4000, w: 100, h: 100 })
+    const arrow = element({
+      id: 'a', type: 'arrow', x: 0, y: 0, w: 0, h: 0,
+      link: { sourceId: 's', targetId: 't' },
+    })
+    const transform = fitTransform([source, target, arrow], viewport)
+    const centre = { x: 9150, y: -3950 }
+    expect(centre.x * transform.scale + transform.x).toBeCloseTo(viewport.width / 2, 0)
+    expect(centre.y * transform.scale + transform.y).toBeCloseTo(viewport.height / 2, 0)
+  })
+
   it('frames content that sits far from the origin', () => {
     const transform = fitTransform([element({ x: 9000, y: -4000, w: 200, h: 200 })], viewport)
     const centre = { x: 9100, y: -3900 }

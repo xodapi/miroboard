@@ -82,6 +82,13 @@ describe('planAlign', () => {
     expect(alignUnitCount(elements, ['f', 'f'])).toBe(0)
   })
 
+  it('skips a freeform arrow that follows a shape', () => {
+    const linked = box('f', 5, 5, 0, 0, { type: 'arrow', link: { sourceId: 'a', targetId: 'b' } })
+    const elements = [box('a', 0, 0), box('b', 100, 0), linked]
+    expect(ids(planAlign(elements, ['a', 'b', 'f'], 'left'))).toEqual(['b'])
+    expect(alignUnitCount(elements, ['f'])).toBe(0)
+  })
+
   it('aligns a freeform line by its normalised frame, and a path by its points', () => {
     const line = box('line', 100, 8, -40, 12, { type: 'line' })
     const path = box('path', 10, 0, 30, 5, {

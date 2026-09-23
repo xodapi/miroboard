@@ -53,6 +53,96 @@ export function snapVal(v: number, grid = 20) { return snap_to_grid(v, grid) }
  * Events are circles, gateways diamonds, tasks rectangles — each needs its own
  * boundary formula or edges visibly stop short of or overshoot the shape.
  */
+type AnchorShape = {
+  x: number
+  y: number
+  w?: number
+  h?: number
+  rotation?: number
+  type?: string
+  bpmnNodeType?: string
+}
+
+/**
+ * World point into the element's local frame. Positive rotation is clockwise,
+ * matching the SVG `rotate` the canvas already uses.
+ */
+export function worldToLocal(element: AnchorShape, point: Point): Point {
+  const width = element.w ?? 0
+  const height = element.h ?? 0
+  const cx = width / 2
+  const cy = height / 2
+  const px = point.x - element.x
+  const py = point.y - element.y
+  const degrees = element.rotation || 0
+  if (!degrees) return { x: px, y: py }
+  const rad = degrees * Math.PI / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const dx = px - cx
+  const dy = py - cy
+  return {
+    x: cx + dx * cos + dy * sin,
+    y: cy - dx * sin + dy * cos,
+  }
+}
+
+/** Inverse of `worldToLocal`. */
+export function localToWorld(element: AnchorShape, local: Point): Point {
+  const width = element.w ?? 0
+  const height = element.h ?? 0
+  const cx = width / 2
+  const cy = height / 2
+  const degrees = element.rotation || 0
+  if (!degrees) return { x: element.x + local.x, y: element.y + local.y }
+  const rad = degrees * Math.PI / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const dx = local.x - cx
+  const dy = local.y - cy
+  return {
+    x: element.x + cx + dx * cos - dy * sin,
+    y: element.y + cy + dx * sin + dy * cos,
+  }
+}
+
+/**
+ * Where a freeform link meets a shape's outline.
+ *
+ * Same boundary formulas as `bpmnEdgeAnchor` for an unrotated non-circle, plus
+ * rotation and a real ellipse for `type: 'circle'`. BPMN connectors keep
+ * calling `bpmnEdgeAnchor`; this one is only for freeform attachments.
+ */
+export function outlineAnchor(element: AnchorShape, towardX: number, towardY: number): Point {
+  const localToward = worldToLocal(element, { x: towardX, y: towardY })
+  return localToWorld(element, anchorInLocal(element, localToward.x, localToward.y))
+}
+
+function anchorInLocal(element: AnchorShape, towardX: number, towardY: number): Point {
+  const width = element.w || 0
+  const height = element.h || 0
+  const cx = width / 2
+  const cy = height / 2
+  const dx = towardX - cx
+  const dy = towardY - cy
+  if (dx === 0 && dy === 0) return { x: cx, y: cy }
+  const halfWidth = width / 2
+  const halfHeight = height / 2
+  if (halfWidth === 0 || halfHeight === 0) return { x: cx, y: cy }
+  let scale: number
+  if (element.type === 'circle') {
+    scale = 1 / Math.hypot(dx / halfWidth, dy / halfHeight)
+  } else if (element.bpmnNodeType === 'startEvent' || element.bpmnNodeType === 'endEvent') {
+    scale = Math.min(halfWidth, halfHeight) / Math.hypot(dx, dy)
+  } else if (element.bpmnNodeType === 'xorGateway' || element.bpmnNodeType === 'andGateway' || element.bpmnNodeType === 'orGateway') {
+    scale = 1 / (Math.abs(dx) / halfWidth + Math.abs(dy) / halfHeight)
+  } else {
+    scale = 1 / Math.max(Math.abs(dx) / halfWidth, Math.abs(dy) / halfHeight)
+  }
+  if (!Number.isFinite(scale)) return { x: cx, y: cy }
+  return { x: cx + dx * scale, y: cy + dy * scale }
+}
+
 export function bpmnEdgeAnchor(element: BoardElement, towardX: number, towardY: number): Point {
   const width = element.w || 0
   const height = element.h || 0

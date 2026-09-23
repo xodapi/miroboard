@@ -159,6 +159,23 @@ describe('sanitiseElement', () => {
     expect(flow).not.toHaveProperty('locked')
   })
 
+  it('keeps a freeform link and never puts one on a connector or a box', () => {
+    const kept = sanitiseElement({
+      id: 'a', type: 'arrow', x: 0, y: 0, color: '#000',
+      link: { sourceId: 's', targetId: '' },
+    })
+    expect(kept?.link).toEqual({ sourceId: 's' })
+    const flow = sanitiseElement({
+      id: 'f', type: 'arrow', x: 0, y: 0, color: '#000',
+      link: { sourceId: 's' },
+      bpmnFlow: { sourceId: 'a', targetId: 'b' },
+    })
+    expect(flow?.link).toBeUndefined()
+    expect(flow?.bpmnFlow).toEqual({ sourceId: 'a', targetId: 'b' })
+    const box = sanitiseElement({ id: 'r', type: 'rect', x: 0, y: 0, color: '#000', link: { sourceId: 's' } })
+    expect(box?.link).toBeUndefined()
+  })
+
   it('keeps a bpmnFlow only when both endpoints are strings', () => {
     const kept = sanitiseElement({ id: 'f', type: 'arrow', x: 0, y: 0, color: '#000', bpmnFlow: { sourceId: 'a', targetId: 'b', flowType: 'message', probability: 0.5 } })
     expect(kept?.bpmnFlow).toEqual({ sourceId: 'a', targetId: 'b', flowType: 'message', probability: 0.5 })
@@ -191,6 +208,16 @@ describe('preparePaste', () => {
     const pasted = preparePaste(elements, { makeId: sourceId => `${sourceId}-2` })
     expect(pasted.map(element => element.id)).toEqual(['start-2', 'task-2', 'flow-2'])
     expect(pasted[2].bpmnFlow).toMatchObject({ sourceId: 'start-2', targetId: 'task-2', condition: 'ok' })
+  })
+
+  it('remaps a freeform link and drops an end that was not copied', () => {
+    const pasted = preparePaste([
+      rect({ id: 's', x: 0, y: 0 }),
+      { id: 'a', type: 'arrow', x: 1, y: 2, w: 3, h: 4, color: '#000', link: { sourceId: 's', targetId: 'gone' } },
+    ], { makeId: sourceId => `${sourceId}-2` })
+    expect(pasted[1].link).toEqual({ sourceId: 's-2' })
+    expect(pasted[1].bpmnFlow).toBeUndefined()
+    expect(pasted[0]).not.toHaveProperty('link')
   })
 
   it('drops a flow whose endpoint is outside the payload rather than rewiring it onto the board', () => {

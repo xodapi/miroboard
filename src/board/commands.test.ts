@@ -567,3 +567,63 @@ describe('bringToFront', () => {
     expect(elements.toArray().at(-1)!.zIndex).toBe(4)
   })
 })
+
+describe('freeform link', () => {
+  const linked = (): BoardElement => element('a', {
+    type: 'arrow', x: 200, y: 20, w: 80, h: 0, link: { sourceId: 's' },
+  })
+
+  it('does not delete the arrow when its shape goes, and one undo restores the link', () => {
+    const { doc, elements } = board([element('s', { x: 0, y: 0, w: 100, h: 40 }), linked()])
+    const undo = new Y.UndoManager(elements, { captureTimeout: 0, trackedOrigins: new Set<unknown>([LOCAL_EDIT]) })
+
+    expect(deleteElement(doc, elements, 's')).toBe(true)
+    expect(ids(elements)).toEqual(['a'])
+    const parked = elements.get(0)
+    expect(parked.bpmnFlow).toBeUndefined()
+    expect(parked).not.toHaveProperty('link')
+    expect(parked.x).not.toBe(0)
+
+    undo.undo()
+    expect(ids(elements)).toEqual(['s', 'a'])
+    expect(elements.toArray().find(item => item.id === 'a')!.link).toEqual({ sourceId: 's' })
+  })
+
+  it('does not rewrite an arrow when only its shape moves', () => {
+    const { doc, elements } = board([element('s', { x: 0, y: 0, w: 100, h: 40 }), linked()])
+    moveElements(doc, elements, ['s'], { x: 30, y: 10 })
+    expect(elements.toArray().find(item => item.id === 'a')).toMatchObject({
+      x: 200, y: 20, link: { sourceId: 's' },
+    })
+    expect(elements.get(0)).toMatchObject({ x: 30, y: 10 })
+  })
+
+  it('detaches an arrow that is nudged away from its shape', () => {
+    const { doc, elements } = board([element('s', { x: 0, y: 0, w: 100, h: 40 }), linked()])
+    const before = elements.get(1)
+    moveElements(doc, elements, ['a'], { x: 15, y: 0 })
+    const after = elements.get(1)
+    expect(after).not.toHaveProperty('link')
+    expect(after.bpmnFlow).toBeUndefined()
+    expect(after.x).not.toBe(before.x)
+    expect(after.y).toBeCloseTo(before.y, 4)
+  })
+
+  it('remaps a copied link onto the copies, and bakes a lone arrow', () => {
+    const { doc, elements } = board([
+      element('s', { x: 0, y: 0, w: 100, h: 40 }),
+      element('t', { x: 400, y: 0, w: 100, h: 40 }),
+      element('a', { type: 'arrow', x: 4, y: 6, w: 10, h: 10, link: { sourceId: 's', targetId: 't' } }),
+    ])
+    let n = 0
+    const both = duplicateElements(doc, elements, ['s', 't', 'a'], () => `copy-${n++}`)
+    const copied = elements.toArray().find(item => item.id === both[2])!
+    expect(copied.bpmnFlow).toBeUndefined()
+    expect(copied.link).toEqual({ sourceId: both[0], targetId: both[1] })
+
+    const alone = duplicateElements(doc, elements, ['a'], () => 'lone')
+    const lone = elements.toArray().find(item => item.id === alone[0])!
+    expect(lone).not.toHaveProperty('link')
+    expect(lone.x).not.toBe(24)
+  })
+})

@@ -1,4 +1,5 @@
 import { clamp_scale } from '../wasm/board-core/board_core'
+import { hasLink, visualExtent } from './follow'
 import { isElementType, type BoardElement, type Point } from './types'
 
 export interface Transform {
@@ -73,10 +74,28 @@ export interface Viewport {
 export function fitTransform(elements: BoardElement[], viewport: Viewport): Transform {
   if (!elements.length) return { x: 0, y: 0, scale: 1 }
 
-  const minX = Math.min(...elements.map(element => element.x))
-  const minY = Math.min(...elements.map(element => element.y))
-  const maxX = Math.max(...elements.map(element => element.x + (element.w || DEFAULT_EXTENT)))
-  const maxY = Math.max(...elements.map(element => element.y + (element.h || DEFAULT_EXTENT)))
+  const byId = new Map(elements.map(element => [element.id, element]))
+  const boxes = elements.map(element => {
+    if (!hasLink(element)) {
+      return {
+        x: element.x,
+        y: element.y,
+        w: element.w || DEFAULT_EXTENT,
+        h: element.h || DEFAULT_EXTENT,
+      }
+    }
+    const live = visualExtent(element, byId)
+    return {
+      x: live.x,
+      y: live.y,
+      w: live.w || DEFAULT_EXTENT,
+      h: live.h || DEFAULT_EXTENT,
+    }
+  })
+  const minX = Math.min(...boxes.map(box => box.x))
+  const minY = Math.min(...boxes.map(box => box.y))
+  const maxX = Math.max(...boxes.map(box => box.x + box.w))
+  const maxY = Math.max(...boxes.map(box => box.y + box.h))
   const width = maxX - minX
   const height = maxY - minY
 

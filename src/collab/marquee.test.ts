@@ -35,6 +35,21 @@ describe('marquee geometry', () => {
       .toEqual({ minX: 20, minY: 50, maxX: 50, maxY: 70 })
   })
 
+  it('bounds a linked arrow between shape centers, and a free end from the stored frame', () => {
+    const source = sticky('s', 0, 0, 80, 40)
+    const target = sticky('t', 400, 200, 80, 40)
+    const byId = new Map<string, MarqueeElement>([source, target].map(element => [element.id, element]))
+    const linked: MarqueeElement = {
+      id: 'a', type: 'arrow', x: 0, y: 0, w: 10, h: 10,
+      link: { sourceId: 's', targetId: 't' },
+    }
+    expect(boundsOf(linked, byId)).toEqual({ minX: 40, minY: 20, maxX: 440, maxY: 220 })
+    expect(boundsOf({ ...linked, link: { sourceId: 's' } }, byId))
+      .toEqual({ minX: 10, minY: 10, maxX: 40, maxY: 20 })
+    expect(boundsOf({ ...linked, link: { sourceId: 'gone' } }, byId))
+      .toEqual({ minX: 0, minY: 0, maxX: 10, maxY: 10 })
+  })
+
   it('bounds a plain arrow from its endpoints', () => {
     expect(boundsOf({ id: 'a', type: 'arrow', x: 10, y: 10, w: 90, h: 40 }))
       .toEqual({ minX: 10, minY: 10, maxX: 100, maxY: 50 })

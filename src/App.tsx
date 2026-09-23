@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as Y from 'yjs'
 import { clamp_scale, export_bpmn_xml, import_bpmn_xml, run_bpmn, simulate_bpmn_seed_string, validate_bpmn } from './wasm/board-core/board_core'
-import { commitElementUpdate } from './persistence/updates'
+import { commitElementPatch } from './persistence/updates'
 import { LOAD, LOCAL_CLIPBOARD, LOCAL_EDIT, LOCAL_GESTURE, LOCAL_ORIGINS, LOCAL_TEMPLATE, NON_EDIT_ORIGINS } from './collab/origins'
 import { PASTE_OFFSET, parseClipboard, preparePaste, serialiseSelection } from './collab/clipboard'
 import { readProfile, writeProfile, type UserProfile } from './collab/user-profile'
@@ -70,6 +70,7 @@ import type { DocHistory, DocMeta, HistorySnapshot, ProfileConfig } from './form
 import { HelpPanel } from './HelpPanel'
 import './help-panel.css'
 import { bpmnEdgeAnchor, simplifyPath, smoothPathD, snapVal } from './board/geometry'
+import { ATTACH_SCREEN_PX, hasLink, lineEnds, parkForMove, planLink, visualExtent, withDrawnLine } from './board/follow'
 import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeInfo } from './board/gesture'
 import { canRotate, frameTransform, rotationFromPointer, type RotateInfo } from './board/rotate'
 import { genId } from './board/id'
@@ -549,7 +550,7 @@ export default function App() {
     const frame = transientFrameRef.current
     if (!frame?.length || !yElements.current) return
     ydoc.transact(() => {
-      for (const item of frame) commitElementUpdate(ydoc, yElements.current!, item.id, item.updates)
+      for (const item of frame) commitElementPatch(ydoc, yElements.current!, item.id, item.updates)
     }, LOCAL_GESTURE)
     transientFrameRef.current = null
     setTransientFrame(null)
@@ -861,7 +862,8 @@ export default function App() {
   const copySelection = useCallback((): number => {
     const source = yElements.current?.toArray() ?? elements
     const wanted = new Set(expandIds(source, selectedIds))
-    const picked = source.filter(element => wanted.has(element.id))
+    const byId = new Map(source.map(element => [element.id, element]))
+    const picked = source.filter(element => wanted.has(element.id)).map(element => withDrawnLine(element, byId))
     if (!picked.length) return 0
     const payload = serialiseSelection(picked)
     internalClipboardRef.current = payload
@@ -1373,9 +1375,15 @@ export default function App() {
           .map(id => elements.find(candidate => candidate.id === id))
           .filter((candidate): candidate is BoardElement => Boolean(candidate) && !isLocked(candidate))
         if (dragged.length) {
+          const moving = new Set(dragged.map(item => item.id))
           dragInfoRef.current = {
             startX: point.x, startY: point.y,
-            items: dragged.map(item => ({ id: item.id, x: item.x, y: item.y })),
+            items: dragged.map(item => {
+              const parked = parkForMove(item, elements, moving)
+              return parked.extras
+                ? { id: item.id, x: parked.x, y: parked.y, extras: parked.extras }
+                : { id: item.id, x: item.x, y: item.y }
+            }),
           }
         }
         const longPress = { timer: null as number | null, x: e.clientX, y: e.clientY, startedAt: performance.now() }
@@ -1631,8 +1639,31 @@ export default function App() {
     if (frame?.length) {
       const frames = frame
       ydoc.transact(() => {
-        for (const item of frames) commitElementUpdate(ydoc, yElements.current!, item.id, item.updates)
+        for (const item of frames) commitElementPatch(ydoc, yElements.current!, item.id, item.updates)
       }, LOCAL_GESTURE)
+    }
+    // A freeform arrow or line sticks to the topmost shape under each end.
+    // The last move already wrote w/h; rewrite it only when a link is set, so
+    // an unattached release keeps the snapped box. This is not a BPMN flow.
+    if (isDrawing && releasedAt && yElements.current && (tool === 'arrow' || tool === 'line') && selectedElementId) {
+      const live = yElements.current.toArray()
+      const drawing = live.find(element => element.id === selectedElementId)
+      if (drawing && (drawing.type === 'arrow' || drawing.type === 'line') && !drawing.bpmnFlow) {
+        const end = snapGrid
+          ? { x: drawing.x + snapVal(releasedAt.x - drawing.x), y: drawing.y + snapVal(releasedAt.y - drawing.y) }
+          : releasedAt
+        const link = planLink(drawing, live, end, ATTACH_SCREEN_PX / transform.scale)
+        if (link) {
+          // Same origin as addElement and the pointermove writes. A gesture
+          // origin would be its own undo step: one undo would drop the link
+          // and leave the arrow behind.
+          updateElement(drawing.id, {
+            w: end.x - drawing.x,
+            h: end.y - drawing.y,
+            link,
+          })
+        }
+      }
     }
     transientFrameRef.current = null
     setTransientFrame(null)
@@ -1659,7 +1690,7 @@ export default function App() {
     resizeInfoRef.current = null
     rotateInfoRef.current = null
     setAlignGuides([])
-  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, userProfile.id, marquee, elements, ydoc, screenToWorld, snapGrid, transform.scale])
+  }, [isDrawing, tool, currentPath, color, strokeWidth, addElement, updateElement, userProfile.id, marquee, elements, ydoc, screenToWorld, snapGrid, transform.scale, selectedElementId])
   // Touch pinch
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (e.touches.length === 2) {
@@ -2042,14 +2073,20 @@ export default function App() {
       case 'arrow':
       case 'line': {
         // A connector follows its endpoints even after the head is removed.
-        // The freeform line below uses the frame, which a connector does not have.
-        if (el.bpmnFlow || el.type === 'arrow') {
+        // A freeform arrow, and a line that is attached, follow the same way
+        // without becoming a flow. An unattached line uses the frame below.
+        if (el.bpmnFlow || el.type === 'arrow' || hasLink(el)) {
           const source = el.bpmnFlow ? renderedById.get(el.bpmnFlow.sourceId) : undefined
           const target = el.bpmnFlow ? renderedById.get(el.bpmnFlow.targetId) : undefined
           const sourceCenter = source ? { x: source.x + (source.w || 0) / 2, y: source.y + (source.h || 0) / 2 } : undefined
           const targetCenter = target ? { x: target.x + (target.w || 0) / 2, y: target.y + (target.h || 0) / 2 } : undefined
-          const start = source && targetCenter ? bpmnEdgeAnchor(source, targetCenter.x, targetCenter.y) : { x: el.x, y: el.y }
-          const end = target && sourceCenter ? bpmnEdgeAnchor(target, sourceCenter.x, sourceCenter.y) : { x: el.x + (el.w || 0), y: el.y + (el.h || 0) }
+          const followed = el.bpmnFlow ? null : lineEnds(el, renderedById)
+          const start = el.bpmnFlow
+            ? (source && targetCenter ? bpmnEdgeAnchor(source, targetCenter.x, targetCenter.y) : { x: el.x, y: el.y })
+            : (followed?.start ?? { x: el.x, y: el.y })
+          const end = el.bpmnFlow
+            ? (target && sourceCenter ? bpmnEdgeAnchor(target, sourceCenter.x, sourceCenter.y) : { x: el.x + (el.w || 0), y: el.y + (el.h || 0) })
+            : (followed?.end ?? { x: el.x + (el.w || 0), y: el.y + (el.h || 0) })
           const startX = start.x
           const startY = start.y
           const x2 = end.x - startX
@@ -2371,7 +2408,7 @@ export default function App() {
         onSelect={selectSnapshot}
       />
       {/* ===== MINIMAP ===== */}
-      {showMiniMap && <MiniMap elements={renderedElements} transform={transform} darkMode={darkMode} setTransform={setTransform} />}
+      {showMiniMap && <MiniMap elements={renderedElements.map(el => ({ ...el, ...visualExtent(el, renderedById) }))} transform={transform} darkMode={darkMode} setTransform={setTransform} />}
       {/* ===== BOTTOM TOOLBAR ===== */}
       <BottomToolbar
         theme={theme}

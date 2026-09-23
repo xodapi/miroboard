@@ -60,6 +60,23 @@ export function stepIndex(count: number, index: number, delta: number): number {
  * between the endpoints instead.
  */
 export function hitBounds(element: BoardElement, byId: ReadonlyMap<string, BoardElement>): Bounds {
+  const link = element.bpmnFlow ? undefined : element.link
+  if (link && (link.sourceId || link.targetId)) {
+    const source = link.sourceId ? byId.get(link.sourceId) : undefined
+    const target = link.targetId ? byId.get(link.targetId) : undefined
+    if (source || target) {
+      const x1 = source ? source.x + (source.w ?? 0) / 2 : element.x
+      const y1 = source ? source.y + (source.h ?? 0) / 2 : element.y
+      const x2 = target ? target.x + (target.w ?? 0) / 2 : element.x + (element.w ?? 0)
+      const y2 = target ? target.y + (target.h ?? 0) / 2 : element.y + (element.h ?? 0)
+      return {
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        w: Math.max(Math.abs(x2 - x1), FALLBACK_EXTENT),
+        h: Math.max(Math.abs(y2 - y1), FALLBACK_EXTENT),
+      }
+    }
+  }
   const flow = element.bpmnFlow
   if (flow) {
     const source = byId.get(flow.sourceId)

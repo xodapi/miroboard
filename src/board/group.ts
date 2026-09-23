@@ -250,8 +250,9 @@ export function groupOutlines(elements: readonly BoardElement[], selectedIds: It
     let maxX = -Infinity
     let maxY = -Infinity
     let boxed = 0
+    const byId = new Map(elements.map(candidate => [candidate.id, candidate]))
     for (const member of members) {
-      const bounds = boundsOf(member)
+      const bounds = boundsOf(member, byId)
       if (!bounds) continue
       boxed += 1
       minX = Math.min(minX, bounds.minX)

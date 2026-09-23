@@ -22,7 +22,7 @@
  * native clipboard integration would use for a real custom MIME type.
  */
 import type { BoardElement } from '../format/mboard'
-import { isBpmnNodeType, isElementType } from '../board/types'
+import { elementLink, isBpmnNodeType, isElementType } from '../board/types'
 import { retargetGroupIds } from '../board/group'
 
 /** Declared media type of a miroboard clipboard payload. */
@@ -132,6 +132,13 @@ export function sanitiseElement(value: unknown): BoardElement | null {
     }
   }
 
+  // After bpmnFlow, so a connector never also grows a freeform attachment.
+  // Only an arrow or a line follows a shape; a link on a box is not a link.
+  if (!element.bpmnFlow && (element.type === 'arrow' || element.type === 'line')) {
+    const link = elementLink(raw.link)
+    if (link) element.link = link
+  }
+
   // A non-empty token only. Connectors are not members, and an empty string
   // would persist as a group that click-expansion ignores.
   if (!element.bpmnFlow && typeof raw.groupId === 'string' && raw.groupId.length > 0) {
@@ -232,6 +239,16 @@ export function preparePaste(elements: readonly BoardElement[], options: PasteOp
       const targetId = idMap.get(element.bpmnFlow.targetId)
       if (sourceId && targetId) next.bpmnFlow = { ...element.bpmnFlow, sourceId, targetId }
       else delete next.bpmnFlow
+    }
+    // A freeform link remaps the ends that came along and drops the rest.
+    // The arrow itself stays: it is a node, not an edge that would dangle.
+    if (element.link) {
+      const link = elementLink({
+        sourceId: element.link.sourceId ? idMap.get(element.link.sourceId) : undefined,
+        targetId: element.link.targetId ? idMap.get(element.link.targetId) : undefined,
+      })
+      if (link && !next.bpmnFlow) next.link = link
+      else delete next.link
     }
     return next
   })

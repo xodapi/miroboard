@@ -122,6 +122,32 @@ export function isElementType(value: unknown): value is ElementType {
   return typeof value === 'string' && (ELEMENT_TYPES as readonly string[]).includes(value)
 }
 
+/**
+ * Optional attachment of a freeform arrow or line. Not a BPMN edge: either end
+ * may be absent, and an id that does not name a shape is ignored.
+ */
+export interface ElementLink {
+  sourceId?: string
+  targetId?: string
+}
+
+/** Keeps only non-empty string ids. Anything else is not an attachment. */
+export function elementLink(value: unknown): ElementLink | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const raw = value as Record<string, unknown>
+  const link: ElementLink = {}
+  if (typeof raw.sourceId === 'string' && raw.sourceId.length > 0) link.sourceId = raw.sourceId
+  if (typeof raw.targetId === 'string' && raw.targetId.length > 0) link.targetId = raw.targetId
+  return link.sourceId || link.targetId ? link : undefined
+}
+
+/** A freeform attachment. A connector follows `bpmnFlow`, not this. */
+export function hasElementLink(element: { type?: string; bpmnFlow?: unknown; link?: ElementLink }): boolean {
+  if (element.bpmnFlow) return false
+  if (element.type && element.type !== 'arrow' && element.type !== 'line') return false
+  return Boolean(element.link && (element.link.sourceId || element.link.targetId))
+}
+
 export interface BoardElement {
   id: string
   type: ElementType
@@ -171,6 +197,11 @@ export interface BoardElement {
     probability?: number
     isDefault?: boolean
   }
+  /**
+   * Shapes a freeform arrow or line follows. Absent when the mark is free.
+   * Never set on a connector — that relationship is `bpmnFlow`.
+   */
+  link?: ElementLink
 }
 
 export type ContextMenuAction = 'edit' | 'duplicate' | 'lock' | 'front' | 'back' | 'delete'

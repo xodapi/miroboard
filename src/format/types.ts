@@ -46,6 +46,11 @@ export interface NodeContent {
   text?: string
   points?: { x: number; y: number }[]
   emoji?: string
+  /**
+   * Freeform attachment. Not an edge: either id may be absent, and a missing
+   * shape is ignored. Omitted when empty. Schema stays 1.
+   */
+  link?: { sourceId?: string; targetId?: string }
 }
 
 export interface DocNode {

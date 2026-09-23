@@ -1020,4 +1020,114 @@ describe('App smoke', () => {
       expect(copy.defaultPrevented).toBe(false)
     })
   })
+
+  describe('freeform follow', () => {
+    function translateOf(node: Element): { x: number; y: number } {
+      const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(node.getAttribute('transform') ?? '')
+      if (!match) throw new Error(`unexpected transform ${node.getAttribute('transform')}`)
+      return { x: Number(match[1]), y: Number(match[2]) }
+    }
+
+    function arrowLine(): { group: Element; line: SVGLineElement } {
+      const group = [...container.querySelectorAll('g[data-id]')].find(node => node.querySelector('line'))
+      const line = group?.querySelector('line')
+      if (!group || !line) throw new Error('arrow has no line')
+      return { group, line }
+    }
+
+    function drawAttachedArrow() {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 150, clientY: 130 })
+      pointer(canvas, 'pointermove', { clientX: 450, clientY: 330 })
+      pointer(canvas, 'pointerup', { clientX: 450, clientY: 330 })
+      key('v')
+    }
+
+    it('follows a moved box, and saves the attachment without becoming a flow', async () => {
+      let written = ''
+      const handle = {
+        kind: 'file',
+        name: 'board.mboard',
+        async createWritable() {
+          return { write: async (value: string) => { written = value }, close: async () => undefined }
+        },
+        async getFile() {
+          return { name: 'board.mboard', type: 'application/json', size: written.length, text: async () => written }
+        },
+      }
+      Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: async () => handle })
+
+      drawAttachedArrow()
+      const before = arrowLine()
+      const start = translateOf(before.group)
+      const x2 = Number(before.line.getAttribute('x2'))
+      const y2 = Number(before.line.getAttribute('y2'))
+      // The stroke meets the outline, not the press point inside the box.
+      expect(start.x).not.toBeCloseTo(150, 0)
+      expect(before.group.getAttribute('data-testid')).toBeNull()
+
+      const rect = container.querySelector('g[data-id]')!
+      pointer(rect, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 80, clientY: 90 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 80, clientY: 90 })
+
+      const after = arrowLine()
+      const next = translateOf(after.group)
+      const nextX2 = Number(after.line.getAttribute('x2'))
+      const nextY2 = Number(after.line.getAttribute('y2'))
+      expect(next.x).toBeCloseTo(start.x - 30, 4)
+      expect(next.y).toBeCloseTo(start.y - 20, 4)
+      expect(nextX2).toBeCloseTo(x2 + 30, 4)
+      expect(nextY2).toBeCloseTo(y2 + 20, 4)
+      expect(next.x + nextX2).toBeCloseTo(start.x + x2, 4)
+      expect(next.y + nextY2).toBeCloseTo(start.y + y2, 4)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      const saved = JSON.parse(written)
+      const ids = [...container.querySelectorAll('g[data-id]')].map(node => node.getAttribute('data-id'))
+      const arrowId = before.group.getAttribute('data-id')
+      const arrow = saved.nodes.find((node: { id: string }) => node.id === arrowId)
+      expect(saved.schemaVersion).toBe(1)
+      expect(saved.edges).toEqual([])
+      expect(arrow.content.link).toEqual({ sourceId: ids[0], targetId: ids[1] })
+      expect(arrow.profileData?.bpmn).toBeUndefined()
+      expect(JSON.stringify(arrow)).not.toContain('bpmnFlow')
+    })
+
+    it('undoes the attached draw as one step', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      // Past the undo capture window, so the boxes are not part of the draw.
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)) })
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 150, clientY: 130 })
+      pointer(canvas, 'pointermove', { clientX: 450, clientY: 330 })
+      pointer(canvas, 'pointerup', { clientX: 450, clientY: 330 })
+      expect(translateOf(arrowLine().group).x).not.toBeCloseTo(150, 0)
+      key('z', { ctrlKey: true })
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(2)
+      expect(container.querySelector('line')).toBeNull()
+    })
+
+    it('leaves the arrow when its box is deleted', () => {
+      drawAttachedArrow()
+      const frozen = arrowLine()
+      const at = translateOf(frozen.group)
+      const rect = container.querySelector('g[data-id]')!
+      pointer(rect, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 110, clientY: 110 })
+      key('Delete')
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(2)
+      const kept = arrowLine()
+      expect(translateOf(kept.group).x).toBeCloseTo(at.x, 4)
+      expect(translateOf(kept.group).y).toBeCloseTo(at.y, 4)
+      expect(kept.group.getAttribute('data-testid')).toBeNull()
+    })
+  })
 })

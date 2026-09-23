@@ -38,3 +38,35 @@ export function commitElementUpdate<T extends ElementRecord>(
   }, origin)
   return true
 }
+
+/**
+ * Same as `commitElementUpdate`, except an explicit `undefined` deletes the key.
+ *
+ * Callers that spread a partial must not use this: a missing field and a field
+ * set to `undefined` are different, and only the follow path means the latter.
+ * A cleared `link` has to leave the record, not sit on it as `undefined`, or
+ * the next clone keeps an attachment the user already dropped.
+ */
+export function commitElementPatch<T extends ElementRecord>(
+  doc: Y.Doc,
+  elements: Y.Array<T>,
+  id: string,
+  updates: Partial<T>,
+  origin?: unknown,
+): boolean {
+  const index = elements.toArray().findIndex(element => element.id === id)
+  if (index < 0) return false
+  const current = elements.get(index)
+  if (isShallowSubset(current, updates)) return false
+  const next = { ...current, ...updates } as T
+  for (const key of Object.keys(updates)) {
+    if ((updates as Record<string, unknown>)[key] === undefined) {
+      delete (next as Record<string, unknown>)[key]
+    }
+  }
+  doc.transact(() => {
+    elements.delete(index, 1)
+    elements.insert(index, [next])
+  }, origin)
+  return true
+}

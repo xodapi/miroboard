@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { canonicalElement, deserialise, fromDocEdge, fromDocNode, serialise, toDocElement, type BoardElement } from './mboard'
+import { loadMboard } from './schema'
 import type { DocHistory, DocMeta } from './types'
 
 const node: BoardElement = {
@@ -221,5 +222,49 @@ describe('canonicalElement', () => {
       profileConfig: loaded.profileConfig, history: loaded.history,
     })
     expect(saved.nodes[0].profileData).toEqual({ bpmn: { nodeType: 'eventSubprocess' } })
+  })
+})
+
+describe('freeform link', () => {
+  const linked: BoardElement = {
+    id: 'follow', type: 'arrow', x: 12.5, y: -4, w: 80, h: 16, color: '#112233',
+    link: { sourceId: 'box-a', targetId: 'box-b' },
+  }
+
+  it('round-trips a link, omits an empty one, and does not invent link: undefined', () => {
+    const doc = toDocElement(linked)
+    if (!('node' in doc)) throw new Error('expected node')
+    expect(doc.node.content.link).toEqual({ sourceId: 'box-a', targetId: 'box-b' })
+    const restored = fromDocNode(doc.node)
+    expect(restored).not.toHaveProperty('bpmnFlow')
+    expect(canonicalElement(restored)).toEqual(canonicalElement(linked))
+
+    const bare = toDocElement({ id: 'bare', type: 'line', x: 1, y: 2, color: '#000' })
+    if (!('node' in bare)) throw new Error('expected node')
+    expect(bare.node.content).not.toHaveProperty('link')
+    expect(fromDocNode(bare.node)).not.toHaveProperty('link')
+
+    const dangling = toDocElement({ id: 'dangle', type: 'arrow', x: 0, y: 0, color: '#000', link: { sourceId: 'missing' } })
+    if (!('node' in dangling)) throw new Error('expected node')
+    expect(dangling.node.content.link).toEqual({ sourceId: 'missing' })
+    expect(fromDocNode(dangling.node).link).toEqual({ sourceId: 'missing' })
+  })
+
+  it('does not write content.link on a connector, and stays schema 1', () => {
+    const flow = toDocElement({
+      id: 'flow', type: 'arrow', x: 4, y: 5, color: '#000',
+      link: { sourceId: 'box-a' },
+      bpmnFlow: { sourceId: 'box-a', targetId: 'box-b' },
+    })
+    expect('edge' in flow).toBe(true)
+    expect(JSON.stringify(flow)).not.toContain('link')
+
+    const file = serialise({ elements: [linked], meta, profileConfig: {}, history })
+    expect(file.schemaVersion).toBe(1)
+    expect(file.edges).toEqual([])
+    expect(file.nodes[0].content.link).toEqual(linked.link)
+    const loaded = loadMboard(JSON.stringify(file))
+    expect(loaded.ok).toBe(true)
+    if (loaded.ok) expect(deserialise(loaded.file).elements[0].link).toEqual(linked.link)
   })
 })

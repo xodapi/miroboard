@@ -194,7 +194,14 @@
           "properties": {
             "text": { "type": "string" },
             "emoji": { "type": "string" },
-            "points": { "type": "array", "items": { "$ref": "#/$defs/point" } }
+            "points": { "type": "array", "items": { "$ref": "#/$defs/point" } },
+            "link": {
+              "type": "object",
+              "properties": {
+                "sourceId": { "type": "string" },
+                "targetId": { "type": "string" }
+              }
+            }
           }
         },
         "profileData": {

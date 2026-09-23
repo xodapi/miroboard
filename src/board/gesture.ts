@@ -19,7 +19,12 @@ export type GestureFrame = { id: string; updates: Partial<BoardElement> }
 export type DragInfo = {
   startX: number
   startY: number
-  items: { id: string; x: number; y: number }[]
+  /**
+   * `extras` is a park written at pointer-down: the frozen segment, and a
+   * `link` of `undefined` when that end must detach. Applied only once the
+   * pointer has actually moved, so a click does not drop an attachment.
+   */
+  items: { id: string; x: number; y: number; extras?: Partial<BoardElement> }[]
 }
 
 export type ResizeCorner = 'nw' | 'ne' | 'sw' | 'se'
@@ -52,7 +57,15 @@ export function dragFrame(info: DragInfo, point: Point, snap?: SnapFn): GestureF
   const rawY = point.y - info.startY
   const deltaX = snap ? snap(info.items[0].x + rawX) - info.items[0].x : rawX
   const deltaY = snap ? snap(info.items[0].y + rawY) - info.items[0].y : rawY
-  return info.items.map(item => ({ id: item.id, updates: { x: item.x + deltaX, y: item.y + deltaY } }))
+  const moved = deltaX !== 0 || deltaY !== 0
+  return info.items.map(item => ({
+    id: item.id,
+    // Extras first, then the delta owns x/y. A click keeps the stored origin
+    // and does not publish the park — releasing where you pressed is not a move.
+    updates: moved
+      ? { ...item.extras, x: item.x + deltaX, y: item.y + deltaY }
+      : { x: item.x + deltaX, y: item.y + deltaY },
+  }))
 }
 
 /** Corner resize: the dragged corner follows the pointer, the opposite one stays put. */

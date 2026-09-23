@@ -102,6 +102,13 @@ connector into a freeform line, and a connector still follows its endpoints.
 Thickness is the existing `style.stroke`. None of this bumps `schemaVersion`.
 The pen's last dash and head are device preferences and are never stored in
 the document.
+`content.link` is an optional attachment on a freeform arrow or line that stayed
+a node. `sourceId` and `targetId` name the shapes those ends follow; either may
+be absent, and an id that does not name a shape on the board is ignored — that
+end keeps the stored frame. This is not an edge and not a `bpmnFlow`: deleting
+the shape leaves the arrow, and the schema stays 1. An empty link is omitted,
+so a file without attachments matches one from before the field existed.
+
 - A `bpmnFlow` becomes an edge. `sourceId` and `targetId` are structural endpoints;
   `flowType`, `condition`, `probability`, and `isDefault` are nested under
   `profileData.bpmn`. Arrows and lines without `bpmnFlow` remain nodes.

@@ -7,13 +7,15 @@
  * any locked member stays put, still defining that edge. Equal spacing is a
  * different operation and is not computed here.
  *
- * Connectors are not units. Their drawn geometry comes from the endpoints, so
- * writing their stored x/y would dirty the file without moving the arrow.
+ * Connectors are not units, and neither is a freeform arrow that follows a
+ * shape. Their drawn geometry comes from the endpoints, so writing their
+ * stored x/y would dirty the file without moving the arrow.
  * Bounds are the stored frame (`boundsOf`), including a negative line, not the
  * axis-aligned box of a rotated shape.
  */
 import { boundsOf, type Bounds } from '../collab/marquee'
 import { expandIds, membership } from './group'
+import { hasLink } from './follow'
 import { isLocked } from './lock'
 import type { BoardElement } from './types'
 
@@ -66,13 +68,13 @@ function unitsOf(elements: readonly BoardElement[], ids: Iterable<string>): Unit
   for (const id of expanded) {
     if (consumed.has(id)) continue
     const element = elements.find(candidate => candidate.id === id)
-    if (!element || element.bpmnFlow) {
+    if (!element || element.bpmnFlow || hasLink(element)) {
       consumed.add(id)
       continue
     }
     const token = membership(element)
     const members = token
-      ? elements.filter(candidate => covered.has(candidate.id) && membership(candidate) === token && !candidate.bpmnFlow)
+      ? elements.filter(candidate => covered.has(candidate.id) && membership(candidate) === token && !candidate.bpmnFlow && !hasLink(candidate))
       : [element]
     for (const member of members) consumed.add(member.id)
     const frames: Frame[] = []

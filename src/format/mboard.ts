@@ -5,7 +5,7 @@
 import { CURRENT_SCHEMA_VERSION, type DocEdge, type DocHistory, type DocMeta, type DocNode, type MboardFile, type ProfileConfig } from './types'
 // board/types.ts is a dependency-free type module, not App.tsx: importing the
 // node-type list from there keeps one list instead of a third copy to drift.
-import { isBpmnNodeType, type BpmnNodeType } from '../board/types'
+import { elementLink, isBpmnNodeType, type BpmnNodeType, type ElementLink } from '../board/types'
 
 type Point = { x: number; y: number }
 
@@ -43,6 +43,8 @@ export interface BoardElement {
   bpmnResourceCapacity?: number
   bpmnPriority?: number
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
+  /** Freeform attachment. Persisted on `content.link`. Never set on a connector. */
+  link?: ElementLink
   waypoints?: Point[]
   labelOffset?: Point
 }
@@ -140,7 +142,14 @@ export function toDocElement(element: BoardElement): DocElement {
       frame: { x: element.x, y: element.y, w: element.w ?? null, h: element.h ?? null, rotation: element.rotation ?? 0 },
       z: element.zIndex ?? 0,
       style: withDash({ color: element.color, fill: element.fill ?? null, stroke: element.stroke ?? null }, element),
-      content: defined({ text: element.text, points: element.points, emoji: element.emoji }),
+      content: defined({
+        text: element.text,
+        points: element.points,
+        emoji: element.emoji,
+        // A connector is an edge. A freeform link stays on the node and is
+        // omitted when empty, so a file without attachments matches an old one.
+        link: element.type === 'arrow' || element.type === 'line' ? elementLink(element.link) : undefined,
+      }),
       profileData,
       createdBy: element.createdBy,
       locked: element.bpmnFlow ? undefined : element.locked === true ? true : undefined,
@@ -184,6 +193,8 @@ export function fromDocNode(node: DocNode): BoardElement {
     bpmnResourceCapacity: bpmn.resourceCapacity as number | undefined,
     bpmnPriority: bpmn.priority as number | undefined,
   }) as BoardElement
+  const link = elementLink(node.content.link)
+  if (link) element.link = link
   const extras: Record<string, unknown> = {
     ...unknownKeys(node as unknown as Record<string, unknown>, NODE_KEYS),
     profileData: profileExtras(node.profileData),
@@ -257,7 +268,9 @@ export function canonicalElement(element: BoardElement): BoardElement {
     // not part of the projection.
     delete result.groupId
     delete result.locked
+    delete result.link
   }
+  if (!elementLink(result.link)) delete result.link
   return result
 }
 
