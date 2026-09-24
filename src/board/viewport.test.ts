@@ -6,7 +6,7 @@ const { clampScale } = vi.hoisted(() => ({
 }))
 vi.mock('../wasm/board-core/board_core', () => ({ clamp_scale: clampScale }))
 
-const { elementsInScope, fitTransform, screenToWorld, wheelZoomFactor, zoomAround } = await import('./viewport')
+const { centerOn, elementsInScope, fitTransform, screenToWorld, wheelZoomFactor, zoomAround } = await import('./viewport')
 type BoardElement = Parameters<typeof fitTransform>[0][number]
 
 const element = (over: Partial<BoardElement> = {}): BoardElement => ({
@@ -80,6 +80,29 @@ describe('fitTransform', () => {
     expect(centre.y * transform.scale + transform.y).toBeCloseTo(viewport.height / 2)
   })
 
+  it('frames an unattached bend instead of the stored chord', () => {
+    const arrow = element({
+      id: 'a', type: 'arrow', x: 0, y: 0, w: 100, h: 0,
+      waypoints: [{ x: 50, y: 400 }],
+    })
+    const straight = fitTransform([element({ id: 'a', type: 'arrow', x: 0, y: 0, w: 100, h: 0 })], viewport)
+    const bent = fitTransform([arrow], viewport)
+    expect(bent.scale).toBeLessThan(straight.scale)
+  })
+
+  it('frames a linked arrow by the live segment, not a stale origin', () => {
+    const source = element({ id: 's', x: 9000, y: -4000, w: 100, h: 100 })
+    const target = element({ id: 't', x: 9200, y: -4000, w: 100, h: 100 })
+    const arrow = element({
+      id: 'a', type: 'arrow', x: 0, y: 0, w: 0, h: 0,
+      link: { sourceId: 's', targetId: 't' },
+    })
+    const transform = fitTransform([source, target, arrow], viewport)
+    const centre = { x: 9150, y: -3950 }
+    expect(centre.x * transform.scale + transform.x).toBeCloseTo(viewport.width / 2, 0)
+    expect(centre.y * transform.scale + transform.y).toBeCloseTo(viewport.height / 2, 0)
+  })
+
   it('frames content that sits far from the origin', () => {
     const transform = fitTransform([element({ x: 9000, y: -4000, w: 200, h: 200 })], viewport)
     const centre = { x: 9100, y: -3900 }
@@ -109,6 +132,19 @@ describe('fitTransform', () => {
   })
 })
 
+describe('centerOn', () => {
+  it('puts the box centre at the viewport centre without changing scale', () => {
+    const transform = centerOn(
+      { x: 0, y: 0, scale: 2 },
+      { x: 1000, y: 2000, w: 100, h: 100 },
+      { width: 800, height: 600 },
+    )
+    expect(transform.scale).toBe(2)
+    expect(1050 * transform.scale + transform.x).toBeCloseTo(400)
+    expect(2050 * transform.scale + transform.y).toBeCloseTo(300)
+  })
+})
+
 describe('elementsInScope', () => {
   const sticky = element({ id: 'sticky', type: 'sticky' })
   const task = element({ id: 'task', bpmnNodeType: 'task' })
@@ -132,6 +168,12 @@ describe('elementsInScope', () => {
 
   it('frames the free-form content in board mode', () => {
     expect(elementsInScope([sticky, task, flow], 'board')).toEqual([sticky])
+  })
+
+  it('frames notation marks without hiding the free board', () => {
+    const event = element({ id: 'event', notation: { id: 'eepc', symbol: 'event' } })
+    expect(elementsInScope([sticky, event, task], 'notation')).toEqual([event])
+    expect(elementsInScope([sticky, event], 'board')).toEqual([sticky, event])
   })
 
   it('frames the process in BPMN and simulation modes', () => {

@@ -6,6 +6,7 @@ import type { UserProfile } from '../collab/user-profile'
 
 const MODES: [WorkspaceMode, string][] = [
   ['board', 'Доска'],
+  ['notation', 'Нотации'],
   ['bpmn', 'BPMN'],
   ['simulation', 'Симуляция'],
 ]
@@ -27,6 +28,8 @@ export interface BoardHeaderProps {
   /** Set once the flow tool has a source and is waiting for a target. */
   bpmnFlowSourceId: string | null
   selectionCount: number
+  /** Shown when the selection can be locked or unlocked. Hidden during preview. */
+  lockLabel?: string | null
   hasBpmnNodes: boolean
   bpmnIssues: { severity: string; message: string }[]
   bpmnRunSummary: string | null
@@ -47,6 +50,7 @@ export interface BoardHeaderProps {
   onToggleDarkMode: () => void
   onToggleMiniMap: () => void
   onToggleProfile: () => void
+  onToggleLock?: () => void
 }
 
 /**
@@ -143,11 +147,24 @@ export function BoardHeader(props: BoardHeaderProps) {
       </div>
 
       <div className="flex items-center gap-2">
+        {props.lockLabel && props.onToggleLock && !isPreview && (
+          <button
+            type="button"
+            data-testid="lock-toggle"
+            onClick={props.onToggleLock}
+            className={chip}
+            title="Заблокированный объект не сдвигается, не меняет размер и не поворачивается"
+            aria-pressed={props.lockLabel === 'Разблокировать'}
+          >
+            {props.lockLabel}
+          </button>
+        )}
+
         {props.selectionCount > 1 && !isPreview && (
           <div
             className={`${pill} ${theme.dark ? 'bg-slate-700 text-slate-100' : 'bg-slate-100 text-slate-700'}`}
             data-testid="selection-count"
-            title="Выделено объектов. Delete — удалить, Esc — снять выделение"
+            title="Выделено объектов. Ctrl+G — сгруппировать, Ctrl+Shift+G — разгруппировать, Delete — удалить, Esc — снять выделение"
           >
             Выделено: {props.selectionCount}
           </div>

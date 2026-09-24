@@ -33,6 +33,16 @@ describe('dragFrame', () => {
     expect(dragFrame(drag(), p(150, 120))).toEqual([{ id: 'a', updates: { x: 150, y: 120 } }])
   })
 
+  it('publishes a park only once the pointer has moved', () => {
+    const info = drag({
+      items: [{ id: 'a', x: 10, y: 20, extras: { w: 30, h: 40, link: undefined } }],
+    })
+    expect(dragFrame(info, p(100, 100))).toEqual([{ id: 'a', updates: { x: 10, y: 20 } }])
+    expect(dragFrame(info, p(110, 100))).toEqual([
+      { id: 'a', updates: { w: 30, h: 40, link: undefined, x: 20, y: 20 } },
+    ])
+  })
+
   it('moves every element of a group by the same delta, keeping the layout', () => {
     const info = drag({
       items: [
@@ -71,6 +81,16 @@ describe('dragFrame', () => {
 
   it('an empty selection produces no frames', () => {
     expect(dragFrame(drag({ items: [] }), p(200, 200))).toEqual([])
+  })
+
+  it('translates bends with the drag and does not publish them on a click', () => {
+    const info = drag({
+      items: [{ id: 'a', x: 10, y: 20, waypoints: [{ x: 30, y: 40 }] }],
+    })
+    expect(dragFrame(info, p(100, 100))).toEqual([{ id: 'a', updates: { x: 10, y: 20 } }])
+    expect(dragFrame(info, p(110, 105))).toEqual([
+      { id: 'a', updates: { x: 20, y: 25, waypoints: [{ x: 40, y: 45 }] } },
+    ])
   })
 })
 

@@ -2,7 +2,11 @@
 name = "board-core"
 version = "0.15.0"
 edition = "2021"
+license = "MIT"
 description = "Deterministic whiteboard geometry for MiroBoard"
+# Runtime crates must stay MIT, Apache-2.0, or "MIT OR Apache-2.0".
+# No GPL, AGPL, MPL, or proprietary SDK: this crate is linked into the
+# single-file HTML build. See docs/DOCUMENTATION_STACK.md.
 
 [lib]
 crate-type = ["cdylib", "rlib"]

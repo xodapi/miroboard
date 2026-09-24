@@ -22,7 +22,9 @@
  * native clipboard integration would use for a real custom MIME type.
  */
 import type { BoardElement } from '../format/mboard'
-import { isBpmnNodeType, isElementType } from '../board/types'
+import { elementLink, isBpmnNodeType, isElementType, type NotationMark } from '../board/types'
+import { retargetGroupIds } from '../board/group'
+import { readWaypoints, shiftPoints } from '../board/waypoints'
 
 /** Declared media type of a miroboard clipboard payload. */
 export const CLIPBOARD_MIME = 'application/x-miroboard+json'
@@ -74,6 +76,22 @@ function toPoints(value: unknown): { x: number; y: number }[] | undefined {
  * must carry and which defaults to transparent — an invisible element can be
  * deleted, a crashed render cannot.
  */
+function sanitiseNotation(value: unknown): NotationMark | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const raw = value as Record<string, unknown>
+  if (raw.id !== 'eepc' && raw.id !== 'vacd' && raw.id !== 'mindmap') return undefined
+  if (typeof raw.symbol !== 'string' || raw.symbol.length === 0) return undefined
+  const mark: NotationMark = { id: raw.id, symbol: raw.symbol }
+  if (typeof raw.role === 'string' && raw.role.length > 0) mark.role = raw.role
+  if (typeof raw.parentId === 'string' && raw.parentId.length > 0) mark.parentId = raw.parentId
+  if (raw.collapsed === true) mark.collapsed = true
+  if (typeof raw.refines === 'string' && raw.refines.length > 0) mark.refines = raw.refines
+  if (raw.relation === 'controlFlow' || raw.relation === 'orgAssignment' || raw.relation === 'sequence' || raw.relation === 'branch') {
+    mark.relation = raw.relation
+  }
+  return mark
+}
+
 export function sanitiseElement(value: unknown): BoardElement | null {
   if (typeof value !== 'object' || value === null) return null
   const raw = value as Record<string, unknown>
@@ -92,6 +110,7 @@ export function sanitiseElement(value: unknown): BoardElement | null {
   if (isFiniteNumber(raw.w)) element.w = raw.w
   if (isFiniteNumber(raw.h)) element.h = raw.h
   if (isFiniteNumber(raw.stroke)) element.stroke = raw.stroke
+  if (raw.dash === 'dashed') element.dash = 'dashed'
   if (isFiniteNumber(raw.rotation)) element.rotation = raw.rotation
   if (isFiniteNumber(raw.zIndex)) element.zIndex = raw.zIndex
   if (typeof raw.text === 'string') element.text = raw.text
@@ -100,10 +119,12 @@ export function sanitiseElement(value: unknown): BoardElement | null {
   if (typeof raw.createdBy === 'string') element.createdBy = raw.createdBy
   const points = toPoints(raw.points)
   if (points) element.points = points
-  const waypoints = toPoints(raw.waypoints)
+  const waypoints = readWaypoints(raw.waypoints)
   if (waypoints) element.waypoints = waypoints
   const labelOffset = toPoint(raw.labelOffset)
   if (labelOffset) element.labelOffset = labelOffset
+  const notation = sanitiseNotation(raw.notation)
+  if (notation) element.notation = notation
 
   // Checked, not cast, for the same reason `type` is — see isBpmnNodeType.
   if (isBpmnNodeType(raw.bpmnNodeType)) element.bpmnNodeType = raw.bpmnNodeType
@@ -129,6 +150,21 @@ export function sanitiseElement(value: unknown): BoardElement | null {
       element.bpmnFlow = bpmnFlow
     }
   }
+
+  // After bpmnFlow, so a connector never also grows a freeform attachment.
+  // Only an arrow or a line follows a shape; a link on a box is not a link.
+  if (!element.bpmnFlow && (element.type === 'arrow' || element.type === 'line')) {
+    const link = elementLink(raw.link)
+    if (link) element.link = link
+  }
+
+  // A non-empty token only. Connectors are not members, and an empty string
+  // would persist as a group that click-expansion ignores.
+  if (!element.bpmnFlow && typeof raw.groupId === 'string' && raw.groupId.length > 0) {
+    element.groupId = raw.groupId
+  }
+  // Only an explicit true. `false`, a string, or a connector must not become a lock.
+  if (!element.bpmnFlow && raw.locked === true) element.locked = true
 
   return element
 }
@@ -195,6 +231,9 @@ export interface PasteOptions {
  * after the paste. A flow whose endpoints are not both inside the payload is
  * dropped: keeping it would either dangle or, worse, reconnect to an unrelated
  * board element that happens to carry the same id.
+ *
+ * Group tokens are remapped the same way. Pasting must not join the source
+ * group, or a click on the paste would select the originals.
  */
 export function preparePaste(elements: readonly BoardElement[], options: PasteOptions = {}): BoardElement[] {
   const offset = options.offset ?? { x: PASTE_OFFSET, y: PASTE_OFFSET }
@@ -205,22 +244,44 @@ export function preparePaste(elements: readonly BoardElement[], options: PasteOp
     idMap.set(element.id, makeId(element.id, index))
   })
 
-  return elements.map(element => {
-    const pasted: BoardElement = {
+  let groupIndex = elements.length
+  const pasted = elements.map(element => {
+    const next: BoardElement = {
       ...element,
       id: idMap.get(element.id) ?? element.id,
       x: element.x + offset.x,
       y: element.y + offset.y,
     }
-    if (options.createdBy !== undefined) pasted.createdBy = options.createdBy
+    if (options.createdBy !== undefined) next.createdBy = options.createdBy
+    // Same offset as x/y. A bend is a world point; leaving it behind would
+    // shear the copy off the route the user copied. A zero offset still copies
+    // the list, so the paste does not share the source array.
+    if (element.waypoints?.length) next.waypoints = shiftPoints(element.waypoints, offset.x, offset.y)
     if (element.bpmnFlow) {
       const sourceId = idMap.get(element.bpmnFlow.sourceId)
       const targetId = idMap.get(element.bpmnFlow.targetId)
-      if (sourceId && targetId) pasted.bpmnFlow = { ...element.bpmnFlow, sourceId, targetId }
-      else delete pasted.bpmnFlow
+      if (sourceId && targetId) next.bpmnFlow = { ...element.bpmnFlow, sourceId, targetId }
+      else delete next.bpmnFlow
     }
-    return pasted
+    // A freeform link remaps the ends that came along and drops the rest.
+    // The arrow itself stays: it is a node, not an edge that would dangle.
+    if (element.notation) {
+      const notation = { ...element.notation }
+      if (notation.parentId && idMap.has(notation.parentId)) notation.parentId = idMap.get(notation.parentId)
+      if (notation.refines && idMap.has(notation.refines)) notation.refines = idMap.get(notation.refines)
+      next.notation = notation
+    }
+    if (element.link) {
+      const link = elementLink({
+        sourceId: element.link.sourceId ? idMap.get(element.link.sourceId) : undefined,
+        targetId: element.link.targetId ? idMap.get(element.link.targetId) : undefined,
+      })
+      if (link && !next.bpmnFlow) next.link = link
+      else delete next.link
+    }
+    return next
   })
+  return retargetGroupIds(pasted, groupId => makeId(groupId, groupIndex++))
 }
 
 /**

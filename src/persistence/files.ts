@@ -1,3 +1,4 @@
+import { classifyNotationSource } from '../board/graph'
 import type { MboardFile } from '../format/types'
 import { loadMboard, type LoadFailure } from '../format/schema'
 import { createOperationQueue } from './operation-queue'
@@ -103,7 +104,9 @@ function download(contents: string, name: string): void {
 }
 
 async function readMboard(file: File): Promise<OpenOutcome> {
-  const loaded = loadMboard(await file.text())
+  const text = await file.text()
+  if (classifyNotationSource(text) === 'aris-aml') return { kind: 'failed', failure: { kind: 'aris-aml' } }
+  const loaded = loadMboard(text)
   return loaded.ok
     ? { kind: 'opened', file: loaded.file, session: { handle: null, name: file.name, isUntitled: false }, migratedFrom: loaded.migratedFrom }
     : { kind: 'failed', failure: loaded.failure }
@@ -123,6 +126,13 @@ async function openDroppedDocumentUnsafe(transfer: DataTransfer): Promise<Droppe
   const file = files[0]
   if (!file) return { kind: 'cancelled', ignoredFileCount }
   if (!file.name.toLowerCase().endsWith(MBOARD_EXTENSION)) {
+    const name = file.name.toLowerCase()
+    if (name.endsWith('.xml') || name.endsWith('.aml')) {
+      const text = await file.text()
+      if (classifyNotationSource(text) === 'aris-aml') {
+        return { kind: 'failed', failure: { kind: 'aris-aml' }, ignoredFileCount }
+      }
+    }
     return { kind: 'failed', failure: { kind: 'not-mboard' }, ignoredFileCount }
   }
 

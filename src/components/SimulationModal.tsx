@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
+import type { FrontierPoint } from '../board/frontier'
 
 type ArrivalClassDraft = { count: string; intervalSec: string; priority: string }
 type QueuePolicy = 'fifo' | 'priority'
@@ -36,14 +37,22 @@ type Props = {
   textSec: string
   visibleBottleneckRole: string | null
   visibleSimulationResult: BpmnSimulationResult | null
+  frontierRole: string | null
+  frontierAdvice: string | null
+  frontierPoints: FrontierPoint[] | null
+  frontierRuns: number | null
+  onTraceFrontier: () => void
+  onApplyFrontierCapacity: (capacity: number) => void
   onClose: () => void
 }
 
 export function SimulationModal({
   arrivalClasses, arrivalInterval, calendarEnd, calendarStart, detectedRoles, dk, hoverBg, rolePolicies,
   setArrivalClasses, setArrivalInterval, setCalendarEnd, setCalendarStart, setRolePolicies, setSimulationInstances, setSimulationRuns, setSimulationSeed, setSimulationTarget,
-  simulationInstances, simulationRuns, simulationSeed, simulationTarget, simulateBpmn, textSec, visibleBottleneckRole, visibleSimulationResult, onClose,
+  simulationInstances, simulationRuns, simulationSeed, simulationTarget, simulateBpmn, textSec, visibleBottleneckRole, visibleSimulationResult,
+  frontierRole, frontierAdvice, frontierPoints, frontierRuns, onTraceFrontier, onApplyFrontierCapacity, onClose,
 }: Props) {
+  const longest = frontierPoints?.reduce((max, point) => Math.max(max, point.meanDurationMs), 1) ?? 1
   return (
     <div className="absolute inset-0 z-50 grid place-items-center p-4 bg-black/60 backdrop-blur-xl" onClick={() => onClose()} data-ui>
           <section className={`w-full max-w-md rounded-[28px] ${dk ? 'bg-slate-800 text-white' : 'bg-white text-slate-900'} shadow-2xl p-6`} onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) { if (event.key === 'Delete' || event.key === 'Backspace') event.preventDefault(); event.stopPropagation() } }}>
@@ -122,6 +131,51 @@ export function SimulationModal({
             <button onClick={simulateBpmn} className="w-full mt-4 rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-500 px-4 py-2.5 text-sm font-bold text-white">
               Запустить симуляцию
             </button>
+            <button
+              type="button"
+              onClick={onTraceFrontier}
+              disabled={detectedRoles.length === 0}
+              data-testid="trace-frontier"
+              className="mt-2 w-full rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Фронтир мощности
+            </button>
+            <p className={`mt-1 text-[11px] leading-4 ${textSec}`}>
+              Одна роль, тот же seed. Точка на фронтире — её время уже не улучшить, не добавив людей. Остальные точки — лишняя мощность.
+            </p>
+            {frontierPoints && frontierPoints.length > 0 && (
+              <div className={`mt-3 rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-violet-50/70'}`} data-testid="frontier-panel">
+                <div className="text-xs font-bold">Фронтир · {frontierRole}</div>
+                {frontierRuns != null && (
+                  <div className={`mt-0.5 text-[10px] ${textSec}`}>По {frontierRuns} прогонов на точку, не больше 40.</div>
+                )}
+                {frontierAdvice && <p className="mt-2 text-xs leading-5">{frontierAdvice}</p>}
+                <ul className="mt-2 space-y-1.5">
+                  {frontierPoints.map(point => (
+                    <li key={point.capacity} className="flex items-center gap-2 text-[11px]" data-testid={point.onFrontier ? 'frontier-point' : 'frontier-dominated'}>
+                      <span className="w-8 shrink-0 font-semibold">{point.capacity}</span>
+                      <span className={`h-1.5 flex-1 overflow-hidden rounded-full ${dk ? 'bg-slate-600' : 'bg-white'}`}>
+                        <span
+                          className={`block h-full rounded-full ${point.onFrontier ? 'bg-violet-500' : 'bg-slate-300'}`}
+                          style={{ width: `${Math.max(8, (point.meanDurationMs / longest) * 100)}%` }}
+                        />
+                      </span>
+                      <span className="w-12 shrink-0 text-right font-semibold">{(point.meanDurationMs / 1000).toFixed(1)}с</span>
+                      <span className={`w-16 shrink-0 text-right ${textSec}`}>{point.onFrontier ? 'фронтир' : 'лишняя'}</span>
+                      {point.onFrontier && (
+                        <button
+                          type="button"
+                          onClick={() => onApplyFrontierCapacity(point.capacity)}
+                          className="shrink-0 rounded-lg bg-white px-2 py-0.5 text-[10px] font-bold text-violet-700"
+                        >
+                          взять
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {visibleSimulationResult && (
               <div className={`mt-5 grid grid-cols-3 gap-2 rounded-2xl p-3 ${dk ? 'bg-slate-700' : 'bg-slate-50'}`}>
                 {([

@@ -9,6 +9,8 @@ export interface ContextMenuProps {
   /** Current viewport, used to place the menu over that world point. */
   transform: { x: number; y: number; scale: number }
   theme: Theme
+  /** Lock or unlock label. Omitted when the target cannot be locked. */
+  lockLabel?: string | null
   onAction: (action: ContextMenuAction) => void
 }
 
@@ -18,7 +20,14 @@ export interface ContextMenuProps {
  * Positioned in world space and projected through the viewport, so the menu
  * stays anchored to its element rather than to the screen.
  */
-export function ContextMenu({ x, y, transform, theme, onAction }: ContextMenuProps) {
+export function ContextMenu({ x, y, transform, theme, lockLabel, onAction }: ContextMenuProps) {
+  const items = lockLabel
+    ? [
+        ...CONTEXT_MENU_ITEMS.slice(0, 2),
+        { label: lockLabel, action: 'lock' as const },
+        ...CONTEXT_MENU_ITEMS.slice(2),
+      ]
+    : CONTEXT_MENU_ITEMS
   return (
     <div
       className="absolute z-40"
@@ -28,7 +37,7 @@ export function ContextMenu({ x, y, transform, theme, onAction }: ContextMenuPro
       role="menu"
     >
       <div className={`rounded-2xl ${theme.dark ? 'bg-slate-800 border-slate-600' : 'bg-white'} shadow-2xl border ${theme.border} overflow-hidden py-1 min-w-[180px]`}>
-        {CONTEXT_MENU_ITEMS.map(item => (
+        {items.map(item => (
           <button
             key={item.action}
             role="menuitem"

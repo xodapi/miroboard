@@ -9,7 +9,7 @@ const { snapToGrid } = vi.hoisted(() => ({
 }))
 vi.mock('../wasm/board-core/board_core', () => ({ snap_to_grid: snapToGrid }))
 
-import { bpmnEdgeAnchor, pointToLineDistance, simplifyPath, smoothPathD, snapVal } from './geometry'
+import { bpmnEdgeAnchor, localToWorld, outlineAnchor, pointToLineDistance, simplifyPath, smoothPathD, snapVal, worldToLocal } from './geometry'
 import type { BoardElement, Point } from './types'
 
 /** Anchors come out of float division, so compare with a tolerance. */
@@ -143,5 +143,37 @@ describe('bpmnEdgeAnchor', () => {
     const task = node({ bpmnNodeType: 'task' })
     expectAnchor(bpmnEdgeAnchor(task, -500, 30), 0, 30)
     expectAnchor(bpmnEdgeAnchor(task, 50, -500), 50, 0)
+  })
+})
+
+describe('outlineAnchor', () => {
+  it('matches the connector anchor on an unrotated non-circle', () => {
+    const shape = node({ x: 10, y: 20, w: 100, h: 60 })
+    const toward = { x: 400, y: 80 }
+    expectAnchor(
+      outlineAnchor(shape, toward.x, toward.y),
+      bpmnEdgeAnchor(shape, toward.x, toward.y).x,
+      bpmnEdgeAnchor(shape, toward.x, toward.y).y,
+    )
+  })
+
+  it('uses the ellipse for a circle, and the centre when the shape has no size', () => {
+    const circle = node({ type: 'circle', x: 0, y: 0, w: 100, h: 40 })
+    const corner = outlineAnchor(circle, 1000, 1000)
+    expect(corner.x).toBeLessThan(100)
+    expect(corner.y).toBeLessThan(40)
+    expectAnchor(outlineAnchor(node({ w: 0, h: 0 }), 40, 40), 0, 0)
+  })
+
+  it('rotates with the shape, matching SVG clockwise', () => {
+    const upright = node({ x: 0, y: 0, w: 100, h: 40 })
+    const spun = node({ x: 0, y: 0, w: 100, h: 40, rotation: 90 })
+    const local = { x: 100, y: 20 }
+    const world = localToWorld(spun, local)
+    expectAnchor(world, 50, 70)
+    expectAnchor(worldToLocal(spun, world), local.x, local.y)
+    // A point below the centre is the rotated image of a point to the right.
+    expectAnchor(outlineAnchor(spun, 50, 200), world.x, world.y)
+    expect(outlineAnchor(upright, 400, 20).y).toBeCloseTo(20, 4)
   })
 })

@@ -5,7 +5,10 @@
 import { CURRENT_SCHEMA_VERSION, type DocEdge, type DocHistory, type DocMeta, type DocNode, type MboardFile, type ProfileConfig } from './types'
 // board/types.ts is a dependency-free type module, not App.tsx: importing the
 // node-type list from there keeps one list instead of a third copy to drift.
-import { isBpmnNodeType, type BpmnNodeType } from '../board/types'
+import { notationProfile, readNotation } from '../board/graph'
+import { elementLink, isBpmnNodeType, type BpmnNodeType, type ElementLink, type NotationMark } from '../board/types'
+import { readOffset } from '../board/label'
+import { readWaypoints } from '../board/waypoints'
 
 type Point = { x: number; y: number }
 
@@ -21,11 +24,17 @@ export interface BoardElement {
   text?: string
   color: string
   stroke?: number
+  /** Only `'dashed'` is stored. Absence is a solid stroke. */
+  dash?: 'dashed'
   fill?: string
   rotation?: number
+  /** When true, the node does not move, resize or rotate. Never set on a connector. */
+  locked?: boolean
   createdBy?: string
   emoji?: string
   zIndex?: number
+  /** Shared group token. Persisted as `parentId`. Never set on a connector. */
+  groupId?: string
   bpmnNodeType?: BpmnNodeType
   bpmnDurationMs?: number
   bpmnDurationDistribution?: 'fixed' | 'uniform' | 'triangular'
@@ -37,8 +46,12 @@ export interface BoardElement {
   bpmnResourceCapacity?: number
   bpmnPriority?: number
   bpmnFlow?: { sourceId: string; targetId: string; flowType?: 'sequence' | 'message'; condition?: string; probability?: number; isDefault?: boolean }
+  /** Freeform attachment. Persisted on `content.link`. Never set on a connector. */
+  link?: ElementLink
   waypoints?: Point[]
+  /** Caption shift from the middle of the route. Zero is absence. */
   labelOffset?: Point
+  notation?: NotationMark
 }
 
 export type DocElement = { node: DocNode } | { edge: DocEdge }
@@ -60,12 +73,30 @@ export interface DeserialiseOutput {
 const elementExtras = new WeakMap<object, Record<string, unknown>>()
 const documentExtras = new WeakMap<object, Record<string, unknown>>()
 
+/** Group token written to `parentId`. Empty and connector tokens stay null. */
+function persistedGroupId(element: BoardElement): string | null {
+  if (element.bpmnFlow) return null
+  return typeof element.groupId === 'string' && element.groupId.length > 0 ? element.groupId : null
+}
+
 function defined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T
 }
 
 function hasEntries(value: Record<string, unknown>): boolean {
   return Object.keys(value).length > 0
+}
+
+/**
+ * Writes `dash` only when the stroke is dashed, so a solid line matches an old file.
+ *
+ * The constraint is `object`, not `{ dash?: 'dashed' }`: a narrower constraint
+ * makes TypeScript check the style literal against that constraint alone and
+ * reject `color`.
+ */
+function withDash<T extends object>(style: T, element: BoardElement): T {
+  if (element.dash !== 'dashed') return style
+  return { ...style, dash: 'dashed' }
 }
 
 function bpmnNodeData(element: BoardElement): Record<string, unknown> {
@@ -87,7 +118,7 @@ export function toDocElement(element: BoardElement): DocElement {
   if (element.bpmnFlow) {
     const { sourceId, targetId, flowType, condition, probability, isDefault } = element.bpmnFlow
     const bpmn = defined({ flowType, condition, probability, isDefault })
-    const profileData: DocEdge['profileData'] = hasEntries(bpmn) ? { bpmn } : {}
+    const profileData: DocEdge['profileData'] = { ...notationProfile(element.notation), ...(hasEntries(bpmn) ? { bpmn } : {}) }
     return {
       edge: defined({
         id: element.id,
@@ -95,30 +126,45 @@ export function toDocElement(element: BoardElement): DocElement {
         kind: 'connector',
         source: { nodeId: sourceId, anchor: 'auto' },
         target: { nodeId: targetId, anchor: 'auto' },
-        style: { color: element.color, stroke: element.stroke ?? null, arrowHead: element.type === 'arrow' ? 'triangle' as const : 'none' as const },
-        waypoints: element.waypoints,
-        content: element.text === undefined && element.labelOffset === undefined
+        style: withDash({ color: element.color, stroke: element.stroke ?? null, arrowHead: element.type === 'arrow' ? 'triangle' as const : 'none' as const }, element),
+        waypoints: readWaypoints(element.waypoints),
+        content: element.text === undefined && !readOffset(element.labelOffset)
           ? undefined
-          : defined({ label: element.text, offset: element.labelOffset }),
+          : defined({ label: element.text, offset: readOffset(element.labelOffset) }),
         profileData,
       }),
     }
   }
 
   const bpmn = bpmnNodeData(element)
-  const profileData: DocNode['profileData'] = hasEntries(bpmn) ? { bpmn } : {}
+  const profileData: DocNode['profileData'] = { ...notationProfile(element.notation), ...(hasEntries(bpmn) ? { bpmn } : {}) }
   return {
     node: defined({
       id: element.id,
       order: 0,
       kind: element.type,
-      parentId: null,
+      parentId: persistedGroupId(element),
       frame: { x: element.x, y: element.y, w: element.w ?? null, h: element.h ?? null, rotation: element.rotation ?? 0 },
       z: element.zIndex ?? 0,
-      style: { color: element.color, fill: element.fill ?? null, stroke: element.stroke ?? null },
-      content: defined({ text: element.text, points: element.points, emoji: element.emoji }),
+      style: withDash({ color: element.color, fill: element.fill ?? null, stroke: element.stroke ?? null }, element),
+      content: defined({
+        text: element.text,
+        points: element.points,
+        emoji: element.emoji,
+        // A connector is an edge. A freeform link stays on the node and is
+        // omitted when empty, so a file without attachments matches an old one.
+        link: element.type === 'arrow' || element.type === 'line' ? elementLink(element.link) : undefined,
+        // Same idea as an edge `waypoints` array, on the node because a freeform
+        // mark is not an edge. Omitted when empty, so a straight arrow matches
+        // a file from before the field existed. Schema stays 1.
+        waypoints: element.type === 'arrow' || element.type === 'line' ? readWaypoints(element.waypoints) : undefined,
+        // Same shift an edge stores on content.offset. Omitted when the caption
+        // sits on the route, so a straight labelled arrow matches an old file.
+        offset: element.type === 'arrow' || element.type === 'line' ? readOffset(element.labelOffset) : undefined,
+      }),
       profileData,
       createdBy: element.createdBy,
+      locked: element.bpmnFlow ? undefined : element.locked === true ? true : undefined,
     }),
   }
 }
@@ -137,10 +183,13 @@ export function fromDocNode(node: DocNode): BoardElement {
     color: node.style.color,
     fill: node.style.fill ?? undefined,
     stroke: node.style.stroke ?? undefined,
+    dash: node.style.dash === 'dashed' ? 'dashed' as const : undefined,
     text: node.content.text,
     points: node.content.points,
     emoji: node.content.emoji,
     createdBy: node.createdBy,
+    groupId: typeof node.parentId === 'string' && node.parentId.length > 0 ? node.parentId : undefined,
+    locked: node.locked === true ? true : undefined,
     // Checked rather than cast: the Rust engine's enum refuses to deserialise
     // an unknown value, taking validation of the whole model down with it. The
     // original is preserved below, so a nodeType from a newer version survives
@@ -156,6 +205,14 @@ export function fromDocNode(node: DocNode): BoardElement {
     bpmnResourceCapacity: bpmn.resourceCapacity as number | undefined,
     bpmnPriority: bpmn.priority as number | undefined,
   }) as BoardElement
+  const link = elementLink(node.content.link)
+  if (link) element.link = link
+  const bends = node.kind === 'arrow' || node.kind === 'line' ? readWaypoints(node.content.waypoints) : undefined
+  if (bends) element.waypoints = bends
+  const offset = node.kind === 'arrow' || node.kind === 'line' ? readOffset(node.content.offset) : undefined
+  if (offset) element.labelOffset = offset
+  const notation = readNotation(node.profileData)
+  if (notation) element.notation = notation
   const extras: Record<string, unknown> = {
     ...unknownKeys(node as unknown as Record<string, unknown>, NODE_KEYS),
     profileData: profileExtras(node.profileData),
@@ -182,9 +239,11 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
     y: 0,
     color: edge.style.color,
     stroke: edge.style.stroke ?? undefined,
+    dash: edge.style.dash === 'dashed' ? 'dashed' as const : undefined,
     text: edge.content?.label,
-    waypoints: edge.waypoints,
-    labelOffset: edge.content?.offset,
+    waypoints: readWaypoints(edge.waypoints),
+    labelOffset: readOffset(edge.content?.offset),
+    notation: readNotation(edge.profileData),
     bpmnFlow: defined({
       sourceId: edge.source.nodeId,
       targetId: edge.target.nodeId,
@@ -209,6 +268,7 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
 export function canonicalElement(element: BoardElement): BoardElement {
   const result = { ...element } as BoardElement
   if (result.rotation === 0) delete result.rotation
+  if (result.locked !== true) delete result.locked
   if (result.zIndex === undefined) result.zIndex = 0
   if (result.bpmnFlow) {
     result.x = 0
@@ -223,15 +283,28 @@ export function canonicalElement(element: BoardElement): BoardElement {
     delete result.createdBy
     delete result.emoji
     delete result.points
+    // Connectors are edges. Edges have no parentId, so a token on a flow is
+    // not part of the projection.
+    delete result.groupId
+    delete result.locked
+    delete result.link
   }
+  if (!elementLink(result.link)) delete result.link
+  if (!result.waypoints?.length) delete result.waypoints
   return result
 }
 
 /** Derives the active document profiles from namespaced element data. */
 export function detectProfiles(nodes: DocNode[], edges: DocEdge[]): string[] {
-  return nodes.some(node => node.profileData.bpmn !== undefined) || edges.some(edge => edge.profileData.bpmn !== undefined)
-    ? ['core', 'bpmn']
-    : ['core']
+  const present = new Set<string>()
+  for (const item of [...nodes, ...edges]) {
+    for (const key of Object.keys(item.profileData)) {
+      if (item.profileData[key] !== undefined) present.add(key)
+    }
+  }
+  const known = ['bpmn', 'eepc', 'vacd', 'mindmap'].filter(id => present.has(id))
+  const rest = [...present].filter(id => !known.includes(id)).sort()
+  return known.length || rest.length ? ['core', ...known, ...rest] : ['core']
 }
 
 export function serialise(input: SerialiseInput): MboardFile {
@@ -275,7 +348,7 @@ export function deserialise(file: MboardFile): DeserialiseOutput {
 }
 
 const ROOT_KEYS = new Set(['format', 'schemaVersion', 'meta', 'nodes', 'edges', 'profileConfig', 'history', 'assets'])
-const NODE_KEYS = new Set(['id', 'order', 'kind', 'parentId', 'frame', 'z', 'style', 'content', 'profileData', 'createdBy'])
+const NODE_KEYS = new Set(['id', 'order', 'kind', 'parentId', 'frame', 'z', 'style', 'content', 'profileData', 'createdBy', 'locked'])
 const EDGE_KEYS = new Set(['id', 'order', 'kind', 'source', 'target', 'waypoints', 'style', 'content', 'profileData'])
 
 function unknownKeys(value: Record<string, unknown>, known: Set<string>): Record<string, unknown> {
@@ -288,14 +361,20 @@ function mergeUnknown<T>(value: T, extras: Record<string, unknown> | undefined):
   const merged = { ...extras, ...valueRecord } as Record<string, unknown>
   if (extras.profileData && valueRecord.profileData) {
     merged.profileData = { ...extras.profileData as Record<string, unknown>, ...valueRecord.profileData as Record<string, unknown> }
-    const oldBpmn = (extras.profileData as Record<string, unknown>).bpmn
-    const newBpmn = (valueRecord.profileData as Record<string, unknown>).bpmn
-    // A preserved bpmn namespace must survive even when this version produced
-    // no bpmn data of its own: an element whose only BPMN field was a nodeType
-    // we do not recognise round-trips to profileData: {} otherwise, silently
-    // deleting it from the user's file.
-    if (oldBpmn && newBpmn) (merged.profileData as Record<string, unknown>).bpmn = { ...oldBpmn as Record<string, unknown>, ...newBpmn as Record<string, unknown> }
-    else if (oldBpmn && hasEntries(oldBpmn as Record<string, unknown>)) (merged.profileData as Record<string, unknown>).bpmn = oldBpmn
+    const extrasProfile = extras.profileData as Record<string, unknown>
+    const valueProfile = valueRecord.profileData as Record<string, unknown>
+    // A preserved namespace must survive even when this version produced no
+    // data of its own, and unknown keys inside a namespace we do write must
+    // not be replaced by the known fields.
+    for (const namespace of ['bpmn', 'eepc', 'vacd', 'mindmap']) {
+      const previous = extrasProfile[namespace]
+      const next = valueProfile[namespace]
+      if (previous && next && typeof previous === 'object' && typeof next === 'object') {
+        (merged.profileData as Record<string, unknown>)[namespace] = { ...previous as Record<string, unknown>, ...next as Record<string, unknown> }
+      } else if (previous && typeof previous === 'object' && hasEntries(previous as Record<string, unknown>)) {
+        (merged.profileData as Record<string, unknown>)[namespace] = previous
+      }
+    }
   }
   return merged as T
 }

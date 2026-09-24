@@ -71,8 +71,57 @@ written explicitly as `null` (for example `frame.w`, `frame.h`, `style.fill`, an
 empty arrays, `0`, negative numbers, large integers, fractions, and `false` are real
 values and are never treated as missing. The normaliser rejects cyclic objects with
 `Cannot normalise cyclic structure` rather than recursing indefinitely.
-- `parentId` is always written as `null` and top-level `assets` is always `{}` in v1.
-  Containers and assets are not supported yet.
+- `parentId` is a group token or `null`. Nodes that share a non-empty token are
+  one group: the app selects, moves, copies and deletes them together. The token
+  is not a node id and is not required to reference anything in the document —
+  v1 groups have no container element, so a dangling `parentId` is valid.
+  An empty string is not a group; readers treat it as ungrouped and the next
+  save writes `null`. Edges have no `parentId`; a connector is not a member and
+  travels with a group only while both of its endpoints are. Top-level `assets`
+  is always `{}`. Frames, nested groups and containers are not supported yet.
+
+`style.color` and `style.fill` are independent. `color` is the stroke, and for a
+BPMN node it is the accent the renderer draws. `fill` is the interior. A sticky
+note paints `fill` only; a rectangle or ellipse paints both. The string
+`transparent` means the user cleared the interior. A missing or `null` fill
+renders the same way. Neither spelling changes the schema: both are already
+legal v1 values.
+
+`locked` is optional and node-only. Absence and an explicit `false` both mean
+unlocked: the node may move, resize and rotate. Only `true` is written. A save
+canonicalises `false` to absence, so an unlocked file stays identical to one
+from before the field existed. A non-boolean value is invalid and is not
+coerced. Edges never carry `locked`, because a connector follows its endpoints.
+
+`style.dash` is optional on nodes and edges. Only `"dashed"` is written;
+absence is a solid stroke, and a save omits the key so a solid line matches
+a file from before the field existed. Any other spelling is invalid and is
+not coerced to dashed. `style.arrowHead` stays `"none"` or `"triangle"` and
+is the element type (`line` or `arrow`): removing the head does not turn a
+connector into a freeform line, and a connector still follows its endpoints.
+Thickness is the existing `style.stroke`. None of this bumps `schemaVersion`.
+The pen's last dash and head are device preferences and are never stored in
+the document.
+`content.link` is an optional attachment on a freeform arrow or line that stayed
+a node. `sourceId` and `targetId` name the shapes those ends follow; either may
+be absent, and an id that does not name a shape on the board is ignored — that
+end keeps the stored frame. This is not an edge and not a `bpmnFlow`: deleting
+the shape leaves the arrow, and the schema stays 1. An empty link is omitted,
+so a file without attachments matches one from before the field existed.
+
+`content.waypoints` is an optional list of world bend points on that same
+freeform arrow or line. An empty list is omitted, so a straight mark matches a
+file from before the field existed. An edge keeps its own `waypoints` array;
+it is the same idea, not a second coordinate system. Moving a shape does not
+move the points — the ends aim at the first and last bend, and the route stays
+where it was drawn. Schema stays 1.
+
+`content.offset` on a freeform arrow or line is the caption's shift from the
+middle of the route, in the same units as the frame. A zero shift is omitted.
+The caption words are `content.text`. An edge already stores the same idea as
+`content.label` and `content.offset`. Moving the mark carries the caption;
+moving a shape the mark follows does not. Schema stays 1.
+
 - A `bpmnFlow` becomes an edge. `sourceId` and `targetId` are structural endpoints;
   `flowType`, `condition`, `probability`, and `isDefault` are nested under
   `profileData.bpmn`. Arrows and lines without `bpmnFlow` remain nodes.
@@ -110,12 +159,13 @@ array index; released v1 files must always include it.
 
 The element round-trip property compares `fromDoc(toDoc(element))` through the
 exported `canonicalElement()` projection. Nodes retain every renderer- and
-profile-visible field; an omitted rotation is equivalent to `rotation: 0`, and
-an omitted z-index is equivalent to `zIndex: 0`. BPMN flow elements are rendered
-from their endpoints, so their in-memory `x` and `y` are canonicalised to zero,
-and node-only fields (`w`, `h`, `fill`, `points`, `emoji`, `createdBy`, and
-`zIndex`) are not part of an edge's projection. This is the complete documented
-lossy projection, not a general-purpose field filter.
+profile-visible field, including `groupId` (the in-memory name of `parentId`);
+an omitted rotation is equivalent to `rotation: 0`, and an omitted z-index is
+equivalent to `zIndex: 0`. BPMN flow elements are rendered from their endpoints,
+so their in-memory `x` and `y` are canonicalised to zero, and node-only fields
+(`w`, `h`, `fill`, `points`, `emoji`, `createdBy`, `zIndex`, and `groupId`) are
+not part of an edge's projection. This is the complete documented lossy
+projection, not a general-purpose field filter.
 
 Edges may carry `waypoints` and `content.offset`; both are preserved exactly
 through adapter conversion and represent manually routed geometry and label
@@ -205,6 +255,14 @@ nodes carry `kind`, frame, content and opaque profile namespaces; relationships 
 edges with endpoints and optional labels. No profile-specific structural field was
 needed, so the schema remains unchanged. A future profile may add fields only under
 its namespace.
+
+The editor writes three notations into those namespaces without a schema bump.
+`profileData.eepc` carries `symbol` (`event`, `function`, `xor`, `org`) and an
+optional `role` or `relation` (`controlFlow`, `orgAssignment`). `profileData.vacd`
+carries `symbol: "step"`, an optional `refines` and `relation: "sequence"`.
+`profileData.mindmap` carries `symbol: "topic"`, an optional `parent` and
+`collapsed`. An empty mark is omitted, so a free-form element still saves as
+`profileData: {}`. An ARIS AML export is refused and is not parsed into the graph.
 
 ## Schema evolution policy
 

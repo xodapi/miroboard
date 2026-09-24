@@ -183,6 +183,9 @@
                 "number",
                 "null"
               ]
+            },
+            "dash": {
+              "const": "dashed"
             }
           }
         },
@@ -191,7 +194,16 @@
           "properties": {
             "text": { "type": "string" },
             "emoji": { "type": "string" },
-            "points": { "type": "array", "items": { "$ref": "#/$defs/point" } }
+            "points": { "type": "array", "items": { "$ref": "#/$defs/point" } },
+            "link": {
+              "type": "object",
+              "properties": {
+                "sourceId": { "type": "string" },
+                "targetId": { "type": "string" }
+              }
+            },
+            "waypoints": { "type": "array", "items": { "$ref": "#/$defs/point" } },
+            "offset": { "$ref": "#/$defs/point" }
           }
         },
         "profileData": {
@@ -200,6 +212,9 @@
         },
         "createdBy": {
           "type": "string"
+        },
+        "locked": {
+          "type": "boolean"
         }
       }
     },
@@ -276,6 +291,9 @@
                 "none",
                 "triangle"
               ]
+            },
+            "dash": {
+              "const": "dashed"
             }
           }
         },

@@ -70,6 +70,37 @@ describe('mboard adapter', () => {
     })
   })
 
+  it('persists a group token as parentId and restores it without a container node', () => {
+    const grouped = { ...plain, id: 'grouped', groupId: 'grp_shared' }
+    const converted = toDocElement(grouped)
+    if (!('node' in converted)) throw new Error('expected node')
+    expect(converted.node.parentId).toBe('grp_shared')
+
+    const restored = fromDocNode(converted.node)
+    expect(restored.groupId).toBe('grp_shared')
+
+    const file = serialise({ elements: [grouped, plain], meta, profileConfig: {}, history })
+    expect(file.nodes.find(node => node.id === 'grouped')?.parentId).toBe('grp_shared')
+    expect(file.nodes.find(node => node.id === 'sticky')?.parentId).toBeNull()
+    expect(deserialise(file).elements.find(element => element.id === 'grouped')?.groupId).toBe('grp_shared')
+    expect(deserialise(file).elements.find(element => element.id === 'sticky')).not.toHaveProperty('groupId')
+  })
+
+  it('treats an empty parentId as ungrouped and does not write a token onto a connector', () => {
+    const converted = toDocElement(plain)
+    if (!('node' in converted)) throw new Error('expected node')
+    expect(fromDocNode({ ...converted.node, parentId: '' })).not.toHaveProperty('groupId')
+
+    const flow = toDocElement({
+      ...plain,
+      id: 'flow',
+      type: 'arrow',
+      groupId: 'grp_shared',
+      bpmnFlow: { sourceId: 'sticky', targetId: 'sticky' },
+    })
+    expect(flow).not.toHaveProperty('node')
+  })
+
   it('serialises nodes, derives profiles, and always emits empty assets', () => {
     const file = serialise({ elements: [plain], meta, profileConfig: {}, history })
 

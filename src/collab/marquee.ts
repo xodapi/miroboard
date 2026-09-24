@@ -27,9 +27,43 @@ export interface MarqueeElement {
   readonly h?: number
   readonly points?: readonly { x: number; y: number }[]
   readonly bpmnFlow?: { sourceId: string; targetId: string }
+  /** Freeform attachment. Resolved center-to-center, same as a BPMN flow. */
+  readonly link?: { sourceId?: string; targetId?: string }
+  /** World bends. The box has to cover them or a marquee misses a routed arrow. */
+  readonly waypoints?: readonly { x: number; y: number }[]
 }
 
 export const DEFAULT_ELEMENT_SIZE = 48
+
+/**
+ * Center-to-center box of an attached arrow or line.
+ *
+ * Enough for marquee and search: the visual stroke sits on that segment, so
+ * this module does not need outline geometry. A missing end uses the stored
+ * frame. Null when nothing resolves, so the caller falls back to that frame.
+ */
+function segmentBounds(
+  element: MarqueeElement,
+  nodesById?: ReadonlyMap<string, MarqueeElement>,
+): Bounds | null {
+  const sourceId = element.bpmnFlow?.sourceId ?? element.link?.sourceId
+  const targetId = element.bpmnFlow?.targetId ?? element.link?.targetId
+  if (!sourceId && !targetId) return null
+  const source = sourceId ? nodesById?.get(sourceId) : undefined
+  const target = targetId ? nodesById?.get(targetId) : undefined
+  // A connector with a missing end keeps the stored frame, as it always has.
+  // A freeform link may have one free end; that end uses the stored point.
+  if (element.bpmnFlow && (!source || !target)) return null
+  if (!source && !target) return null
+  return normaliseRect(
+    source
+      ? { x: source.x + (source.w ?? 0) / 2, y: source.y + (source.h ?? 0) / 2 }
+      : { x: element.x, y: element.y },
+    target
+      ? { x: target.x + (target.w ?? 0) / 2, y: target.y + (target.h ?? 0) / 2 }
+      : { x: element.x + (element.w ?? 0), y: element.y + (element.h ?? 0) },
+  )
+}
 
 /** Normalises a drag from any corner into min/max world coordinates. */
 export function normaliseRect(a: { x: number; y: number }, b: { x: number; y: number }): Bounds {
@@ -65,23 +99,13 @@ export function boundsOf(
       }
     }
     case 'line':
-      return normaliseRect(
-        { x: element.x, y: element.y },
-        { x: element.x + (element.w ?? 0), y: element.y + (element.h ?? 0) },
-      )
     case 'arrow': {
-      const source = element.bpmnFlow ? nodesById?.get(element.bpmnFlow.sourceId) : undefined
-      const target = element.bpmnFlow ? nodesById?.get(element.bpmnFlow.targetId) : undefined
-      if (source && target) {
-        return normaliseRect(
-          { x: source.x + (source.w ?? 0) / 2, y: source.y + (source.h ?? 0) / 2 },
-          { x: target.x + (target.w ?? 0) / 2, y: target.y + (target.h ?? 0) / 2 },
-        )
-      }
-      return normaliseRect(
+      const live = segmentBounds(element, nodesById)
+      const base = live ?? normaliseRect(
         { x: element.x, y: element.y },
         { x: element.x + (element.w ?? 0), y: element.y + (element.h ?? 0) },
       )
+      return includeWaypoints(base, element.waypoints)
     }
     default: {
       const w = element.w ?? DEFAULT_ELEMENT_SIZE
@@ -89,6 +113,19 @@ export function boundsOf(
       return { minX: element.x, minY: element.y, maxX: element.x + w, maxY: element.y + h }
     }
   }
+}
+
+function includeWaypoints(bounds: Bounds, points: readonly { x: number; y: number }[] | undefined): Bounds {
+  if (!points?.length) return bounds
+  let { minX, minY, maxX, maxY } = bounds
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue
+    if (point.x < minX) minX = point.x
+    if (point.y < minY) minY = point.y
+    if (point.x > maxX) maxX = point.x
+    if (point.y > maxY) maxY = point.y
+  }
+  return { minX, minY, maxX, maxY }
 }
 
 export function intersects(a: Bounds, b: Bounds): boolean {

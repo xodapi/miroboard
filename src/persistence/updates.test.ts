@@ -1,6 +1,6 @@
 import * as Y from 'yjs'
 import { describe, expect, it } from 'vitest'
-import { commitElementUpdate } from './updates'
+import { commitElementPatch, commitElementUpdate } from './updates'
 
 describe('field-level Yjs updates', () => {
   it('does not transact for a no-op update', () => {
@@ -31,5 +31,13 @@ describe('field-level Yjs updates', () => {
 
     expect(transactions).toBe(1)
     expect(Y.encodeStateAsUpdate(doc).byteLength - before).toBeLessThan(4 * 1024)
+  })
+
+  it('deletes a key when the patch sets it to undefined', () => {
+    const doc = new Y.Doc({ gc: false })
+    const elements = doc.getArray<{ id: string; link?: { sourceId: string } }>('elements')
+    elements.push([{ id: 'arrow', link: { sourceId: 'shape' } }])
+    expect(commitElementPatch(doc, elements, 'arrow', { link: undefined })).toBe(true)
+    expect(elements.get(0)).not.toHaveProperty('link')
   })
 })

@@ -35,12 +35,32 @@ export interface NodeStyle {
   color: string
   fill: string | null
   stroke: number | null
+  /**
+   * Optional. Only `'dashed'` is written. Absence is a solid stroke.
+   * Not a required v1 field — schema stays 1.
+   */
+  dash?: 'dashed'
 }
 
 export interface NodeContent {
   text?: string
   points?: { x: number; y: number }[]
   emoji?: string
+  /**
+   * Freeform attachment. Not an edge: either id may be absent, and a missing
+   * shape is ignored. Omitted when empty. Schema stays 1.
+   */
+  link?: { sourceId?: string; targetId?: string }
+  /**
+   * World bend points of a freeform arrow or line that stayed a node.
+   * Omitted when empty. An edge uses its own `waypoints` array. Schema stays 1.
+   */
+  waypoints?: { x: number; y: number }[]
+  /**
+   * Caption shift from the middle of the route. Omitted when zero. An edge
+   * stores the same shift as `content.offset`. Schema stays 1.
+   */
+  offset?: { x: number; y: number }
 }
 
 export interface DocNode {
@@ -55,6 +75,11 @@ export interface DocNode {
   content: NodeContent
   profileData: Record<string, Record<string, unknown>>
   createdBy?: string
+  /**
+   * Optional. Only `true` is written. Absence and `false` both mean the node
+   * may move. Edges do not carry this field.
+   */
+  locked?: boolean
 }
 
 export interface EndpointRef {
@@ -66,6 +91,8 @@ export interface EdgeStyle {
   color: string
   stroke: number | null
   arrowHead: 'none' | 'triangle'
+  /** Optional. Only `'dashed'` is written. Absence is a solid stroke. */
+  dash?: 'dashed'
 }
 
 export interface DocEdge {

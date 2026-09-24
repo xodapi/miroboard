@@ -34,7 +34,23 @@ export function isBpmnNodeType(value: unknown): value is BpmnNodeType {
   return typeof value === 'string' && (BPMN_NODE_TYPES as readonly string[]).includes(value)
 }
 
-export type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
+export type WorkspaceMode = 'board' | 'bpmn' | 'simulation' | 'notation'
+
+/** Academic notations on the same graph. Not an ARIS product and not an AML import. */
+export type NotationId = 'eepc' | 'vacd' | 'mindmap'
+
+export interface NotationMark {
+  id: NotationId
+  symbol: string
+  role?: string
+  /** Mind-map parent. Absent on the root. Not a second coordinate. */
+  parentId?: string
+  collapsed?: boolean
+  /** VACD step refined by another element on this board. */
+  refines?: string
+  /** Set on a connector. Absent on a node. */
+  relation?: string
+}
 
 export type QueuePolicy = 'fifo' | 'priority'
 
@@ -122,6 +138,32 @@ export function isElementType(value: unknown): value is ElementType {
   return typeof value === 'string' && (ELEMENT_TYPES as readonly string[]).includes(value)
 }
 
+/**
+ * Optional attachment of a freeform arrow or line. Not a BPMN edge: either end
+ * may be absent, and an id that does not name a shape is ignored.
+ */
+export interface ElementLink {
+  sourceId?: string
+  targetId?: string
+}
+
+/** Keeps only non-empty string ids. Anything else is not an attachment. */
+export function elementLink(value: unknown): ElementLink | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const raw = value as Record<string, unknown>
+  const link: ElementLink = {}
+  if (typeof raw.sourceId === 'string' && raw.sourceId.length > 0) link.sourceId = raw.sourceId
+  if (typeof raw.targetId === 'string' && raw.targetId.length > 0) link.targetId = raw.targetId
+  return link.sourceId || link.targetId ? link : undefined
+}
+
+/** A freeform attachment. A connector follows `bpmnFlow`, not this. */
+export function hasElementLink(element: { type?: string; bpmnFlow?: unknown; link?: ElementLink }): boolean {
+  if (element.bpmnFlow) return false
+  if (element.type && element.type !== 'arrow' && element.type !== 'line') return false
+  return Boolean(element.link && (element.link.sourceId || element.link.targetId))
+}
+
 export interface BoardElement {
   id: string
   type: ElementType
@@ -133,11 +175,26 @@ export interface BoardElement {
   text?: string
   color: string
   stroke?: number
+  /**
+   * Stroke pattern. Only `'dashed'` is stored; absence is a solid stroke.
+   * Meaningful on an arrow or a line, including a BPMN connector.
+   */
+  dash?: 'dashed'
   fill?: string
   rotation?: number
+  /**
+   * When true, drag, nudge, resize and rotate leave the element where it is.
+   * Absent means unlocked. Never set on a connector.
+   */
+  locked?: boolean
   createdBy?: string
   emoji?: string
   zIndex?: number
+  /**
+   * Shared group token. Absent when the element is ungrouped. Persisted as
+   * `parentId`; not a node id, and never set on a connector.
+   */
+  groupId?: string
   bpmnNodeType?: BpmnNodeType
   bpmnDurationMs?: number
   bpmnDurationDistribution?: 'fixed' | 'uniform' | 'triangular'
@@ -156,9 +213,29 @@ export interface BoardElement {
     probability?: number
     isDefault?: boolean
   }
+  /**
+   * Shapes a freeform arrow or line follows. Absent when the mark is free.
+   * Never set on a connector — that relationship is `bpmnFlow`.
+   */
+  link?: ElementLink
+  /**
+   * World bend points of an arrow or a line. Absent when the mark is straight.
+   * A shape moving does not move these; moving the mark itself does.
+   */
+  waypoints?: Point[]
+  /**
+   * Caption shift from the middle of the route, in world pixels. Absent means
+   * the caption sits on the route. Not a world point: moving the mark carries it.
+   */
+  labelOffset?: Point
+  /**
+   * eEPC, VACD or mind-map mark. Persisted under profileData, not a new core
+   * field. Absent on a free shape and on a BPMN element.
+   */
+  notation?: NotationMark
 }
 
-export type ContextMenuAction = 'edit' | 'duplicate' | 'front' | 'back' | 'delete'
+export type ContextMenuAction = 'edit' | 'duplicate' | 'lock' | 'front' | 'back' | 'delete'
 
 /** A destructive open that the user has already agreed to, waiting to run. */
 export type PendingOpen = { proceed: () => Promise<void> }

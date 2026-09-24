@@ -498,6 +498,258 @@ describe('App smoke', () => {
     })
   })
 
+  describe('search list and resize alignment', () => {
+    function placeSticky(at: { x: number; y: number }) {
+      key('s')
+      pointer(byTestId('canvas')!, 'pointerdown', { clientX: at.x, clientY: at.y })
+      const field = container.querySelector<HTMLTextAreaElement>('[data-testid="element-text-input"]')
+      // React listens for focusout, not a synthetic blur, so call the real method.
+      if (field) act(() => { field.blur() })
+    }
+
+    it('lists search hits and jumps to the one that was clicked', () => {
+      placeSticky({ x: 200, y: 200 })
+      placeSticky({ x: 800, y: 700 })
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(2)
+
+      key('f', { ctrlKey: true })
+      const input = container.querySelector('[data-testid="board-search"] input') as HTMLInputElement
+      expect(input).not.toBeNull()
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'Заметка')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+
+      const rows = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="search-result"]')]
+      expect(rows).toHaveLength(2)
+      expect(rows[0].getAttribute('aria-current')).toBe('true')
+
+      const before = container.querySelector('svg > g')?.getAttribute('transform')
+      act(() => { rows[1].click() })
+      expect(rows[1].isConnected ? container.querySelectorAll('[data-testid="search-result"]')[1].getAttribute('aria-current') : null).toBe('true')
+      expect(container.querySelector('svg > g')?.getAttribute('transform')).not.toBe(before)
+      expect(byTestId('search-hit')).not.toBeNull()
+    })
+
+    it('snaps a resize edge to a neighbour instead of stopping where the pointer was', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      key('v')
+      const first = container.querySelector('g[data-id]')!
+      pointer(first, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(first, 'pointerup', { clientX: 110, clientY: 110 })
+
+      const handle = container.querySelector('[data-resize="se"]')!
+      expect(handle).not.toBeNull()
+      pointer(handle, 'pointerdown', { clientX: 200, clientY: 160 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 398, clientY: 160 })
+      expect(byTestId('align-guide')).not.toBeNull()
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 398, clientY: 160 })
+
+      // Right edge lands on the neighbour's left edge (400), not at the pointer (398).
+      const shape = first.querySelector('rect')!
+      expect(shape.getAttribute('width')).toBe('300')
+      expect(byTestId('align-guide')).toBeNull()
+    })
+
+    it('resizes a rectangle from the north-west corner, and a circle the same way', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+      const rect = container.querySelector('g[data-id]')!
+      pointer(rect, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(rect, 'pointerup', { clientX: 110, clientY: 110 })
+      expect([...container.querySelectorAll('[data-resize]')].map(grip => grip.getAttribute('data-resize'))).toEqual(['nw', 'ne', 'sw', 'se'])
+
+      const handle = container.querySelector('[data-resize="nw"]')!
+      pointer(handle, 'pointerdown', { clientX: 100, clientY: 100 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 70, clientY: 80 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 70, clientY: 80 })
+      expect(rect.getAttribute('transform')).toBe('translate(70,80)')
+      expect(rect.querySelector('rect')!.getAttribute('width')).toBe('130')
+      expect(rect.querySelector('rect')!.getAttribute('height')).toBe('80')
+
+      key('o')
+      pointer(byTestId('canvas')!, 'pointerdown', { clientX: 400, clientY: 300 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 500, clientY: 360 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 500, clientY: 360 })
+      key('v')
+      const circle = container.querySelectorAll('g[data-id]')[1]!
+      pointer(circle, 'pointerdown', { clientX: 420, clientY: 320 })
+      pointer(circle, 'pointerup', { clientX: 420, clientY: 320 })
+      expect([...container.querySelectorAll('[data-resize]')].map(grip => grip.getAttribute('data-resize'))).toEqual(['nw', 'ne', 'sw', 'se'])
+    })
+
+    it('gives a BPMN task the same four corners', () => {
+      const openTemplates = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Начать с шаблона'))!
+      act(() => { openTemplates.click() })
+      const bpmn = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('BPMN 2.0'))!
+      act(() => { bpmn.click() })
+      const task = [...container.querySelectorAll('g[data-id]')].find(node => node.textContent?.includes('Выполнить'))!
+      pointer(task, 'pointerdown', { clientX: 260, clientY: 180 })
+      pointer(task, 'pointerup', { clientX: 260, clientY: 180 })
+      expect([...container.querySelectorAll('[data-resize]')].map(grip => grip.getAttribute('data-resize'))).toEqual(['nw', 'ne', 'sw', 'se'])
+    })
+
+    it('does not put corner grips on a freeform arrow', () => {
+      // Drawing selects the new mark. A corner grip would be on screen without
+      // a further click; the stroke is not a box, so there must be none.
+      key('a')
+      pointer(byTestId('canvas')!, 'pointerdown', { clientX: 100, clientY: 100 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 200, clientY: 160 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 200, clientY: 160 })
+      key('v')
+      expect(container.querySelector('g[data-id]')).not.toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+    })
+  })
+
+  describe('groups', () => {
+    function ids(): string[] {
+      return [...container.querySelectorAll('g[data-id]')].map(node => (node as HTMLElement).dataset.id!)
+    }
+
+    function placeTwo() {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+    }
+
+    it('groups a selection with Ctrl+G and selects the whole group from one click', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+
+      key('g', { ctrlKey: true })
+      expect(container.textContent).toContain('Сгруппировано')
+      expect(byTestId('group-outline')).not.toBeNull()
+
+      key('Escape')
+      expect(byTestId('selection-count')).toBeNull()
+      expect(byTestId('group-outline')).toBeNull()
+
+      // Click the first rectangle, not a hit-test of the canvas: the second
+      // rectangle is far away, so only group membership can pull it in.
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerup', { clientX: 110, clientY: 110 })
+      expect(byTestId('selection-count')!.textContent).toContain('2')
+      expect(byTestId('group-outline')).not.toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+    })
+
+    it('moves both members when one of them is dragged', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('Escape')
+
+      const before = transforms()
+      const first = container.querySelector('g[data-id]')!
+      pointer(first, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 170, clientY: 140 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 170, clientY: 140 })
+
+      expect(transforms()).toEqual([shift(before[0], 50, 20), shift(before[1], 50, 20)])
+    })
+
+    it('marquee of one member still selects the whole group', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('Escape')
+
+      dragMarquee({ x: 80, y: 80 }, { x: 220, y: 180 })
+      expect(byTestId('selection-count')!.textContent).toContain('2')
+      expect(byTestId('group-outline')).not.toBeNull()
+    })
+
+    it('deletes the whole group from one selected member', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('Escape')
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerup', { clientX: 110, clientY: 110 })
+
+      key('Delete')
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
+    })
+
+    it('ungroups with Ctrl+Shift+G so the next click selects one object', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('G', { ctrlKey: true, shiftKey: true, code: 'KeyG' })
+      expect(container.textContent).toContain('Группа снята')
+
+      key('Escape')
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerup', { clientX: 110, clientY: 110 })
+      expect(byTestId('selection-count')).toBeNull()
+      expect(byTestId('group-outline')).toBeNull()
+      expect(container.querySelector('[data-resize]')).not.toBeNull()
+    })
+
+    it('shift-click removes the whole group, not one member', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      expect(byTestId('selection-count')!.textContent).toContain('2')
+      expect(byTestId('selection-anchor')).not.toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+
+      const first = container.querySelector('g[data-id]')!
+      pointer(first, 'pointerdown', { clientX: 110, clientY: 110, shiftKey: true })
+      pointer(first, 'pointerup', { clientX: 110, clientY: 110, shiftKey: true })
+
+      expect(byTestId('selection-count')).toBeNull()
+      expect(byTestId('selection-anchor')).toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(2)
+    })
+
+    it('still groups when the layout reports a different character for the G key', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('п', { ctrlKey: true, code: 'KeyG' })
+      expect(container.textContent).toContain('Сгруппировано')
+      expect(byTestId('group-outline')).not.toBeNull()
+    })
+
+    it('refuses to group fewer than two objects', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(container.querySelector('g[data-id]')!, 'pointerup', { clientX: 110, clientY: 110 })
+      key('g', { ctrlKey: true })
+      expect(container.textContent).toContain('Для группы нужно хотя бы два объекта')
+      expect(byTestId('group-outline')).toBeNull()
+    })
+
+    it('gives a duplicated group its own token', () => {
+      placeTwo()
+      dragMarquee({ x: 5, y: 5 }, { x: 600, y: 500 })
+      key('g', { ctrlKey: true })
+      key('d', { ctrlKey: true })
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(4)
+
+      // Paste/duplicate offsets by 20, so the copies overlap the sources.
+      // Dispatch on the third element rather than hit-testing a point.
+      key('Escape')
+      const copies = [...container.querySelectorAll('g[data-id]')]
+      pointer(copies[2], 'pointerdown', { clientX: 105, clientY: 105 })
+      pointer(copies[2], 'pointerup', { clientX: 105, clientY: 105 })
+      expect(byTestId('selection-count')!.textContent).toContain('2')
+
+      const before = transforms()
+      pointer(copies[2], 'pointerdown', { clientX: 130, clientY: 130 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 180, clientY: 150 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 180, clientY: 150 })
+      const after = transforms()
+      expect(after[0]).toBe(before[0])
+      expect(after[1]).toBe(before[1])
+      expect(after[2]).toBe(shift(before[2], 50, 20))
+      expect(after[3]).toBe(shift(before[3], 50, 20))
+      expect(ids()).toHaveLength(4)
+    })
+  })
+
   describe('clipboard', () => {
     /** Ctrl+V awaits the (usually unavailable) system clipboard, so it needs an async act. */
     async function keyAsync(k: string, init: KeyboardEventInit = {}) {
@@ -611,6 +863,84 @@ describe('App smoke', () => {
     })
   })
 
+  describe('object lock', () => {
+    function writtenBySave() {
+      let written = ''
+      const handle = {
+        kind: 'file',
+        name: 'board.mboard',
+        async createWritable() {
+          return { write: async (value: string) => { written = value }, close: async () => undefined }
+        },
+        async getFile() {
+          return { name: 'board.mboard', type: 'application/json', size: written.length, text: async () => written }
+        },
+      }
+      Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: async () => handle })
+      return () => written
+    }
+
+    function lockSelected() {
+      const button = byTestId('lock-toggle')
+      expect(button?.textContent).toBe('Заблокировать')
+      act(() => { button!.click() })
+    }
+
+    it('does not move a locked rect by drag or arrow, and saves locked: true', async () => {
+      const written = writtenBySave()
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+      expect(container.querySelector('[data-resize]')).not.toBeNull()
+      expect(byTestId('rotate-handle')).not.toBeNull()
+
+      lockSelected()
+      expect(container.textContent).toContain('Заблокировано')
+      expect(byTestId('lock-badge')).not.toBeNull()
+      expect(byTestId('lock-toggle')!.textContent).toBe('Разблокировать')
+      expect(byTestId('lock-toggle')!.getAttribute('aria-pressed')).toBe('true')
+      expect(container.querySelector('[data-resize]')).toBeNull()
+      expect(byTestId('rotate-handle')).toBeNull()
+      const shape = container.querySelector('g[data-id]')!
+      expect(shape.getAttribute('class')).toContain('cursor-default')
+      expect(shape.getAttribute('class')).not.toContain('cursor-move')
+
+      const before = transforms()
+      pointer(shape, 'pointerdown', { clientX: 120, clientY: 120 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 180, clientY: 150 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 180, clientY: 150 })
+      key('ArrowRight')
+      expect(transforms()).toEqual(before)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      const saved = JSON.parse(written())
+      expect(saved.schemaVersion).toBe(1)
+      expect(saved.nodes[0].locked).toBe(true)
+
+      act(() => { byTestId('lock-toggle')!.click() })
+      expect(container.textContent).toContain('Разблокировано')
+      expect(byTestId('lock-badge')).toBeNull()
+      key('ArrowRight')
+      expect(transforms()).toEqual([shift(before[0], 1, 0)])
+    })
+
+    it('still deletes and erases a locked object', () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+      lockSelected()
+      key('Delete')
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
+
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      key('v')
+      lockSelected()
+      key('e')
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 120, clientY: 120 })
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(0)
+    })
+  })
+
   describe('history preview', () => {
     /** Marks a named checkpoint of the board as it stands. */
     function markSnapshot() {
@@ -689,5 +1019,269 @@ describe('App smoke', () => {
       act(() => { window.dispatchEvent(copy) })
       expect(copy.defaultPrevented).toBe(false)
     })
+  })
+
+  describe('freeform follow', () => {
+    function translateOf(node: Element): { x: number; y: number } {
+      const match = /translate\(([-\d.]+),([-\d.]+)\)/.exec(node.getAttribute('transform') ?? '')
+      if (!match) throw new Error(`unexpected transform ${node.getAttribute('transform')}`)
+      return { x: Number(match[1]), y: Number(match[2]) }
+    }
+
+    function arrowLine(): { group: Element; line: SVGLineElement } {
+      const group = [...container.querySelectorAll('g[data-id]')].find(node => node.querySelector('line'))
+      const line = group?.querySelector('line')
+      if (!group || !line) throw new Error('arrow has no line')
+      return { group, line }
+    }
+
+    function drawAttachedArrow() {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 150, clientY: 130 })
+      pointer(canvas, 'pointermove', { clientX: 450, clientY: 330 })
+      pointer(canvas, 'pointerup', { clientX: 450, clientY: 330 })
+      key('v')
+    }
+
+    it('follows a moved box, and saves the attachment without becoming a flow', async () => {
+      let written = ''
+      const handle = {
+        kind: 'file',
+        name: 'board.mboard',
+        async createWritable() {
+          return { write: async (value: string) => { written = value }, close: async () => undefined }
+        },
+        async getFile() {
+          return { name: 'board.mboard', type: 'application/json', size: written.length, text: async () => written }
+        },
+      }
+      Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: async () => handle })
+
+      drawAttachedArrow()
+      const before = arrowLine()
+      const start = translateOf(before.group)
+      const x2 = Number(before.line.getAttribute('x2'))
+      const y2 = Number(before.line.getAttribute('y2'))
+      // The stroke meets the outline, not the press point inside the box.
+      expect(start.x).not.toBeCloseTo(150, 0)
+      expect(before.group.getAttribute('data-testid')).toBeNull()
+
+      const rect = container.querySelector('g[data-id]')!
+      pointer(rect, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 80, clientY: 90 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 80, clientY: 90 })
+
+      const after = arrowLine()
+      const next = translateOf(after.group)
+      const nextX2 = Number(after.line.getAttribute('x2'))
+      const nextY2 = Number(after.line.getAttribute('y2'))
+      expect(next.x).toBeCloseTo(start.x - 30, 4)
+      expect(next.y).toBeCloseTo(start.y - 20, 4)
+      expect(nextX2).toBeCloseTo(x2 + 30, 4)
+      expect(nextY2).toBeCloseTo(y2 + 20, 4)
+      expect(next.x + nextX2).toBeCloseTo(start.x + x2, 4)
+      expect(next.y + nextY2).toBeCloseTo(start.y + y2, 4)
+
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      const saved = JSON.parse(written)
+      const ids = [...container.querySelectorAll('g[data-id]')].map(node => node.getAttribute('data-id'))
+      const arrowId = before.group.getAttribute('data-id')
+      const arrow = saved.nodes.find((node: { id: string }) => node.id === arrowId)
+      expect(saved.schemaVersion).toBe(1)
+      expect(saved.edges).toEqual([])
+      expect(arrow.content.link).toEqual({ sourceId: ids[0], targetId: ids[1] })
+      expect(arrow.profileData?.bpmn).toBeUndefined()
+      expect(JSON.stringify(arrow)).not.toContain('bpmnFlow')
+    })
+
+    it('undoes the attached draw as one step', async () => {
+      placeRect({ x: 100, y: 100 }, { x: 200, y: 160 })
+      placeRect({ x: 400, y: 300 }, { x: 500, y: 360 })
+      // Past the undo capture window, so the boxes are not part of the draw.
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)) })
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 150, clientY: 130 })
+      pointer(canvas, 'pointermove', { clientX: 450, clientY: 330 })
+      pointer(canvas, 'pointerup', { clientX: 450, clientY: 330 })
+      expect(translateOf(arrowLine().group).x).not.toBeCloseTo(150, 0)
+      key('z', { ctrlKey: true })
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(2)
+      expect(container.querySelector('line')).toBeNull()
+    })
+
+    it('bends a straight arrow from the midpoint, and a click does not', () => {
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 100, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 300, clientY: 100 })
+      pointer(canvas, 'pointerup', { clientX: 300, clientY: 100 })
+      key('v')
+      const group = container.querySelector('g[data-id]')!
+      expect(group.querySelector('line')).not.toBeNull()
+      expect(group.querySelector('polyline')).toBeNull()
+      const grip = group.querySelector('[data-bend="0"]')!
+      expect(grip).not.toBeNull()
+
+      pointer(grip, 'pointerdown', { clientX: 200, clientY: 100 })
+      pointer(canvas, 'pointerup', { clientX: 200, clientY: 100 })
+      expect(group.querySelector('[data-waypoint]')).toBeNull()
+      expect(group.querySelector('polyline')).toBeNull()
+
+      pointer(grip, 'pointerdown', { clientX: 200, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 200, clientY: 160 })
+      pointer(canvas, 'pointerup', { clientX: 200, clientY: 160 })
+      const routed = container.querySelector('g[data-id]')!
+      expect(routed.querySelector('line')).toBeNull()
+      expect(routed.querySelector('polyline')!.getAttribute('points')).toBe('0,0 100,60 200,0')
+      expect(routed.getAttribute('transform')).toBe('translate(100,100)')
+
+      const local = routed.querySelector('polyline')!.getAttribute('points')
+      pointer(routed, 'pointerdown', { clientX: 120, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 150, clientY: 110 })
+      pointer(canvas, 'pointerup', { clientX: 150, clientY: 110 })
+      expect(routed.getAttribute('transform')).toBe('translate(130,110)')
+      expect(routed.querySelector('polyline')!.getAttribute('points')).toBe(local)
+
+      const waypoint = routed.querySelector('[data-waypoint="0"]')!
+      pointer(waypoint, 'pointerdown', { clientX: 230, clientY: 170, detail: 2 })
+      pointer(canvas, 'pointerup', { clientX: 230, clientY: 170, detail: 2 })
+      const straight = container.querySelector('g[data-id]')!
+      expect(straight.querySelector('[data-waypoint]')).toBeNull()
+      expect(straight.querySelector('polyline')).toBeNull()
+      expect(straight.querySelector('line')).not.toBeNull()
+      expect(container.querySelector('[data-testid="element-text-input"]')).toBeNull()
+    })
+
+    it('captions an arrow from a double-click and keeps the shift when the arrow moves', () => {
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 100, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 300, clientY: 100 })
+      pointer(canvas, 'pointerup', { clientX: 300, clientY: 100 })
+      key('v')
+      const group = container.querySelector('g[data-id]')!
+      act(() => {
+        group.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
+      })
+      const input = container.querySelector<HTMLInputElement>('[data-testid="element-text-input"]')
+      expect(input).not.toBeNull()
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'если да')
+        input!.dispatchEvent(new Event('input', { bubbles: true }))
+        input!.blur()
+      })
+      const label = container.querySelector('[data-testid="line-label"]')!
+      expect(label.textContent).toContain('если да')
+      expect(label.getAttribute('transform')).toBe('translate(100,0)')
+
+      pointer(label, 'pointerdown', { clientX: 200, clientY: 100 })
+      pointer(canvas, 'pointerup', { clientX: 200, clientY: 100 })
+      expect(container.querySelector('[data-waypoint]')).toBeNull()
+
+      pointer(label, 'pointerdown', { clientX: 200, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 200, clientY: 140 })
+      pointer(canvas, 'pointerup', { clientX: 200, clientY: 140 })
+      expect(container.querySelector('[data-testid="line-label"]')!.getAttribute('transform')).toBe('translate(100,40)')
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(100,100)')
+
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 120, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 150, clientY: 110 })
+      pointer(canvas, 'pointerup', { clientX: 150, clientY: 110 })
+      expect(container.querySelector('[data-testid="line-label"]')!.getAttribute('transform')).toBe('translate(100,40)')
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(130,110)')
+
+      act(() => {
+        container.querySelector('[data-label]')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
+      })
+      const again = container.querySelector<HTMLInputElement>('[data-testid="element-text-input"]')
+      expect(again).not.toBeNull()
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(again, '   ')
+        again!.dispatchEvent(new Event('input', { bubbles: true }))
+        again!.blur()
+      })
+      expect(container.querySelector('[data-testid="line-label"]')).toBeNull()
+    })
+
+    it('edits a locked arrow caption and does not drag it', () => {
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 40, clientY: 40 })
+      pointer(canvas, 'pointermove', { clientX: 140, clientY: 40 })
+      pointer(canvas, 'pointerup', { clientX: 140, clientY: 40 })
+      key('v')
+      const group = container.querySelector('g[data-id]')!
+      act(() => { group.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })) })
+      const input = container.querySelector<HTMLInputElement>('[data-testid="element-text-input"]')!
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'нет')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.blur()
+      })
+      act(() => { byTestId('lock-toggle')!.click() })
+      const label = container.querySelector('[data-testid="line-label"]')!
+      const before = label.getAttribute('transform')
+      pointer(label, 'pointerdown', { clientX: 90, clientY: 40 })
+      pointer(canvas, 'pointermove', { clientX: 90, clientY: 80 })
+      pointer(canvas, 'pointerup', { clientX: 90, clientY: 80 })
+      expect(container.querySelector('[data-testid="line-label"]')!.getAttribute('transform')).toBe(before)
+      act(() => { label.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })) })
+      expect(container.querySelector('[data-testid="element-text-input"]')).not.toBeNull()
+    })
+
+    it('does not offer a bend grip on a locked arrow', () => {
+      key('a')
+      pointer(byTestId('canvas')!, 'pointerdown', { clientX: 40, clientY: 40 })
+      pointer(byTestId('canvas')!, 'pointermove', { clientX: 80, clientY: 40 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 80, clientY: 40 })
+      key('v')
+      expect(container.querySelector('[data-bend]')).not.toBeNull()
+      act(() => { byTestId('lock-toggle')!.click() })
+      expect(container.querySelector('[data-bend]')).toBeNull()
+    })
+
+    it('offers a bend grip on a selected connector and no corner grips', () => {
+      const openTemplates = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Начать с шаблона'))!
+      act(() => { openTemplates.click() })
+      const bpmn = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('BPMN 2.0'))!
+      act(() => { bpmn.click() })
+      const flow = container.querySelector('[data-testid^="bpmn-flow-"]')!
+      pointer(flow, 'pointerdown', { clientX: 200, clientY: 208 })
+      pointer(flow, 'pointerup', { clientX: 200, clientY: 208 })
+      expect(container.querySelector('[data-testid^="bpmn-flow-"] [data-bend]')).not.toBeNull()
+      expect(container.querySelector('[data-resize]')).toBeNull()
+    })
+
+    it('leaves the arrow when its box is deleted', () => {
+      drawAttachedArrow()
+      const frozen = arrowLine()
+      const at = translateOf(frozen.group)
+      const rect = container.querySelector('g[data-id]')!
+      pointer(rect, 'pointerdown', { clientX: 110, clientY: 110 })
+      pointer(byTestId('canvas')!, 'pointerup', { clientX: 110, clientY: 110 })
+      key('Delete')
+      expect(container.querySelectorAll('g[data-id]')).toHaveLength(2)
+      const kept = arrowLine()
+      expect(translateOf(kept.group).x).toBeCloseTo(at.x, 4)
+      expect(translateOf(kept.group).y).toBeCloseTo(at.y, 4)
+      expect(kept.group.getAttribute('data-testid')).toBeNull()
+    })
+  })
+
+  it('places an eEPC event from the notation palette onto the same canvas', () => {
+    const mode = Array.from(container.querySelectorAll('button')).find(item => item.textContent?.includes('Нотации'))
+    expect(mode).toBeTruthy()
+    act(() => { mode!.click() })
+    const event = Array.from(container.querySelectorAll('button')).find(item => item.textContent?.includes('Событие'))
+    act(() => { event!.click() })
+    pointer(byTestId('canvas')!, 'pointerdown', { clientX: 240, clientY: 180 })
+    pointer(byTestId('canvas')!, 'pointerup', { clientX: 240, clientY: 180 })
+    expect(container.querySelector('[data-notation="eepc"]')).not.toBeNull()
   })
 })

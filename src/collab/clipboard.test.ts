@@ -131,6 +131,51 @@ describe('sanitiseElement', () => {
     expect(element?.labelOffset).not.toHaveProperty('extra')
   })
 
+  it('keeps a non-empty group token and drops one that is empty, mistyped, or sitting on a connector', () => {
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', groupId: 'grp_1' })?.groupId).toBe('grp_1')
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', groupId: '' })).not.toHaveProperty('groupId')
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', groupId: 4 })).not.toHaveProperty('groupId')
+    const flow = sanitiseElement({
+      id: 'f', type: 'arrow', x: 0, y: 0, color: '#000', groupId: 'grp_1',
+      bpmnFlow: { sourceId: 'a', targetId: 'b' },
+    })
+    expect(flow).not.toHaveProperty('groupId')
+  })
+
+  it('keeps a dashed stroke and drops any other dash spelling', () => {
+    expect(sanitiseElement({ id: 'a', type: 'arrow', x: 0, y: 0, color: '#000', dash: 'dashed' })?.dash).toBe('dashed')
+    expect(sanitiseElement({ id: 'a', type: 'line', x: 0, y: 0, color: '#000', dash: 'solid' })).not.toHaveProperty('dash')
+    expect(sanitiseElement({ id: 'a', type: 'arrow', x: 0, y: 0, color: '#000', dash: 1 })).not.toHaveProperty('dash')
+  })
+
+  it('keeps locked: true and never puts the flag on a connector', () => {
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', locked: true })?.locked).toBe(true)
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', locked: false })).not.toHaveProperty('locked')
+    expect(sanitiseElement({ id: 'a', type: 'rect', x: 0, y: 0, color: '#000', locked: 'yes' })).not.toHaveProperty('locked')
+    const flow = sanitiseElement({
+      id: 'f', type: 'arrow', x: 0, y: 0, color: '#000', locked: true,
+      bpmnFlow: { sourceId: 'a', targetId: 'b' },
+    })
+    expect(flow).not.toHaveProperty('locked')
+  })
+
+  it('keeps a freeform link and never puts one on a connector or a box', () => {
+    const kept = sanitiseElement({
+      id: 'a', type: 'arrow', x: 0, y: 0, color: '#000',
+      link: { sourceId: 's', targetId: '' },
+    })
+    expect(kept?.link).toEqual({ sourceId: 's' })
+    const flow = sanitiseElement({
+      id: 'f', type: 'arrow', x: 0, y: 0, color: '#000',
+      link: { sourceId: 's' },
+      bpmnFlow: { sourceId: 'a', targetId: 'b' },
+    })
+    expect(flow?.link).toBeUndefined()
+    expect(flow?.bpmnFlow).toEqual({ sourceId: 'a', targetId: 'b' })
+    const box = sanitiseElement({ id: 'r', type: 'rect', x: 0, y: 0, color: '#000', link: { sourceId: 's' } })
+    expect(box?.link).toBeUndefined()
+  })
+
   it('keeps a bpmnFlow only when both endpoints are strings', () => {
     const kept = sanitiseElement({ id: 'f', type: 'arrow', x: 0, y: 0, color: '#000', bpmnFlow: { sourceId: 'a', targetId: 'b', flowType: 'message', probability: 0.5 } })
     expect(kept?.bpmnFlow).toEqual({ sourceId: 'a', targetId: 'b', flowType: 'message', probability: 0.5 })
@@ -151,6 +196,19 @@ describe('preparePaste', () => {
     expect(preparePaste([rect()], { offset: { x: -5, y: 7 } })[0]).toMatchObject({ x: 95, y: 127 })
   })
 
+  it('offsets bends by the same delta as the mark, including a zero offset', () => {
+    const source = rect({
+      id: 'a', type: 'arrow', x: 10, y: 20, w: 30, h: 0,
+      waypoints: [{ x: 40, y: 80 }],
+    })
+    const pasted = preparePaste([source], { offset: { x: 5, y: -2 }, makeId: () => 'copy' })[0]
+    expect(pasted.waypoints).toEqual([{ x: 45, y: 78 }])
+    expect(source.waypoints).toEqual([{ x: 40, y: 80 }])
+    const unmoved = preparePaste([source], { offset: { x: 0, y: 0 }, makeId: () => 'same' })[0]
+    expect(unmoved.waypoints).toEqual([{ x: 40, y: 80 }])
+    expect(unmoved.waypoints).not.toBe(source.waypoints)
+  })
+
   it('remaps bpmnFlow endpoints through the same id table, so a copied fragment stays connected to itself', () => {
     const elements: BoardElement[] = [
       rect({ id: 'start', bpmnNodeType: 'startEvent' }),
@@ -163,6 +221,16 @@ describe('preparePaste', () => {
     const pasted = preparePaste(elements, { makeId: sourceId => `${sourceId}-2` })
     expect(pasted.map(element => element.id)).toEqual(['start-2', 'task-2', 'flow-2'])
     expect(pasted[2].bpmnFlow).toMatchObject({ sourceId: 'start-2', targetId: 'task-2', condition: 'ok' })
+  })
+
+  it('remaps a freeform link and drops an end that was not copied', () => {
+    const pasted = preparePaste([
+      rect({ id: 's', x: 0, y: 0 }),
+      { id: 'a', type: 'arrow', x: 1, y: 2, w: 3, h: 4, color: '#000', link: { sourceId: 's', targetId: 'gone' } },
+    ], { makeId: sourceId => `${sourceId}-2` })
+    expect(pasted[1].link).toEqual({ sourceId: 's-2' })
+    expect(pasted[1].bpmnFlow).toBeUndefined()
+    expect(pasted[0]).not.toHaveProperty('link')
   })
 
   it('drops a flow whose endpoint is outside the payload rather than rewiring it onto the board', () => {
@@ -184,6 +252,36 @@ describe('preparePaste', () => {
     const source = rect()
     preparePaste([source], { makeId: () => 'new', offset: { x: 50, y: 50 } })
     expect(source).toEqual(rect())
+  })
+
+  it('remaps a copied mind-map parent and does not share the notation object', () => {
+    const root = rect({ id: 'root', notation: { id: 'mindmap', symbol: 'topic' } })
+    const child = rect({ id: 'child', notation: { id: 'mindmap', symbol: 'topic', parentId: 'root', role: 'продажи' } })
+    const pasted = preparePaste([root, child], { makeId: sourceId => `${sourceId}-2` })
+    expect(pasted[1].notation).toEqual({ id: 'mindmap', symbol: 'topic', parentId: 'root-2', role: 'продажи' })
+    expect(pasted[1].notation).not.toBe(child.notation)
+    expect(child.notation?.parentId).toBe('root')
+    const alone = preparePaste([child], { makeId: () => 'copy' })
+    expect(alone[0].notation?.parentId).toBe('root')
+  })
+
+  it('keeps an organisational role through copy and paste', () => {
+    const pasted = roundTrip([rect({ notation: { id: 'eepc', symbol: 'org', role: 'продажи' } })], { makeId: () => 'copy' })
+    expect(pasted[0].notation).toEqual({ id: 'eepc', symbol: 'org', role: 'продажи' })
+  })
+
+  it('retargets a pasted group so the copies do not join the source group', () => {
+    const source = [rect({ id: 'a', groupId: 'g' }), rect({ id: 'b', groupId: 'g' })]
+    const pasted = preparePaste(source, { makeId: (sourceId, index) => `${sourceId}-${index}` })
+    expect(pasted.map(element => element.id)).toEqual(['a-0', 'b-1'])
+    expect(pasted[0].groupId).toBe('g-2')
+    expect(pasted[1].groupId).toBe(pasted[0].groupId)
+    expect(source[0].groupId).toBe('g')
+  })
+
+  it('drops a group token when the paste does not contain two members', () => {
+    const pasted = preparePaste([rect({ groupId: 'g' })], { makeId: () => 'new' })
+    expect(pasted[0]).not.toHaveProperty('groupId')
   })
 })
 
