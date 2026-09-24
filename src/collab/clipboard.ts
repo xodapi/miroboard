@@ -82,7 +82,7 @@ function sanitiseNotation(value: unknown): NotationMark | undefined {
   if (raw.id !== 'eepc' && raw.id !== 'vacd' && raw.id !== 'mindmap') return undefined
   if (typeof raw.symbol !== 'string' || raw.symbol.length === 0) return undefined
   const mark: NotationMark = { id: raw.id, symbol: raw.symbol }
-  if (raw.role === 'start' || raw.role === 'end' || raw.role === 'root') mark.role = raw.role
+  if (typeof raw.role === 'string' && raw.role.length > 0) mark.role = raw.role
   if (typeof raw.parentId === 'string' && raw.parentId.length > 0) mark.parentId = raw.parentId
   if (raw.collapsed === true) mark.collapsed = true
   if (typeof raw.refines === 'string' && raw.refines.length > 0) mark.refines = raw.refines
@@ -265,6 +265,12 @@ export function preparePaste(elements: readonly BoardElement[], options: PasteOp
     }
     // A freeform link remaps the ends that came along and drops the rest.
     // The arrow itself stays: it is a node, not an edge that would dangle.
+    if (element.notation) {
+      const notation = { ...element.notation }
+      if (notation.parentId && idMap.has(notation.parentId)) notation.parentId = idMap.get(notation.parentId)
+      if (notation.refines && idMap.has(notation.refines)) notation.refines = idMap.get(notation.refines)
+      next.notation = notation
+    }
     if (element.link) {
       const link = elementLink({
         sourceId: element.link.sourceId ? idMap.get(element.link.sourceId) : undefined,

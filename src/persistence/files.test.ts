@@ -197,6 +197,14 @@ describe('file save paths', () => {
     })
   })
 
+  it('refuses an AML export that was renamed to .mboard', async () => {
+    const file = { name: 'export.mboard', text: async () => '<?xml version="1.0"?><AML></AML>' } as File
+    const transfer = { files: [file], items: [] } as unknown as DataTransfer
+    await expect(openDroppedDocument(transfer)).resolves.toEqual({
+      kind: 'failed', failure: { kind: 'aris-aml' }, ignoredFileCount: 0,
+    })
+  })
+
   it('refuses a dropped ARIS AML export instead of opening it', async () => {
     const file = { name: 'export.xml', text: async () => '<?xml version="1.0"?><AML></AML>' } as File
     const transfer = { files: [file], items: [] } as unknown as DataTransfer

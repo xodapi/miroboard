@@ -18,9 +18,9 @@ const NOTATION_SPECS: Record<Exclude<NotationTool, 'link'>, {
   color: string
   notation: NotationMark
 }> = {
-  event: { type: 'circle', w: 78, h: 78, text: 'Событие', color: '#059669', notation: { id: 'eepc', symbol: 'event' } },
+  event: { type: 'circle', w: 140, h: 80, text: 'Событие', color: '#059669', notation: { id: 'eepc', symbol: 'event' } },
   function: { type: 'rect', w: 168, h: 72, text: 'Функция', color: '#2563EB', notation: { id: 'eepc', symbol: 'function' } },
-  xor: { type: 'rect', w: 72, h: 72, text: 'X', color: '#D97706', notation: { id: 'eepc', symbol: 'xor' } },
+  xor: { type: 'rect', w: 136, h: 72, text: 'X', color: '#D97706', notation: { id: 'eepc', symbol: 'xor' } },
   org: { type: 'rect', w: 148, h: 56, text: 'Роль', color: '#7C3AED', notation: { id: 'eepc', symbol: 'org' } },
   step: { type: 'rect', w: 168, h: 64, text: 'Шаг', color: '#0F766E', notation: { id: 'vacd', symbol: 'step' } },
   topic: { type: 'text', w: 148, h: 48, text: 'Тема', color: '#111827', notation: { id: 'mindmap', symbol: 'topic' } },
@@ -39,7 +39,8 @@ export function notationElement(kind: Exclude<NotationTool, 'link'>, at: Point, 
     text: spec.text,
     color: spec.color,
     stroke: 2,
-    fill: spec.type === 'text' ? undefined : spec.color,
+    // White fill: the label is black, and a saturated fill hides it on both themes.
+    fill: spec.type === 'text' ? undefined : '#ffffff',
     notation: { ...spec.notation },
   }
 }
@@ -48,18 +49,82 @@ export function notationElement(kind: Exclude<NotationTool, 'link'>, at: Point, 
  * Joins two marks of one notation. A mind-map join is a parent, not a second
  * edge on top of parentId. Different notations do not join.
  */
+export type NotationJoin =
+  | { kind: 'edge'; element: BoardElement }
+  | { kind: 'parent'; id: string; parentId: string }
+  | { kind: 'refused'; message: string }
+
+function refused(message: string): NotationJoin {
+  return { kind: 'refused', message }
+}
+
+function wouldCycle(sourceId: string, targetId: string, board: readonly BoardElement[]): boolean {
+  const parentOf = new Map(board.map(element => [element.id, element.notation?.parentId]))
+  const seen = new Set<string>()
+  let current: string | undefined = sourceId
+  while (current) {
+    if (current === targetId || seen.has(current)) return true
+    seen.add(current)
+    current = parentOf.get(current)
+  }
+  return false
+}
+
+function alreadyJoined(source: BoardElement, target: BoardElement, board: readonly BoardElement[]): boolean {
+  return board.some(element =>
+    Boolean(element.notation?.relation)
+    && element.notation?.id === source.notation?.id
+    && element.link?.sourceId === source.id
+    && element.link?.targetId === target.id)
+}
+
+function acceptJoin(
+  join: Exclude<NotationJoin, { kind: 'refused' }>,
+  board: readonly BoardElement[] | undefined,
+  target: BoardElement,
+): NotationJoin {
+  if (!board) return join
+  const before = new Set(validateGraph(board).map(issue => `${issue.code}:${issue.id ?? ''}`))
+  const next = join.kind === 'edge'
+    ? [...board, join.element]
+    : board.map(element => element.id === target.id
+      ? { ...target, notation: { ...target.notation!, parentId: join.parentId } }
+      : element)
+  const fresh = validateGraph(next).find(issue => !before.has(`${issue.code}:${issue.id ?? ''}`))
+  return fresh ? refused(fresh.message) : join
+}
+
 export function notationJoin(
   source: BoardElement,
   target: BoardElement,
   id: string,
-): { kind: 'edge'; element: BoardElement } | { kind: 'parent'; id: string; parentId: string } | null {
+  board?: readonly BoardElement[],
+): NotationJoin | null {
   if (!source.notation || !target.notation || source.notation.id !== target.notation.id) return null
   if (source.notation.relation || target.notation.relation || source.id === target.id) return null
-  if (source.notation.id === 'mindmap') return { kind: 'parent', id: target.id, parentId: source.id }
+  if (source.notation.id === 'mindmap') {
+    if (source.notation.symbol !== 'topic' || target.notation.symbol !== 'topic') return refused('Связь карты соединяет только темы.')
+    const current = board?.find(element => element.id === target.id) ?? target
+    if (current.notation?.parentId) return refused('У темы уже есть родитель.')
+    if (board && wouldCycle(source.id, target.id, board)) return refused('Такая связь замыкает карту в цикл.')
+    return acceptJoin({ kind: 'parent', id: target.id, parentId: source.id }, board, target)
+  }
+  if (source.notation.id === 'vacd') {
+    if (source.notation.symbol !== 'step' || target.notation.symbol !== 'step') return refused('Цепочка соединяет только шаги.')
+  } else {
+    const symbols = [source.notation.symbol, target.notation.symbol]
+    const annotation = symbols.filter(symbol => symbol === 'org' || symbol === 'info').length
+    if (annotation && (!symbols.includes('function') || annotation !== 1)) {
+      return refused('Роль в eEPC назначается функции, не событию и не другой роли.')
+    }
+  }
+  if (board && alreadyJoined(source, target, board)) return refused('Такая связь уже есть.')
   const relation = source.notation.id === 'vacd'
     ? 'sequence'
-    : (source.notation.symbol === 'org' || target.notation.symbol === 'org' ? 'orgAssignment' : 'controlFlow')
-  return {
+    : (source.notation.symbol === 'org' || target.notation.symbol === 'org' || source.notation.symbol === 'info' || target.notation.symbol === 'info'
+      ? 'orgAssignment'
+      : 'controlFlow')
+  return acceptJoin({
     kind: 'edge',
     element: {
       id,
@@ -68,12 +133,13 @@ export function notationJoin(
       y: source.y,
       w: target.x - source.x,
       h: target.y - source.y,
-      color: '#334155',
+      // Mid slate stays visible on the light canvas and on the dark one.
+      color: '#64748b',
       stroke: 2,
       link: { sourceId: source.id, targetId: target.id },
       notation: { id: source.notation.id, symbol: relation, relation },
     },
-  }
+  }, board, target)
 }
 
 export interface GraphNode {
@@ -143,8 +209,9 @@ export function projectGraph(elements: readonly BoardElement[]): { nodes: GraphN
     if (!mark) continue
     const sourceId = element.link?.sourceId
     const targetId = element.link?.targetId
-    if (mark.relation && sourceId && targetId) {
-      edges.push({ id: element.id, notation: mark.id, sourceId, targetId, relation: mark.relation })
+    // A relation is an edge. A missing end must not become a fake node.
+    if (mark.relation) {
+      if (sourceId && targetId) edges.push({ id: element.id, notation: mark.id, sourceId, targetId, relation: mark.relation })
       continue
     }
     nodes.push(nodeOf(element, mark.id, mark.symbol))
@@ -207,6 +274,17 @@ function eepcIssues(elements: readonly BoardElement[]): GraphIssue[] {
       if (symbols.get(reached) !== symbol || reported.has(`${id}>${reached}`)) continue
       reported.add(`${id}>${reached}`)
       issues.push(issue('eepc-alternation', 'В eEPC событие и функция чередуются.', id))
+    }
+  }
+  for (const element of elements) {
+    if (element.notation?.id !== 'eepc' || element.notation.relation !== 'orgAssignment') continue
+    const sourceId = element.link?.sourceId
+    const targetId = element.link?.targetId
+    if (!sourceId || !targetId) continue
+    const ends = [symbols.get(sourceId), symbols.get(targetId)]
+    const annotation = ends.filter(symbol => symbol === 'org' || symbol === 'info').length
+    if (!ends.includes('function') || annotation !== 1) {
+      issues.push(issue('eepc-assignment', 'Роль в eEPC назначается функции, не событию и не другой роли.', element.id))
     }
   }
   return issues
@@ -292,17 +370,63 @@ export function validateGraph(elements: readonly BoardElement[]): GraphIssue[] {
   return [...issues, ...eepcIssues(usable), ...mindmapIssues(usable), ...vacdIssues(usable)]
 }
 
+/**
+ * Nearest mind-map parent that is not being deleted, or none if the chain ends.
+ * A deleted middle topic hands its children to that parent instead of dangling.
+ */
+export function notationPatchesForRemoval(
+  elements: readonly BoardElement[],
+  removing: ReadonlySet<string>,
+): { id: string; updates: Partial<BoardElement> }[] {
+  const byId = new Map(elements.map(element => [element.id, element]))
+  const patches: { id: string; updates: Partial<BoardElement> }[] = []
+  for (const element of elements) {
+    if (removing.has(element.id) || !element.notation) continue
+    const notation = { ...element.notation }
+    let changed = false
+    if (notation.parentId && removing.has(notation.parentId)) {
+      const parentId = survivingParent(notation.parentId, byId, removing)
+      if (parentId) notation.parentId = parentId
+      else delete notation.parentId
+      changed = true
+    }
+    if (notation.refines && removing.has(notation.refines)) {
+      delete notation.refines
+      changed = true
+    }
+    if (changed) patches.push({ id: element.id, updates: { notation } })
+  }
+  return patches
+}
+
+function survivingParent(
+  startId: string,
+  byId: ReadonlyMap<string, BoardElement>,
+  removing: ReadonlySet<string>,
+): string | undefined {
+  let current: string | undefined = startId
+  const seen = new Set<string>()
+  while (current && removing.has(current)) {
+    if (seen.has(current)) return undefined
+    seen.add(current)
+    current = byId.get(current)?.notation?.parentId
+  }
+  return current
+}
+
 /** Classifies a dropped file. AML is refused; it is not a graph. */
 export function classifyNotationSource(text: string): 'mboard' | 'aris-aml' | 'unknown' {
-  if (/<\s*AML[\s>]/i.test(text)) return 'aris-aml'
   const trimmed = text.trim()
-  if (!trimmed.startsWith('{')) return 'unknown'
-  try {
-    const parsed = JSON.parse(trimmed) as { format?: unknown }
-    return parsed.format === 'mboard' ? 'mboard' : 'unknown'
-  } catch {
-    return 'unknown'
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { format?: unknown }
+      return parsed.format === 'mboard' ? 'mboard' : 'unknown'
+    } catch {
+      return 'unknown'
+    }
   }
+  if (/<\s*AML[\s>]/i.test(trimmed)) return 'aris-aml'
+  return 'unknown'
 }
 
 const NOTATION_IDS: readonly NotationId[] = ['eepc', 'vacd', 'mindmap']

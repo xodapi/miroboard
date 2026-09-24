@@ -254,6 +254,22 @@ describe('preparePaste', () => {
     expect(source).toEqual(rect())
   })
 
+  it('remaps a copied mind-map parent and does not share the notation object', () => {
+    const root = rect({ id: 'root', notation: { id: 'mindmap', symbol: 'topic' } })
+    const child = rect({ id: 'child', notation: { id: 'mindmap', symbol: 'topic', parentId: 'root', role: 'продажи' } })
+    const pasted = preparePaste([root, child], { makeId: sourceId => `${sourceId}-2` })
+    expect(pasted[1].notation).toEqual({ id: 'mindmap', symbol: 'topic', parentId: 'root-2', role: 'продажи' })
+    expect(pasted[1].notation).not.toBe(child.notation)
+    expect(child.notation?.parentId).toBe('root')
+    const alone = preparePaste([child], { makeId: () => 'copy' })
+    expect(alone[0].notation?.parentId).toBe('root')
+  })
+
+  it('keeps an organisational role through copy and paste', () => {
+    const pasted = roundTrip([rect({ notation: { id: 'eepc', symbol: 'org', role: 'продажи' } })], { makeId: () => 'copy' })
+    expect(pasted[0].notation).toEqual({ id: 'eepc', symbol: 'org', role: 'продажи' })
+  })
+
   it('retargets a pasted group so the copies do not join the source group', () => {
     const source = [rect({ id: 'a', groupId: 'g' }), rect({ id: 'b', groupId: 'g' })]
     const pasted = preparePaste(source, { makeId: (sourceId, index) => `${sourceId}-${index}` })

@@ -456,6 +456,52 @@ describe('duplicateElements', () => {
     expect(elements.get(2).groupId).toBe('g')
   })
 
+  it('removes a notation edge with its endpoint and reparents a mind-map child', () => {
+    const edge = element('flow', {
+      type: 'arrow',
+      link: { sourceId: 'event', targetId: 'fn' },
+      notation: { id: 'eepc', symbol: 'controlFlow', relation: 'controlFlow' },
+    })
+    const { doc, elements } = board([
+      element('event', { notation: { id: 'eepc', symbol: 'event' } }),
+      element('fn', { notation: { id: 'eepc', symbol: 'function' } }),
+      edge,
+      element('root', { notation: { id: 'mindmap', symbol: 'topic' } }),
+      element('mid', { notation: { id: 'mindmap', symbol: 'topic', parentId: 'root' } }),
+      element('leaf', { notation: { id: 'mindmap', symbol: 'topic', parentId: 'mid' } }),
+      element('step', { notation: { id: 'vacd', symbol: 'step', refines: 'fn' } }),
+    ])
+    expect(deleteElement(doc, elements, 'event')).toBe(true)
+    expect(ids(elements)).not.toContain('flow')
+    expect(deleteElement(doc, elements, 'mid')).toBe(true)
+    expect(elements.toArray().find(item => item.id === 'leaf')?.notation?.parentId).toBe('root')
+    expect(deleteElement(doc, elements, 'fn')).toBe(true)
+    expect(elements.toArray().find(item => item.id === 'step')?.notation).not.toHaveProperty('refines')
+  })
+
+  it('copies a notation edge with both ends and remaps a mind-map parent', () => {
+    const { doc, elements } = board([
+      element('root', { notation: { id: 'mindmap', symbol: 'topic' } }),
+      element('child', { notation: { id: 'mindmap', symbol: 'topic', parentId: 'root' } }),
+      element('event', { notation: { id: 'eepc', symbol: 'event' } }),
+      element('fn', { notation: { id: 'eepc', symbol: 'function' } }),
+      element('flow', {
+        type: 'arrow',
+        link: { sourceId: 'event', targetId: 'fn' },
+        notation: { id: 'eepc', symbol: 'controlFlow', relation: 'controlFlow' },
+      }),
+    ])
+    let counter = 0
+    duplicateElements(doc, elements, ['root', 'child'], () => `m-${counter++}`)
+    const copiedChild = elements.toArray().find(item => item.id === 'm-1')
+    expect(copiedChild?.notation?.parentId).toBe('m-0')
+    expect(elements.toArray().find(item => item.id === 'child')?.notation?.parentId).toBe('root')
+    counter = 0
+    duplicateElements(doc, elements, ['event', 'fn'], () => `e-${counter++}`)
+    expect(elements.toArray().some(item => item.notation?.relation === 'controlFlow' && item.link?.sourceId === 'e-0' && item.link?.targetId === 'e-1')).toBe(true)
+    expect(duplicateElements(doc, elements, ['flow'], () => 'stray')).toEqual([])
+  })
+
   it('remaps a connector onto the copies and drops one that would leave the set', () => {
     const flow = (id: string, sourceId: string, targetId: string): BoardElement => ({
       id, type: 'arrow', x: 4, y: 6, color: '#000', bpmnFlow: { sourceId, targetId, condition: 'ok' },

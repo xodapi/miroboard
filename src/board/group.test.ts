@@ -67,6 +67,16 @@ describe('expandIds', () => {
     expect(expandIds(elements, ['b'])).toEqual(['b', 'a'])
   })
 
+  it('adds a notation edge only when both ends are in the set', () => {
+    const edge = el('flow', {
+      type: 'arrow',
+      link: { sourceId: 'a', targetId: 'b' },
+      notation: { id: 'eepc', symbol: 'controlFlow', relation: 'controlFlow' },
+    })
+    expect(expandIds([el('a'), el('b'), edge], ['a'])).toEqual(['a'])
+    expect(expandIds([el('a'), el('b'), edge], ['a', 'b'])).toEqual(['a', 'b', 'flow'])
+  })
+
   it('adds a connector only when both ends are in the set', () => {
     const elements = [el('a', { groupId: 'g' }), el('b', { groupId: 'g' }), el('c'), flow('ab', 'a', 'b'), flow('ac', 'a', 'c')]
     expect(expandIds(elements, ['a'])).toEqual(['a', 'b', 'ab'])

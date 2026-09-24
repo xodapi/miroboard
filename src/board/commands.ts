@@ -4,6 +4,7 @@ import { LOCAL_EDIT } from '../collab/origins'
 import { commitElementPatch, commitElementUpdate } from '../persistence/updates'
 import { planAlign, type AlignAxis } from './arrange'
 import { parkForMove, patchesForRemoval, withDrawnLine } from './follow'
+import { notationPatchesForRemoval } from './graph'
 import { shiftPoints } from './waypoints'
 import { dissolveAfter, expandIds, type GroupWrite } from './group'
 import { isLocked, withLock } from './lock'
@@ -89,14 +90,28 @@ function commitRemoval(doc: Y.Doc, elements: Elements, ids: Iterable<string>, or
     if (flow && !removing.has(element.id) && (removing.has(flow.sourceId) || removing.has(flow.targetId))) {
       removing.add(element.id)
     }
+    // A notation relation is an edge of the shared graph, not a freeform arrow.
+    // Leaving it after an endpoint goes would project as a fake node.
+    const link = element.link
+    const endLeaving = Boolean(
+      (link?.sourceId && removing.has(link.sourceId)) || (link?.targetId && removing.has(link.targetId)),
+    )
+    if (element.notation?.relation && !removing.has(element.id) && endLeaving) {
+      removing.add(element.id)
+    }
   }
   const clears = dissolveAfter(list, removing)
   // A freeform link is not an edge. Freeze the visual end and drop only the
   // ids that are leaving; the arrow stays. A bpmnFlow was already added to
   // `removing` above and is deleted with its endpoint, which the format requires.
   const linkPatches = patchesForRemoval(list, removing)
+  const notationPatches = notationPatchesForRemoval(list, removing)
   doc.transact(() => {
     applyMembership(elements, clears)
+    for (const patch of notationPatches) {
+      if (removing.has(patch.id)) continue
+      commitElementPatch(doc, elements, patch.id, patch.updates, origin)
+    }
     for (const patch of linkPatches) {
       if (removing.has(patch.id)) continue
       commitElementPatch(doc, elements, patch.id, patch.updates, origin)
@@ -368,8 +383,12 @@ export function duplicateElements(
   const picked = list.filter(element => {
     if (!wanted.has(element.id)) return false
     const flow = element.bpmnFlow
-    if (!flow) return true
-    return wanted.has(flow.sourceId) && wanted.has(flow.targetId)
+    if (flow) return wanted.has(flow.sourceId) && wanted.has(flow.targetId)
+    const link = element.link
+    if (element.notation?.relation && link) {
+      return Boolean(link.sourceId && link.targetId && wanted.has(link.sourceId) && wanted.has(link.targetId))
+    }
+    return true
   }).map(element => withDrawnLine(element, byId))
   if (!picked.length) return []
 

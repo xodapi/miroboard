@@ -1351,9 +1351,16 @@ export default function App() {
           return
         }
         const source = elements.find(item => item.id === notationSourceId)
-        const join = source ? notationJoin(source, hit, genId()) : null
-        if (!join) showToast('Связь только между метками одной нотации.', 'info')
-        else if (join.kind === 'parent') {
+        const join = source ? notationJoin(source, hit, genId(), elements) : null
+        if (!join) {
+          showToast('Связь только между метками одной нотации.', 'info')
+          return
+        }
+        if (join.kind === 'refused') {
+          showToast(join.message, 'info')
+          return
+        }
+        if (join.kind === 'parent') {
           if (yElements.current) commitElementPatch(ydoc, yElements.current, hit.id, { notation: { ...hit.notation, parentId: join.parentId } }, LOCAL_EDIT)
         } else addElement({ ...join.element, createdBy: userProfile.id })
         setNotationSourceId(null)

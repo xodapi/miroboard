@@ -117,6 +117,10 @@ export function expandIds(elements: readonly BoardElement[], ids: Iterable<strin
   for (const element of elements) {
     const flow = element.bpmnFlow
     if (flow && covered.has(flow.sourceId) && covered.has(flow.targetId)) push(element.id)
+    const link = element.link
+    if (element.notation?.relation && link?.sourceId && link.targetId && covered.has(link.sourceId) && covered.has(link.targetId)) {
+      push(element.id)
+    }
   }
   return result
 }
