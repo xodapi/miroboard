@@ -116,6 +116,12 @@ it is the same idea, not a second coordinate system. Moving a shape does not
 move the points — the ends aim at the first and last bend, and the route stays
 where it was drawn. Schema stays 1.
 
+`content.offset` on a freeform arrow or line is the caption's shift from the
+middle of the route, in the same units as the frame. A zero shift is omitted.
+The caption words are `content.text`. An edge already stores the same idea as
+`content.label` and `content.offset`. Moving the mark carries the caption;
+moving a shape the mark follows does not. Schema stays 1.
+
 - A `bpmnFlow` becomes an edge. `sourceId` and `targetId` are structural endpoints;
   `flowType`, `condition`, `probability`, and `isDefault` are nested under
   `profileData.bpmn`. Arrows and lines without `bpmnFlow` remain nodes.

@@ -225,6 +225,14 @@ describe('moveElements', () => {
     expect(moved.x).not.toBe(200)
   })
 
+  it('carries a caption with the arrow and does not treat the shift as a world point', () => {
+    const { doc, elements } = board([
+      element('a', { type: 'arrow', x: 10, y: 20, w: 40, h: 0, text: 'да', labelOffset: { x: 0, y: -12 } }),
+    ])
+    moveElements(doc, elements, ['a'], { x: 5, y: 3 })
+    expect(elements.get(0)).toMatchObject({ x: 15, y: 23, text: 'да', labelOffset: { x: 0, y: -12 } })
+  })
+
   it('leaves a locked element where it is, and opens no transaction when nothing else moves', () => {
     const { doc, elements } = board([
       element('a', { locked: true, x: 0, y: 0 }),

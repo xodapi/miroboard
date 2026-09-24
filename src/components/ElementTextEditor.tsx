@@ -18,7 +18,8 @@ export interface ElementTextEditorProps {
   style?: CSSProperties
   onDraftChange: (value: string) => void
   onBeginEdit: () => void
-  onCommit: () => void
+  /** The field's current value, so a commit in the same tick as the last keystroke is not stale. */
+  onCommit: (value: string) => void
 }
 
 /**
@@ -53,21 +54,23 @@ export function ElementTextEditor(props: ElementTextEditorProps) {
     )
   }
 
-  const commit = () => props.onCommit()
-  const onKeyDown = (event: React.KeyboardEvent) => {
+  const commitFrom = (event: { currentTarget: { value: string } }) => {
+    props.onCommit(event.currentTarget.value)
+  }
+  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     if (event.key !== 'Enter') return
     // Shift+Enter inserts a newline in a multi-line field; everywhere else
     // Enter is "done".
     if (multiline && event.shiftKey) return
     event.preventDefault()
-    commit()
+    commitFrom(event)
   }
 
   const shared = {
     autoFocus: true,
     value: draft,
     onChange: (event: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => props.onDraftChange(event.target.value),
-    onBlur: commit,
+    onBlur: commitFrom,
     onKeyDown,
     className,
     style,

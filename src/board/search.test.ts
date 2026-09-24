@@ -26,6 +26,10 @@ describe('searchBoard', () => {
     expect(searchBoard(board, 'ОПЛАТИТЬ')[0]?.label).toBe('Оплатить счёт')
   })
 
+  it('matches a caption on an arrow', () => {
+    expect(searchBoard([el({ id: 'a', type: 'arrow', text: 'если да' })], 'если').map(hit => hit.id)).toEqual(['a'])
+  })
+
   it('matches a role, a flow condition and an emoji, not just the label', () => {
     expect(searchBoard(board, 'бухгалтер').map(hit => hit.id)).toEqual(['b'])
     expect(searchBoard(board, 'сумма').map(hit => hit.id)).toEqual(['c'])
@@ -94,5 +98,15 @@ describe('hitBounds', () => {
     }), new Map())
     expect(bent.y).toBe(-10)
     expect(bent.x + bent.w).toBeGreaterThanOrEqual(40)
+  })
+
+  it('grows the box to a caption dragged off the route, and not when it sits on the route', () => {
+    const straight = hitBounds(el({ id: 'a', type: 'arrow', x: 10, y: 20, w: 100, h: 0, text: 'да' }), new Map())
+    const lifted = hitBounds(el({
+      id: 'a', type: 'arrow', x: 10, y: 20, w: 100, h: 0, text: 'да',
+      labelOffset: { x: 0, y: -80 },
+    }), new Map())
+    expect(lifted.y).toBeLessThan(straight.y)
+    expect(lifted.y).toBeLessThanOrEqual(-60)
   })
 })

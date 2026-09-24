@@ -290,4 +290,32 @@ describe('freeform link', () => {
     expect(loaded.ok).toBe(true)
     if (loaded.ok) expect(deserialise(loaded.file).elements[0].waypoints).toEqual(bent.waypoints)
   })
+
+  it('round-trips a freeform caption shift, omits a zero shift, and stays schema 1', () => {
+    const captioned: BoardElement = {
+      id: 'cap', type: 'line', x: 8, y: 12, w: 40, h: 0, color: '#000',
+      text: 'если да', labelOffset: { x: 6.5, y: -18 },
+    }
+    const doc = toDocElement(captioned)
+    if (!('node' in doc)) throw new Error('expected node')
+    expect(doc.node.content.text).toBe('если да')
+    expect(doc.node.content.offset).toEqual({ x: 6.5, y: -18 })
+    expect(canonicalElement(fromDocNode(doc.node))).toEqual(canonicalElement(captioned))
+
+    const onRoute = toDocElement({ id: 'on', type: 'arrow', x: 1, y: 2, color: '#000', text: 'да', labelOffset: { x: 0, y: 0 } })
+    if (!('node' in onRoute)) throw new Error('expected node')
+    expect(onRoute.node.content.text).toBe('да')
+    expect(onRoute.node.content).not.toHaveProperty('offset')
+
+    const file = serialise({ elements: [captioned], meta, profileConfig: {}, history })
+    expect(file.schemaVersion).toBe(1)
+    expect(file.edges).toEqual([])
+    const loaded = loadMboard(JSON.stringify(file))
+    expect(loaded.ok).toBe(true)
+    if (loaded.ok) {
+      const restored = deserialise(loaded.file).elements[0]
+      expect(restored.text).toBe('если да')
+      expect(restored.labelOffset).toEqual({ x: 6.5, y: -18 })
+    }
+  })
 })

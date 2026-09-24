@@ -202,7 +202,8 @@
                 "targetId": { "type": "string" }
               }
             },
-            "waypoints": { "type": "array", "items": { "$ref": "#/$defs/point" } }
+            "waypoints": { "type": "array", "items": { "$ref": "#/$defs/point" } },
+            "offset": { "$ref": "#/$defs/point" }
           }
         },
         "profileData": {

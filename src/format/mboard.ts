@@ -6,6 +6,7 @@ import { CURRENT_SCHEMA_VERSION, type DocEdge, type DocHistory, type DocMeta, ty
 // board/types.ts is a dependency-free type module, not App.tsx: importing the
 // node-type list from there keeps one list instead of a third copy to drift.
 import { elementLink, isBpmnNodeType, type BpmnNodeType, type ElementLink } from '../board/types'
+import { readOffset } from '../board/label'
 import { readWaypoints } from '../board/waypoints'
 
 type Point = { x: number; y: number }
@@ -47,6 +48,7 @@ export interface BoardElement {
   /** Freeform attachment. Persisted on `content.link`. Never set on a connector. */
   link?: ElementLink
   waypoints?: Point[]
+  /** Caption shift from the middle of the route. Zero is absence. */
   labelOffset?: Point
 }
 
@@ -124,9 +126,9 @@ export function toDocElement(element: BoardElement): DocElement {
         target: { nodeId: targetId, anchor: 'auto' },
         style: withDash({ color: element.color, stroke: element.stroke ?? null, arrowHead: element.type === 'arrow' ? 'triangle' as const : 'none' as const }, element),
         waypoints: readWaypoints(element.waypoints),
-        content: element.text === undefined && element.labelOffset === undefined
+        content: element.text === undefined && !readOffset(element.labelOffset)
           ? undefined
-          : defined({ label: element.text, offset: element.labelOffset }),
+          : defined({ label: element.text, offset: readOffset(element.labelOffset) }),
         profileData,
       }),
     }
@@ -154,6 +156,9 @@ export function toDocElement(element: BoardElement): DocElement {
         // mark is not an edge. Omitted when empty, so a straight arrow matches
         // a file from before the field existed. Schema stays 1.
         waypoints: element.type === 'arrow' || element.type === 'line' ? readWaypoints(element.waypoints) : undefined,
+        // Same shift an edge stores on content.offset. Omitted when the caption
+        // sits on the route, so a straight labelled arrow matches an old file.
+        offset: element.type === 'arrow' || element.type === 'line' ? readOffset(element.labelOffset) : undefined,
       }),
       profileData,
       createdBy: element.createdBy,
@@ -202,6 +207,8 @@ export function fromDocNode(node: DocNode): BoardElement {
   if (link) element.link = link
   const bends = node.kind === 'arrow' || node.kind === 'line' ? readWaypoints(node.content.waypoints) : undefined
   if (bends) element.waypoints = bends
+  const offset = node.kind === 'arrow' || node.kind === 'line' ? readOffset(node.content.offset) : undefined
+  if (offset) element.labelOffset = offset
   const extras: Record<string, unknown> = {
     ...unknownKeys(node as unknown as Record<string, unknown>, NODE_KEYS),
     profileData: profileExtras(node.profileData),
@@ -231,7 +238,7 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
     dash: edge.style.dash === 'dashed' ? 'dashed' as const : undefined,
     text: edge.content?.label,
     waypoints: readWaypoints(edge.waypoints),
-    labelOffset: edge.content?.offset,
+    labelOffset: readOffset(edge.content?.offset),
     bpmnFlow: defined({
       sourceId: edge.source.nodeId,
       targetId: edge.target.nodeId,

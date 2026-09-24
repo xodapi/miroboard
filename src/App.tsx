@@ -31,6 +31,7 @@ import { ZoomControls, ElementCount } from './components/ZoomControls'
 import { CanvasBackground } from './components/CanvasBackground'
 import { ChangedInPreview, LockBadges, ResizeHandles } from './components/element-chrome'
 import { ElementTextEditor } from './components/ElementTextEditor'
+import { LineCaption } from './components/LineCaption'
 import { useSimulationSettings } from './board/use-simulation-settings'
 import { centerOn, elementsInScope, fitTransform, screenToWorld as toWorld, wheelZoomFactor, zoomAround } from './board/viewport'
 import { ALIGN_SCREEN_PX, snapDragFrames, snapResizeFrames, type Guide } from './board/align'
@@ -73,6 +74,7 @@ import { simplifyPath, smoothPathD, snapVal } from './board/geometry'
 import { ATTACH_SCREEN_PX, hasLink, parkForMove, planLink, visualExtent, withDrawnLine } from './board/follow'
 import { dragFrame, resizeFrame, type DragInfo, type ResizeCorner, type ResizeInfo } from './board/gesture'
 import { BEND_ARM_PX, BEND_SCREEN_PX, boxOf, commitBend, draftBend, strokeOf, type BendDrag } from './board/route'
+import { readOffset } from './board/label'
 import { sameWaypoints } from './board/waypoints'
 import { canRotate, frameTransform, rotationFromPointer, type RotateInfo } from './board/rotate'
 import { genId } from './board/id'
@@ -190,6 +192,11 @@ export default function App() {
   const rotateInfoRef = useRef<RotateInfo | null>(null)
   // A bend drag is not a move of the mark. The line-body drag stays on data-id.
   const bendRef = useRef<(BendDrag & { id: string; press: Point; moved: boolean }) | null>(null)
+  // A caption drag moves the shift, not the mark. Origin is the shift at press.
+  const labelDragRef = useRef<{ id: string; origin: Point; press: Point; moved: boolean } | null>(null)
+  // Set when a bend is deleted on the second click, so the following dblclick
+  // does not also open the caption editor.
+  const suppressCaptionEditRef = useRef(false)
   // Gesture frames stay local until pointer-up, preventing one Yjs item rewrite
   // (and one gc:false tombstone) per pointer event.
   const [transientFrame, setTransientFrame] = useState<{ id: string; updates: Partial<BoardElement> }[] | null>(null)
@@ -227,6 +234,7 @@ export default function App() {
     transientFrameRef.current = null
     setTransientFrame(null)
     bendRef.current = null
+    labelDragRef.current = null
   }, [])
   const closeTimeline = useCallback(() => {
     setShowTimeline(false)
@@ -1280,6 +1288,9 @@ export default function App() {
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     const target = e.target as Element
     if (target.closest('[data-ui]')) return
+    // A caption or sticky editor lives in the canvas. Let the field take the
+    // click, or preventDefault would steal the caret and the chip would drag.
+    if (target.closest('input, textarea')) return
     e.preventDefault()
     setContextMenu(null)
     setShowTemplates(false)
@@ -1353,6 +1364,36 @@ export default function App() {
         }
       }
 
+      // The caption sits on the route, so it has to be claimed before a bend
+      // grip and before the line-body drag. Double-click edits the words;
+      // a locked mark can still be edited, it just cannot be dragged.
+      const labelHit = target.closest('[data-label]') as HTMLElement | null
+      if (labelHit) {
+        const host = labelHit.closest('[data-id]') as HTMLElement | null
+        const labelled = host?.dataset.id ? elements.find(item => item.id === host.dataset.id) : undefined
+        if (labelled && (labelled.type === 'arrow' || labelled.type === 'line')) {
+          if (e.detail >= 2) {
+            setEditingText(labelled.id)
+            setEditValue(labelled.text || '')
+            labelDragRef.current = null
+            return
+          }
+          if (!selectedIds.has(labelled.id)) {
+            setSelectedIds(selectOnly(labelled.id))
+            setAnchorId(labelled.id)
+          }
+          if (!isLocked(labelled)) {
+            labelDragRef.current = {
+              id: labelled.id,
+              origin: labelled.labelOffset ? { x: labelled.labelOffset.x, y: labelled.labelOffset.y } : { x: 0, y: 0 },
+              press: point,
+              moved: false,
+            }
+          }
+          return
+        }
+      }
+
       // A bend grip is inside the mark, so it has to be claimed before the
       // line-body drag. A click on the midpoint does not insert a point; the
       // pointer has to move. Double-click deletes the bend it landed on.
@@ -1367,6 +1408,8 @@ export default function App() {
           if (bendGrip.dataset.waypoint !== undefined && e.detail >= 2) {
             const index = Number(bendGrip.dataset.waypoint)
             const next = origin.filter((_, at) => at !== index)
+            // The dblclick that follows must not also open the caption editor.
+            suppressCaptionEditRef.current = true
             commitElementPatch(ydoc, yElements.current, routed.id, {
               waypoints: next.length ? next : undefined,
             }, LOCAL_EDIT)
@@ -1597,6 +1640,19 @@ export default function App() {
         longPressRef.current = null
       }
     }
+    const labelDrag = labelDragRef.current
+    if (labelDrag) {
+      const dx = point.x - labelDrag.press.x
+      const dy = point.y - labelDrag.press.y
+      if (Math.hypot(dx, dy) < 1) return
+      labelDrag.moved = true
+      const raw = { x: labelDrag.origin.x + dx, y: labelDrag.origin.y + dy }
+      const offset = snapGrid ? { x: snapVal(raw.x), y: snapVal(raw.y) } : raw
+      const frame = [{ id: labelDrag.id, updates: { labelOffset: readOffset(offset) ?? { x: 0, y: 0 } } }]
+      transientFrameRef.current = frame
+      setTransientFrame(frame)
+      return
+    }
     const bend = bendRef.current
     if (bend) {
       const pulled = Math.hypot(point.x - bend.press.x, point.y - bend.press.y)
@@ -1728,6 +1784,28 @@ export default function App() {
           : transientFrameRef.current?.find(item => item.id === bend.id)?.updates.waypoints
         if (!sameWaypoints(bend.origin, waypoints)) {
           commitElementPatch(ydoc, yElements.current, bend.id, { waypoints }, LOCAL_GESTURE)
+        }
+      }
+    }
+    // A caption drag writes the shift, not the mark. A zero shift is absence.
+    const labelDrag = labelDragRef.current
+    labelDragRef.current = null
+    if (labelDrag) {
+      frame = null
+      if (labelDrag.moved && yElements.current) {
+        const raw = releasedAt
+          ? {
+              x: labelDrag.origin.x + (releasedAt.x - labelDrag.press.x),
+              y: labelDrag.origin.y + (releasedAt.y - labelDrag.press.y),
+            }
+          : null
+        const snapped = raw ? (snapGrid ? { x: snapVal(raw.x), y: snapVal(raw.y) } : raw) : labelDrag.origin
+        const offset = readOffset(snapped)
+        const origin = readOffset(labelDrag.origin)
+        const unchanged = (!offset && !origin)
+          || Boolean(offset && origin && offset.x === origin.x && offset.y === origin.y)
+        if (!unchanged) {
+          commitElementPatch(ydoc, yElements.current, labelDrag.id, { labelOffset: offset }, LOCAL_GESTURE)
         }
       }
     }
@@ -2175,6 +2253,28 @@ export default function App() {
         const routed = Boolean(el.bpmnFlow) || el.type === 'arrow' || hasLink(el) || Boolean(el.waypoints?.length)
         const stroke = routed ? strokeOf(el, renderedById) : null
         const showBends = isSelected && selectionCount === 1 && !isLocked(el) && !isPreview && tool === 'select'
+        const commitLineCaption = (raw: string) => {
+          if (!yElements.current) return
+          const text = raw.trim()
+          commitElementPatch(ydoc, yElements.current, el.id, {
+            text: text || undefined,
+            ...(text ? {} : { labelOffset: undefined }),
+          }, LOCAL_EDIT)
+          setEditingText(null)
+        }
+        const lineCaption = (anchor: { x: number; y: number }) => (
+          <LineCaption
+            anchor={anchor}
+            text={el.text || ''}
+            offset={el.labelOffset}
+            editing={editingText === el.id}
+            draft={editValue}
+            readOnly={isPreview}
+            onDraftChange={setEditValue}
+            onBeginEdit={() => { setEditingText(el.id); setEditValue(el.text || '') }}
+            onCommit={commitLineCaption}
+          />
+        )
         if (stroke && stroke.points.length >= 2) {
           const start = stroke.start
           const local = stroke.points.map(point => ({ x: point.x - start.x, y: point.y - start.y }))
@@ -2216,6 +2316,7 @@ export default function App() {
               {showBends && local.slice(1, -1).map((point, index) => (
                 <circle key={`waypoint-${index}`} data-waypoint={index} cx={point.x} cy={point.y} r={6 * invS} fill="#4D96FF" stroke="white" strokeWidth={1.5 * invS} />
               ))}
+              {lineCaption(labelAt)}
             </g>
           )
         }
@@ -2229,6 +2330,7 @@ export default function App() {
             {showBends && (
               <circle data-bend={0} cx={(el.w || 0) / 2} cy={(el.h || 0) / 2} r={5 * invS} fill="white" stroke="#4D96FF" strokeWidth={1.5 * invS} />
             )}
+            {lineCaption({ x: (el.w || 0) / 2, y: (el.h || 0) / 2 })}
           </g>
         )
       }
@@ -2357,6 +2459,16 @@ export default function App() {
             const id = node?.getAttribute('data-id')
             const element = id ? elements.find(candidate => candidate.id === id) : undefined
             if (element && (element.type === 'rect' || element.type === 'circle')) {
+              setEditingText(element.id)
+              setEditValue(element.text || '')
+            }
+            // A bend grip's double-click deletes the point. Don't also open a caption.
+            if (suppressCaptionEditRef.current) {
+              suppressCaptionEditRef.current = false
+              return
+            }
+            if (tool === 'select' && element && (element.type === 'arrow' || element.type === 'line')
+              && !(e.target as Element).closest('[data-bend], [data-waypoint]')) {
               setEditingText(element.id)
               setEditValue(element.text || '')
             }

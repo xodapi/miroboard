@@ -207,6 +207,11 @@ export interface BoardElement {
    * A shape moving does not move these; moving the mark itself does.
    */
   waypoints?: Point[]
+  /**
+   * Caption shift from the middle of the route, in world pixels. Absent means
+   * the caption sits on the route. Not a world point: moving the mark carries it.
+   */
+  labelOffset?: Point
 }
 
 export type ContextMenuAction = 'edit' | 'duplicate' | 'lock' | 'front' | 'back' | 'delete'

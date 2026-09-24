@@ -56,6 +56,11 @@ export interface NodeContent {
    * Omitted when empty. An edge uses its own `waypoints` array. Schema stays 1.
    */
   waypoints?: { x: number; y: number }[]
+  /**
+   * Caption shift from the middle of the route. Omitted when zero. An edge
+   * stores the same shift as `content.offset`. Schema stays 1.
+   */
+  offset?: { x: number; y: number }
 }
 
 export interface DocNode {

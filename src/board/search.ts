@@ -5,6 +5,8 @@
  * outline, and the only way to a node used to be panning. Search is local —
  * it reads the elements already in memory and never leaves the page.
  */
+import { captionAnchor, captionPoint } from './label'
+import { strokeOf } from './route'
 import type { BoardElement } from './types'
 
 export interface SearchHit {
@@ -69,12 +71,12 @@ export function hitBounds(element: BoardElement, byId: ReadonlyMap<string, Board
       const y1 = source ? source.y + (source.h ?? 0) / 2 : element.y
       const x2 = target ? target.x + (target.w ?? 0) / 2 : element.x + (element.w ?? 0)
       const y2 = target ? target.y + (target.h ?? 0) / 2 : element.y + (element.h ?? 0)
-      return withWaypoints({
+      return withCaption(withWaypoints({
         x: Math.min(x1, x2),
         y: Math.min(y1, y2),
         w: Math.max(Math.abs(x2 - x1), FALLBACK_EXTENT),
         h: Math.max(Math.abs(y2 - y1), FALLBACK_EXTENT),
-      }, element.waypoints)
+      }, element.waypoints), element, byId)
     }
   }
   const flow = element.bpmnFlow
@@ -86,23 +88,23 @@ export function hitBounds(element: BoardElement, byId: ReadonlyMap<string, Board
       const y1 = source.y + (source.h ?? 0) / 2
       const x2 = target.x + (target.w ?? 0) / 2
       const y2 = target.y + (target.h ?? 0) / 2
-      return withWaypoints({
+      return withCaption(withWaypoints({
         x: Math.min(x1, x2),
         y: Math.min(y1, y2),
         w: Math.max(Math.abs(x2 - x1), FALLBACK_EXTENT),
         h: Math.max(Math.abs(y2 - y1), FALLBACK_EXTENT),
-      }, element.waypoints)
+      }, element.waypoints), element, byId)
     }
   }
   if (element.type === 'arrow' || element.type === 'line') {
     const x2 = element.x + (element.w ?? 0)
     const y2 = element.y + (element.h ?? 0)
-    return withWaypoints({
+    return withCaption(withWaypoints({
       x: Math.min(element.x, x2),
       y: Math.min(element.y, y2),
       w: Math.max(Math.abs(element.w ?? 0), FALLBACK_EXTENT),
       h: Math.max(Math.abs(element.h ?? 0), FALLBACK_EXTENT),
-    }, element.waypoints)
+    }, element.waypoints), element, byId)
   }
   return {
     x: element.x,
@@ -110,6 +112,17 @@ export function hitBounds(element: BoardElement, byId: ReadonlyMap<string, Board
     w: element.w || FALLBACK_EXTENT,
     h: element.h || FALLBACK_EXTENT,
   }
+}
+
+/** A caption dragged off the route still has to be framed, or search stops short of the words. */
+function withCaption(bounds: Bounds, element: BoardElement, byId: ReadonlyMap<string, BoardElement>): Bounds {
+  if (!element.labelOffset) return bounds
+  if (element.type !== 'arrow' && element.type !== 'line') return bounds
+  const stroke = strokeOf(element, byId)
+  const anchor = stroke ? captionAnchor(stroke.points) : null
+  if (!anchor) return bounds
+  const at = captionPoint(anchor, element.labelOffset)
+  return withWaypoints(bounds, [at])
 }
 
 /** A bend outside the endpoint box still has to be framed, or search jumps short of it. */

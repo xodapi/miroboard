@@ -1155,6 +1155,84 @@ describe('App smoke', () => {
       expect(straight.querySelector('[data-waypoint]')).toBeNull()
       expect(straight.querySelector('polyline')).toBeNull()
       expect(straight.querySelector('line')).not.toBeNull()
+      expect(container.querySelector('[data-testid="element-text-input"]')).toBeNull()
+    })
+
+    it('captions an arrow from a double-click and keeps the shift when the arrow moves', () => {
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 100, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 300, clientY: 100 })
+      pointer(canvas, 'pointerup', { clientX: 300, clientY: 100 })
+      key('v')
+      const group = container.querySelector('g[data-id]')!
+      act(() => {
+        group.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
+      })
+      const input = container.querySelector<HTMLInputElement>('[data-testid="element-text-input"]')
+      expect(input).not.toBeNull()
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'если да')
+        input!.dispatchEvent(new Event('input', { bubbles: true }))
+        input!.blur()
+      })
+      const label = container.querySelector('[data-testid="line-label"]')!
+      expect(label.textContent).toContain('если да')
+      expect(label.getAttribute('transform')).toBe('translate(100,0)')
+
+      pointer(label, 'pointerdown', { clientX: 200, clientY: 100 })
+      pointer(canvas, 'pointerup', { clientX: 200, clientY: 100 })
+      expect(container.querySelector('[data-waypoint]')).toBeNull()
+
+      pointer(label, 'pointerdown', { clientX: 200, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 200, clientY: 140 })
+      pointer(canvas, 'pointerup', { clientX: 200, clientY: 140 })
+      expect(container.querySelector('[data-testid="line-label"]')!.getAttribute('transform')).toBe('translate(100,40)')
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(100,100)')
+
+      pointer(container.querySelector('g[data-id]')!, 'pointerdown', { clientX: 120, clientY: 100 })
+      pointer(canvas, 'pointermove', { clientX: 150, clientY: 110 })
+      pointer(canvas, 'pointerup', { clientX: 150, clientY: 110 })
+      expect(container.querySelector('[data-testid="line-label"]')!.getAttribute('transform')).toBe('translate(100,40)')
+      expect(container.querySelector('g[data-id]')!.getAttribute('transform')).toBe('translate(130,110)')
+
+      act(() => {
+        container.querySelector('[data-label]')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
+      })
+      const again = container.querySelector<HTMLInputElement>('[data-testid="element-text-input"]')
+      expect(again).not.toBeNull()
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(again, '   ')
+        again!.dispatchEvent(new Event('input', { bubbles: true }))
+        again!.blur()
+      })
+      expect(container.querySelector('[data-testid="line-label"]')).toBeNull()
+    })
+
+    it('edits a locked arrow caption and does not drag it', () => {
+      key('a')
+      const canvas = byTestId('canvas')!
+      pointer(canvas, 'pointerdown', { clientX: 40, clientY: 40 })
+      pointer(canvas, 'pointermove', { clientX: 140, clientY: 40 })
+      pointer(canvas, 'pointerup', { clientX: 140, clientY: 40 })
+      key('v')
+      const group = container.querySelector('g[data-id]')!
+      act(() => { group.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })) })
+      const input = container.querySelector<HTMLInputElement>('[data-testid="element-text-input"]')!
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'нет')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.blur()
+      })
+      act(() => { byTestId('lock-toggle')!.click() })
+      const label = container.querySelector('[data-testid="line-label"]')!
+      const before = label.getAttribute('transform')
+      pointer(label, 'pointerdown', { clientX: 90, clientY: 40 })
+      pointer(canvas, 'pointermove', { clientX: 90, clientY: 80 })
+      pointer(canvas, 'pointerup', { clientX: 90, clientY: 80 })
+      expect(container.querySelector('[data-testid="line-label"]')!.getAttribute('transform')).toBe(before)
+      act(() => { label.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })) })
+      expect(container.querySelector('[data-testid="element-text-input"]')).not.toBeNull()
     })
 
     it('does not offer a bend grip on a locked arrow', () => {
