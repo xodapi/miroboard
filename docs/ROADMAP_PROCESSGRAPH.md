@@ -35,6 +35,7 @@
 
 | Задача / Task | Статус / Status |
 |---|---|
+| Общий граф eEPC, VACD и интеллект-карты на схеме v1, без второй системы координат; AML не импортируется / Shared eEPC, VACD and mind-map graph on schema 1; AML is refused | ✅ Срез редактора / Editor slice |
 | `NotationPlugin` interface (`render`, `validate`, `serialize`, `simulate`) | 📋 Planned |
 | BPMN extracted as first plugin (`BpmnPlugin`) | 📋 Planned |
 | Strangler-fig migration of `BoardElement` (dual-write → migrate → cleanup) | 📋 Planned |

@@ -120,14 +120,19 @@ export function fitTransform(elements: BoardElement[], viewport: Viewport): Tran
  * If that leaves nothing, fall back to everything rather than to an empty view —
  * a board holding only BPMN nodes still has to be reachable from board mode.
  */
-export function elementsInScope(elements: BoardElement[], mode: 'board' | 'bpmn' | 'simulation'): BoardElement[] {
+export function elementsInScope(elements: BoardElement[], mode: 'board' | 'bpmn' | 'simulation' | 'notation'): BoardElement[] {
   const isBpmn = (element: BoardElement) => Boolean(element.bpmnNodeType || element.bpmnFlow)
+  const isNotation = (element: BoardElement) => Boolean(element.notation)
   // An element whose type this version does not render is skipped: fitting the
   // view to something invisible zooms the board out to frame empty space, and
   // the user cannot see what caused it. Such elements come from a newer
   // version's file and are preserved on save — they are simply not in scope
   // for a viewport that cannot draw them.
   const drawable = elements.filter(element => isElementType(element.type))
-  const scoped = mode === 'board' ? drawable.filter(e => !isBpmn(e)) : drawable.filter(isBpmn)
+  const scoped = mode === 'board'
+    ? drawable.filter(element => !isBpmn(element))
+    : mode === 'notation'
+      ? drawable.filter(isNotation)
+      : drawable.filter(isBpmn)
   return scoped.length ? scoped : drawable
 }

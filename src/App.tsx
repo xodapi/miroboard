@@ -34,6 +34,8 @@ import { ElementTextEditor } from './components/ElementTextEditor'
 import { LineCaption } from './components/LineCaption'
 import { useSimulationSettings } from './board/use-simulation-settings'
 import { centerOn, elementsInScope, fitTransform, screenToWorld as toWorld, wheelZoomFactor, zoomAround } from './board/viewport'
+import { notationElement, notationJoin, validateGraph, type NotationTool } from './board/graph'
+import { NotationPalette } from './components/NotationPalette'
 import { ALIGN_SCREEN_PX, snapDragFrames, snapResizeFrames, type Guide } from './board/align'
 import { hitBounds, searchBoard, stepIndex } from './board/search'
 import { readUiPreferences, writeUiPreferences } from './board/preferences'
@@ -127,6 +129,8 @@ export default function App() {
   const [showLearningModules, setShowLearningModules] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('board')
+  const [notationTool, setNotationTool] = useState<NotationTool>('event')
+  const [notationSourceId, setNotationSourceId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null)
   const [tourStep, setTourStep] = useState(() => {
     try { return localStorage.getItem('miro-onboarding-seen') ? -1 : 0 } catch { return -1 }
@@ -686,7 +690,9 @@ export default function App() {
           ? `Документ использует более новую схему v${outcome.failure.found}, поддерживается v${outcome.failure.supported}`
           : outcome.failure.kind === 'not-mboard'
             ? 'Файл не является документом .mboard'
-            : `Недопустимый документ .mboard: ${outcome.failure.errors[0] ?? 'неизвестная ошибка'}`
+            : outcome.failure.kind === 'aris-aml'
+              ? 'Экспорт ARIS AML не импортируется. Откройте документ .mboard'
+              : `Недопустимый документ .mboard: ${outcome.failure.errors[0] ?? 'неизвестная ошибка'}`
     showToast(message, 'error')
   }, [showToast])
   const requestOpen = useCallback(async (proceed: () => Promise<void>) => {
@@ -706,7 +712,8 @@ export default function App() {
     const outcome = await openDroppedDocument(transfer)
     if (outcome.kind === 'cancelled') return
     if (outcome.kind === 'failed') {
-      if (outcome.failure.kind === 'not-mboard') showToast('Поддерживаются только документы .mboard', 'error')
+      if (outcome.failure.kind === 'aris-aml') showToast('Экспорт ARIS AML не импортируется', 'error')
+      else if (outcome.failure.kind === 'not-mboard') showToast('Поддерживаются только документы .mboard', 'error')
       else showOpenFailure(outcome)
       return
     }
@@ -1334,6 +1341,25 @@ export default function App() {
       return
     }
 
+    if (tool === 'select' && workspaceMode === 'notation' && notationTool === 'link') {
+      const host = target.closest('[data-id]') as HTMLElement | null
+      const hit = host?.dataset.id ? elements.find(item => item.id === host.dataset.id) : undefined
+      if (hit?.notation && !hit.notation.relation) {
+        if (!notationSourceId || notationSourceId === hit.id) {
+          setNotationSourceId(hit.id)
+          setSelectedIds(selectOnly(hit.id))
+          return
+        }
+        const source = elements.find(item => item.id === notationSourceId)
+        const join = source ? notationJoin(source, hit, genId()) : null
+        if (!join) showToast('Связь только между метками одной нотации.', 'info')
+        else if (join.kind === 'parent') {
+          if (yElements.current) commitElementPatch(ydoc, yElements.current, hit.id, { notation: { ...hit.notation, parentId: join.parentId } }, LOCAL_EDIT)
+        } else addElement({ ...join.element, createdBy: userProfile.id })
+        setNotationSourceId(null)
+        return
+      }
+    }
     if (tool === 'select') {
       // The rotate handle sits outside the element, so it must be claimed before
       // the empty-canvas branch starts a marquee.
@@ -1505,6 +1531,10 @@ export default function App() {
           if ('vibrate' in navigator) navigator.vibrate(30)
         }, 500)
         longPressRef.current = longPress
+      } else if (workspaceMode === 'notation' && notationTool !== 'link') {
+        const created = notationElement(notationTool, point, genId())
+        addElement({ ...created, createdBy: userProfile.id })
+        setSelectedIds(selectOnly(created.id))
       } else {
         // Empty canvas: start a marquee. Shift extends the anchored selection.
         marqueeRef.current = { from: point, shift: e.shiftKey }
@@ -1627,7 +1657,7 @@ export default function App() {
       setIsDrawing(true)
       setCurrentPath([point])
     }
-  }, [tool, screenToWorld, transform, color, strokeWidth, lineDash, arrowHead, addElement, deleteElement, userProfile.id, selectedIds, selectedElementId, selectElement, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, previewSnapshot])
+  }, [tool, screenToWorld, transform, color, strokeWidth, lineDash, arrowHead, addElement, deleteElement, userProfile.id, selectedIds, selectedElementId, selectElement, elements, selectedEmoji, bpmnFlowSourceId, setBpmnFlowSourceId, showToast, chooseTool, previewSnapshot, workspaceMode, notationTool, notationSourceId, genId, ydoc])
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const point = screenToWorld(e.clientX, e.clientY)
     const isLaser = tool === 'laser'
@@ -2175,7 +2205,7 @@ export default function App() {
         )
       case 'text':
         return (
-          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}>
+          <g key={el.id} data-id={el.id} data-notation={el.notation?.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}>
             {isChangedInPreview && <ChangedInPreview invScale={invS} x={-6} y={-6} width={(el.w || 200) + 12} height={(el.h || 60) + 12} radius={6} />}
             <foreignObject width={el.w || 200} height={el.h || 60}>
               <div className="w-full h-full select-none"
@@ -2197,7 +2227,7 @@ export default function App() {
         )
       case 'rect':
         return (
-          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}
+          <g key={el.id} data-id={el.id} data-notation={el.notation?.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}
             onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
@@ -2223,7 +2253,7 @@ export default function App() {
         )
       case 'circle':
         return (
-          <g key={el.id} data-id={el.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}
+          <g key={el.id} data-id={el.id} data-notation={el.notation?.id} transform={frameTransform(el)} className={`touch-none ${moveCursor}`}
             onDoubleClick={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onDoubleClickCapture={() => { if (!isPreview) { setEditingText(el.id); setEditValue(el.text || '') } }}
             onMouseDown={e => { if (!isPreview && e.detail === 2) { setEditingText(el.id); setEditValue(el.text || '') } }}
@@ -2626,6 +2656,18 @@ export default function App() {
         onClose={closeTimeline}
         onSelect={selectSnapshot}
       />
+      {workspaceMode === 'notation' && !previewSnapshot && (
+        <NotationPalette
+          tool={notationTool}
+          sourceLabel={elements.find(item => item.id === notationSourceId)?.text ?? null}
+          issues={validateGraph(elements)}
+          onSelect={next => {
+            setNotationTool(next)
+            if (next !== 'link') setNotationSourceId(null)
+            chooseTool('select')
+          }}
+        />
+      )}
       {/* ===== MINIMAP ===== */}
       {showMiniMap && <MiniMap elements={renderedElements.map(el => {
         // A connector's stored frame is the origin. Only a route that actually

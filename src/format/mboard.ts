@@ -5,7 +5,8 @@
 import { CURRENT_SCHEMA_VERSION, type DocEdge, type DocHistory, type DocMeta, type DocNode, type MboardFile, type ProfileConfig } from './types'
 // board/types.ts is a dependency-free type module, not App.tsx: importing the
 // node-type list from there keeps one list instead of a third copy to drift.
-import { elementLink, isBpmnNodeType, type BpmnNodeType, type ElementLink } from '../board/types'
+import { notationProfile, readNotation } from '../board/graph'
+import { elementLink, isBpmnNodeType, type BpmnNodeType, type ElementLink, type NotationMark } from '../board/types'
 import { readOffset } from '../board/label'
 import { readWaypoints } from '../board/waypoints'
 
@@ -50,6 +51,7 @@ export interface BoardElement {
   waypoints?: Point[]
   /** Caption shift from the middle of the route. Zero is absence. */
   labelOffset?: Point
+  notation?: NotationMark
 }
 
 export type DocElement = { node: DocNode } | { edge: DocEdge }
@@ -116,7 +118,7 @@ export function toDocElement(element: BoardElement): DocElement {
   if (element.bpmnFlow) {
     const { sourceId, targetId, flowType, condition, probability, isDefault } = element.bpmnFlow
     const bpmn = defined({ flowType, condition, probability, isDefault })
-    const profileData: DocEdge['profileData'] = hasEntries(bpmn) ? { bpmn } : {}
+    const profileData: DocEdge['profileData'] = { ...notationProfile(element.notation), ...(hasEntries(bpmn) ? { bpmn } : {}) }
     return {
       edge: defined({
         id: element.id,
@@ -135,7 +137,7 @@ export function toDocElement(element: BoardElement): DocElement {
   }
 
   const bpmn = bpmnNodeData(element)
-  const profileData: DocNode['profileData'] = hasEntries(bpmn) ? { bpmn } : {}
+  const profileData: DocNode['profileData'] = { ...notationProfile(element.notation), ...(hasEntries(bpmn) ? { bpmn } : {}) }
   return {
     node: defined({
       id: element.id,
@@ -209,6 +211,8 @@ export function fromDocNode(node: DocNode): BoardElement {
   if (bends) element.waypoints = bends
   const offset = node.kind === 'arrow' || node.kind === 'line' ? readOffset(node.content.offset) : undefined
   if (offset) element.labelOffset = offset
+  const notation = readNotation(node.profileData)
+  if (notation) element.notation = notation
   const extras: Record<string, unknown> = {
     ...unknownKeys(node as unknown as Record<string, unknown>, NODE_KEYS),
     profileData: profileExtras(node.profileData),
@@ -239,6 +243,7 @@ export function fromDocEdge(edge: DocEdge): BoardElement {
     text: edge.content?.label,
     waypoints: readWaypoints(edge.waypoints),
     labelOffset: readOffset(edge.content?.offset),
+    notation: readNotation(edge.profileData),
     bpmnFlow: defined({
       sourceId: edge.source.nodeId,
       targetId: edge.target.nodeId,
@@ -291,9 +296,15 @@ export function canonicalElement(element: BoardElement): BoardElement {
 
 /** Derives the active document profiles from namespaced element data. */
 export function detectProfiles(nodes: DocNode[], edges: DocEdge[]): string[] {
-  return nodes.some(node => node.profileData.bpmn !== undefined) || edges.some(edge => edge.profileData.bpmn !== undefined)
-    ? ['core', 'bpmn']
-    : ['core']
+  const present = new Set<string>()
+  for (const item of [...nodes, ...edges]) {
+    for (const key of Object.keys(item.profileData)) {
+      if (item.profileData[key] !== undefined) present.add(key)
+    }
+  }
+  const known = ['bpmn', 'eepc', 'vacd', 'mindmap'].filter(id => present.has(id))
+  const rest = [...present].filter(id => !known.includes(id)).sort()
+  return known.length || rest.length ? ['core', ...known, ...rest] : ['core']
 }
 
 export function serialise(input: SerialiseInput): MboardFile {
@@ -350,14 +361,20 @@ function mergeUnknown<T>(value: T, extras: Record<string, unknown> | undefined):
   const merged = { ...extras, ...valueRecord } as Record<string, unknown>
   if (extras.profileData && valueRecord.profileData) {
     merged.profileData = { ...extras.profileData as Record<string, unknown>, ...valueRecord.profileData as Record<string, unknown> }
-    const oldBpmn = (extras.profileData as Record<string, unknown>).bpmn
-    const newBpmn = (valueRecord.profileData as Record<string, unknown>).bpmn
-    // A preserved bpmn namespace must survive even when this version produced
-    // no bpmn data of its own: an element whose only BPMN field was a nodeType
-    // we do not recognise round-trips to profileData: {} otherwise, silently
-    // deleting it from the user's file.
-    if (oldBpmn && newBpmn) (merged.profileData as Record<string, unknown>).bpmn = { ...oldBpmn as Record<string, unknown>, ...newBpmn as Record<string, unknown> }
-    else if (oldBpmn && hasEntries(oldBpmn as Record<string, unknown>)) (merged.profileData as Record<string, unknown>).bpmn = oldBpmn
+    const extrasProfile = extras.profileData as Record<string, unknown>
+    const valueProfile = valueRecord.profileData as Record<string, unknown>
+    // A preserved namespace must survive even when this version produced no
+    // data of its own, and unknown keys inside a namespace we do write must
+    // not be replaced by the known fields.
+    for (const namespace of ['bpmn', 'eepc', 'vacd', 'mindmap']) {
+      const previous = extrasProfile[namespace]
+      const next = valueProfile[namespace]
+      if (previous && next && typeof previous === 'object' && typeof next === 'object') {
+        (merged.profileData as Record<string, unknown>)[namespace] = { ...previous as Record<string, unknown>, ...next as Record<string, unknown> }
+      } else if (previous && typeof previous === 'object' && hasEntries(previous as Record<string, unknown>)) {
+        (merged.profileData as Record<string, unknown>)[namespace] = previous
+      }
+    }
   }
   return merged as T
 }

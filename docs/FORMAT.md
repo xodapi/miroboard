@@ -256,6 +256,14 @@ edges with endpoints and optional labels. No profile-specific structural field w
 needed, so the schema remains unchanged. A future profile may add fields only under
 its namespace.
 
+The editor writes three notations into those namespaces without a schema bump.
+`profileData.eepc` carries `symbol` (`event`, `function`, `xor`, `org`) and an
+optional `role` or `relation` (`controlFlow`, `orgAssignment`). `profileData.vacd`
+carries `symbol: "step"`, an optional `refines` and `relation: "sequence"`.
+`profileData.mindmap` carries `symbol: "topic"`, an optional `parent` and
+`collapsed`. An empty mark is omitted, so a free-form element still saves as
+`profileData: {}`. An ARIS AML export is refused and is not parsed into the graph.
+
 ## Schema evolution policy
 
 `schemaVersion` is an integer and is bumped only for breaking changes. Readers accept

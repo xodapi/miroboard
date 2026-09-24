@@ -22,7 +22,7 @@
  * native clipboard integration would use for a real custom MIME type.
  */
 import type { BoardElement } from '../format/mboard'
-import { elementLink, isBpmnNodeType, isElementType } from '../board/types'
+import { elementLink, isBpmnNodeType, isElementType, type NotationMark } from '../board/types'
 import { retargetGroupIds } from '../board/group'
 import { readWaypoints, shiftPoints } from '../board/waypoints'
 
@@ -76,6 +76,22 @@ function toPoints(value: unknown): { x: number; y: number }[] | undefined {
  * must carry and which defaults to transparent — an invisible element can be
  * deleted, a crashed render cannot.
  */
+function sanitiseNotation(value: unknown): NotationMark | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const raw = value as Record<string, unknown>
+  if (raw.id !== 'eepc' && raw.id !== 'vacd' && raw.id !== 'mindmap') return undefined
+  if (typeof raw.symbol !== 'string' || raw.symbol.length === 0) return undefined
+  const mark: NotationMark = { id: raw.id, symbol: raw.symbol }
+  if (raw.role === 'start' || raw.role === 'end' || raw.role === 'root') mark.role = raw.role
+  if (typeof raw.parentId === 'string' && raw.parentId.length > 0) mark.parentId = raw.parentId
+  if (raw.collapsed === true) mark.collapsed = true
+  if (typeof raw.refines === 'string' && raw.refines.length > 0) mark.refines = raw.refines
+  if (raw.relation === 'controlFlow' || raw.relation === 'orgAssignment' || raw.relation === 'sequence' || raw.relation === 'branch') {
+    mark.relation = raw.relation
+  }
+  return mark
+}
+
 export function sanitiseElement(value: unknown): BoardElement | null {
   if (typeof value !== 'object' || value === null) return null
   const raw = value as Record<string, unknown>
@@ -107,6 +123,8 @@ export function sanitiseElement(value: unknown): BoardElement | null {
   if (waypoints) element.waypoints = waypoints
   const labelOffset = toPoint(raw.labelOffset)
   if (labelOffset) element.labelOffset = labelOffset
+  const notation = sanitiseNotation(raw.notation)
+  if (notation) element.notation = notation
 
   // Checked, not cast, for the same reason `type` is — see isBpmnNodeType.
   if (isBpmnNodeType(raw.bpmnNodeType)) element.bpmnNodeType = raw.bpmnNodeType

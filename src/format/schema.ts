@@ -5,6 +5,7 @@ export type LoadFailure =
   | { kind: 'empty' }
   | { kind: 'parse-error'; message: string }
   | { kind: 'not-mboard' }
+  | { kind: 'aris-aml' }
   | { kind: 'too-new'; found: number; supported: number }
   | { kind: 'invalid'; errors: string[] }
 

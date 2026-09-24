@@ -170,6 +170,12 @@ describe('elementsInScope', () => {
     expect(elementsInScope([sticky, task, flow], 'board')).toEqual([sticky])
   })
 
+  it('frames notation marks without hiding the free board', () => {
+    const event = element({ id: 'event', notation: { id: 'eepc', symbol: 'event' } })
+    expect(elementsInScope([sticky, event, task], 'notation')).toEqual([event])
+    expect(elementsInScope([sticky, event], 'board')).toEqual([sticky, event])
+  })
+
   it('frames the process in BPMN and simulation modes', () => {
     expect(elementsInScope([sticky, task, flow], 'bpmn')).toEqual([task, flow])
     expect(elementsInScope([sticky, task, flow], 'simulation')).toEqual([task, flow])

@@ -1,3 +1,4 @@
+import { classifyNotationSource } from '../board/graph'
 import type { MboardFile } from '../format/types'
 import { loadMboard, type LoadFailure } from '../format/schema'
 import { createOperationQueue } from './operation-queue'
@@ -123,6 +124,13 @@ async function openDroppedDocumentUnsafe(transfer: DataTransfer): Promise<Droppe
   const file = files[0]
   if (!file) return { kind: 'cancelled', ignoredFileCount }
   if (!file.name.toLowerCase().endsWith(MBOARD_EXTENSION)) {
+    const name = file.name.toLowerCase()
+    if (name.endsWith('.xml') || name.endsWith('.aml')) {
+      const text = await file.text()
+      if (classifyNotationSource(text) === 'aris-aml') {
+        return { kind: 'failed', failure: { kind: 'aris-aml' }, ignoredFileCount }
+      }
+    }
     return { kind: 'failed', failure: { kind: 'not-mboard' }, ignoredFileCount }
   }
 

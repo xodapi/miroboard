@@ -1273,4 +1273,15 @@ describe('App smoke', () => {
       expect(kept.group.getAttribute('data-testid')).toBeNull()
     })
   })
+
+  it('places an eEPC event from the notation palette onto the same canvas', () => {
+    const mode = Array.from(container.querySelectorAll('button')).find(item => item.textContent?.includes('Нотации'))
+    expect(mode).toBeTruthy()
+    act(() => { mode!.click() })
+    const event = Array.from(container.querySelectorAll('button')).find(item => item.textContent?.includes('Событие'))
+    act(() => { event!.click() })
+    pointer(byTestId('canvas')!, 'pointerdown', { clientX: 240, clientY: 180 })
+    pointer(byTestId('canvas')!, 'pointerup', { clientX: 240, clientY: 180 })
+    expect(container.querySelector('[data-notation="eepc"]')).not.toBeNull()
+  })
 })

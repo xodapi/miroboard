@@ -6,6 +6,7 @@ import type { UserProfile } from '../collab/user-profile'
 
 const MODES: [WorkspaceMode, string][] = [
   ['board', 'Доска'],
+  ['notation', 'Нотации'],
   ['bpmn', 'BPMN'],
   ['simulation', 'Симуляция'],
 ]

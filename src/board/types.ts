@@ -34,7 +34,23 @@ export function isBpmnNodeType(value: unknown): value is BpmnNodeType {
   return typeof value === 'string' && (BPMN_NODE_TYPES as readonly string[]).includes(value)
 }
 
-export type WorkspaceMode = 'board' | 'bpmn' | 'simulation'
+export type WorkspaceMode = 'board' | 'bpmn' | 'simulation' | 'notation'
+
+/** Academic notations on the same graph. Not an ARIS product and not an AML import. */
+export type NotationId = 'eepc' | 'vacd' | 'mindmap'
+
+export interface NotationMark {
+  id: NotationId
+  symbol: string
+  role?: string
+  /** Mind-map parent. Absent on the root. Not a second coordinate. */
+  parentId?: string
+  collapsed?: boolean
+  /** VACD step refined by another element on this board. */
+  refines?: string
+  /** Set on a connector. Absent on a node. */
+  relation?: string
+}
 
 export type QueuePolicy = 'fifo' | 'priority'
 
@@ -212,6 +228,11 @@ export interface BoardElement {
    * the caption sits on the route. Not a world point: moving the mark carries it.
    */
   labelOffset?: Point
+  /**
+   * eEPC, VACD or mind-map mark. Persisted under profileData, not a new core
+   * field. Absent on a free shape and on a BPMN element.
+   */
+  notation?: NotationMark
 }
 
 export type ContextMenuAction = 'edit' | 'duplicate' | 'lock' | 'front' | 'back' | 'delete'
